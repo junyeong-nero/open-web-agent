@@ -22,6 +22,10 @@ export interface TuiState {
   projectPath: string
   activeSessionId: string | null
   activeRunId: string | null
+  selectedAgentId: string
+  selectedModelId: string | null
+  selectedEnvironmentId: string
+  selectedThemeId: string
   runStatus: "idle" | "running" | "completed" | "failed" | "cancelled"
   inspectorVisible: boolean
   selectedEvent: RunEvent | null

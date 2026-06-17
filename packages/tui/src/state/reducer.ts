@@ -3,6 +3,7 @@ import { EMPTY_OBSERVATION, type ConversationMessage, type PlanItem, type Timeli
 
 export type TuiEvent =
   | { type: "session.created"; sessionId: string }
+  | { type: "theme.selected"; themeId: string }
   | { type: "run.event"; event: RunEvent }
   | { type: "slash.details" }
   | { type: "conversation.append"; message: ConversationMessage }
@@ -14,6 +15,10 @@ export function createInitialState(projectPath: string): TuiState {
     projectPath,
     activeSessionId: null,
     activeRunId: null,
+    selectedAgentId: "mock-agent",
+    selectedModelId: null,
+    selectedEnvironmentId: "mock-browser",
+    selectedThemeId: "opencode",
     runStatus: "idle",
     inspectorVisible: true,
     selectedEvent: null,
@@ -37,6 +42,7 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
     }
   }
   if (event.type === "session.created") return { ...state, activeSessionId: event.sessionId, runStatus: "idle" }
+  if (event.type === "theme.selected") return { ...state, selectedThemeId: event.themeId }
   if (event.type === "slash.details") return { ...state, inspectorVisible: !state.inspectorVisible }
   if (event.type === "conversation.append") {
     return { ...state, conversation: [...state.conversation, event.message] }

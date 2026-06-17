@@ -16,6 +16,15 @@ function event(type: RunEvent["type"], payload: Record<string, unknown> = {}): R
 }
 
 describe("reduceTuiEvent", () => {
+  it("uses opencode shell defaults", () => {
+    expect(createInitialState("/tmp/project")).toMatchObject({
+      selectedAgentId: "mock-agent",
+      selectedModelId: null,
+      selectedEnvironmentId: "mock-browser",
+      selectedThemeId: "opencode",
+    })
+  })
+
   it("adds timeline item for browser action events", () => {
     const state = reduceTuiEvent(
       createInitialState("/tmp/project"),
