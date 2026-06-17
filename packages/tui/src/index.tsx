@@ -20,6 +20,8 @@ export async function launchTui(options: LaunchTuiOptions): Promise<void> {
 
     void render(() => <App {...options} onExit={finish} />, {
       exitOnCtrlC: false,
+      useMouse: true,
+      enableMouseMovement: true,
       clearOnShutdown: true,
       onDestroy: finish,
     })

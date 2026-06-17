@@ -1,10 +1,11 @@
 import { createSignal, onCleanup, onMount } from "solid-js"
-import { useKeyboard, useRenderer } from "@opentui/solid"
+import { useKeyboard, useRenderer, useSelectionHandler } from "@opentui/solid"
 import { PromptInput } from "./components/prompt-input"
 import { SessionHeader } from "./components/session-header"
 import { TranscriptPanel } from "./components/transcript-panel"
 import { createEventStream } from "./client/event-source"
 import { createServerClient } from "./client/server-client"
+import { copySelectionToClipboard, pasteSystemClipboardText } from "./clipboard/system-clipboard"
 import { parseSlashCommand } from "./commands/slash-commands"
 import { mapKeyEvent } from "./keymap/keybindings"
 import { createInitialState, reduceTuiEvent } from "./state/reducer"
@@ -78,8 +79,28 @@ export function App(props: AppProps) {
     const action = mapKeyEvent(key)
     if (action === "quit") exit()
     if (action === "new") void createNewSession()
+    if (action === "copy") {
+      key.preventDefault()
+      void copySelectionToClipboard(renderer)
+    }
+    if (action === "copy-or-cancel") {
+      if (renderer.hasSelection) {
+        key.preventDefault()
+        void copySelectionToClipboard(renderer)
+        return
+      }
+      void cancelOrExit()
+    }
+    if (action === "paste") {
+      key.preventDefault()
+      void pasteSystemClipboardText(renderer)
+    }
     if (action === "cancel-or-quit") void cancelOrExit()
     if (action === "submit") void submitPrompt()
+  })
+
+  useSelectionHandler(() => {
+    void copySelectionToClipboard(renderer)
   })
 
   async function createNewSession() {
