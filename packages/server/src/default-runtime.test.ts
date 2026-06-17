@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import { startDefaultRuntime } from "./default-runtime"
 
 describe("startDefaultRuntime", () => {
@@ -120,6 +120,278 @@ describe("startDefaultRuntime", () => {
       })
     } finally {
       await runtime.stop()
+    }
+  })
+
+  it("delegates jsonl Python agent model calls through the runtime-selected model", async () => {
+    const originalFetch = globalThis.fetch
+    const providerRequests: unknown[] = []
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input)
+      if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) {
+        return originalFetch(input, init)
+      }
+
+      providerRequests.push(JSON.parse(String(init?.body ?? "{}")))
+      return Response.json({
+        id: "chatcmpl_python_runtime",
+        choices: [{ message: { content: "delegated runtime model answer" } }],
+        usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
+      })
+    }) as typeof fetch
+
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const agentsDir = join(home, "agents")
+    const agentDir = join(agentsDir, "runtime-model-agent")
+    await mkdir(agentDir, { recursive: true })
+    await writeFile(
+      join(agentDir, "agent.yaml"),
+      [
+        "id: runtime-model-agent",
+        "name: Runtime Model Agent",
+        "description: Delegates to runtime model",
+        "language: python",
+        "entry: main.py",
+        "protocol: jsonl",
+        "",
+      ].join("\n"),
+    )
+    await writeFile(
+      join(agentDir, "main.py"),
+      [
+        "import json",
+        "import sys",
+        "request = json.loads(sys.stdin.readline())",
+        'if request["method"] == "initialize":',
+        '    print(json.dumps({"ok": True}), flush=True)',
+        "    raise SystemExit(0)",
+        'if request["method"] == "finalize":',
+        '    print(json.dumps({"finalAnswer": request["state"].get("finalAnswer") or ""}), flush=True)',
+        "    raise SystemExit(0)",
+        'print(json.dumps({"command":"model.complete","id":"model_1","request":{"model":"gpt-test","messages":[{"role":"user","content":request["state"]["prompt"]}],"temperature":0,"responseFormat":"text"}}), flush=True)',
+        "model_response = json.loads(sys.stdin.readline())",
+        'print(json.dumps({"decision":{"type":"final_answer","thought":None,"finalAnswer":model_response["response"]["text"],"confidence":1}}), flush=True)',
+        "",
+      ].join("\n"),
+    )
+    const runtime = await startDefaultRuntime({
+      home,
+      agentsDir,
+      configPath: join(home, "missing-config.yaml"),
+      env: {
+        OPENAI_API_KEY: "test-openai-key",
+        OPEN_WEB_AGENT_MODEL: "gpt-test",
+      },
+    })
+
+    try {
+      const modelEvents: string[] = []
+      const completed = new Promise<{ type: string; payload: Record<string, unknown> }>((resolve) => {
+        const unsubscribe = runtime.eventBus.subscribe((event) => {
+          if (event.type === "model.called" || event.type === "model.completed") {
+            modelEvents.push(event.type)
+          }
+          if (event.type === "run.completed" || event.type === "run.failed") {
+            unsubscribe()
+            resolve({ type: event.type, payload: event.payload })
+          }
+        })
+      })
+      const sessionResponse = await fetch(`${runtime.url}/sessions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectPath: "/tmp/project" }),
+      })
+      const session = (await sessionResponse.json()) as { sessionId: string }
+      const runResponse = await fetch(`${runtime.url}/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId: session.sessionId,
+          prompt: "delegate through runtime",
+          agentId: "runtime-model-agent",
+          modelId: "openai",
+          environmentId: "mock-browser",
+        }),
+      })
+      expect(runResponse.ok).toBe(true)
+
+      const result = await completed
+
+      expect(result).toEqual({
+        type: "run.completed",
+        payload: { finalAnswer: "delegated runtime model answer" },
+      })
+      expect(modelEvents).toEqual(["model.called", "model.completed"])
+      expect((providerRequests[0] as { messages: Array<{ content: string }> }).messages[0]?.content).toBe(
+        "delegate through runtime",
+      )
+    } finally {
+      await runtime.stop()
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it("loads the project-local plan-act external agent and emits plan events", async () => {
+    const originalFetch = globalThis.fetch
+    const providerResponses = [
+      JSON.stringify({
+        items: [
+          { id: "inspect", title: "Inspect the current page", status: "active" },
+          { id: "answer", title: "Answer the user", status: "pending" },
+        ],
+      }),
+      JSON.stringify({
+        type: "final_answer",
+        thought: "The page is already sufficient.",
+        finalAnswer: "external plan-act answered",
+        confidence: 1,
+      }),
+    ]
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input)
+      if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) {
+        return originalFetch(input, init)
+      }
+
+      return Response.json({
+        id: "chatcmpl_plan_act",
+        choices: [{ message: { content: providerResponses.shift() ?? providerResponses.at(-1) ?? "{}" } }],
+      })
+    }) as typeof fetch
+
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const runtime = await startDefaultRuntime({
+      home,
+      agentsDir: resolve(import.meta.dir, "../../../agents"),
+      configPath: join(home, "missing-config.yaml"),
+      env: {
+        OPENAI_API_KEY: "test-openai-key",
+        OPEN_WEB_AGENT_MODEL: "gpt-test",
+      },
+    })
+
+    try {
+      const plugins = await fetchPlugins(runtime.url)
+      expect(plugins.agents.map((agent) => agent.id)).toContain("plan-act")
+
+      const eventTypes: string[] = []
+      const completed = new Promise<{ type: string; payload: Record<string, unknown> }>((resolveDone) => {
+        const unsubscribe = runtime.eventBus.subscribe((event) => {
+          if (event.type === "plan.created" || event.type === "run.completed" || event.type === "run.failed") {
+            eventTypes.push(event.type)
+          }
+          if (event.type === "run.completed" || event.type === "run.failed") {
+            unsubscribe()
+            resolveDone({ type: event.type, payload: event.payload })
+          }
+        })
+      })
+      const sessionResponse = await fetch(`${runtime.url}/sessions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectPath: "/tmp/project" }),
+      })
+      const session = (await sessionResponse.json()) as { sessionId: string }
+      const runResponse = await fetch(`${runtime.url}/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId: session.sessionId,
+          prompt: "inspect and answer",
+          agentId: "plan-act",
+          modelId: "openai",
+          environmentId: "mock-browser",
+        }),
+      })
+      expect(runResponse.ok).toBe(true)
+
+      const result = await completed
+
+      expect(eventTypes).toEqual(["plan.created", "run.completed"])
+      expect(result).toEqual({
+        type: "run.completed",
+        payload: { finalAnswer: "external plan-act answered" },
+      })
+    } finally {
+      await runtime.stop()
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it("runs text-vision mixed grounding through the runtime model with text and screenshot content", async () => {
+    const originalFetch = globalThis.fetch
+    const providerRequests: unknown[] = []
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input)
+      if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) {
+        return originalFetch(input, init)
+      }
+
+      providerRequests.push(JSON.parse(String(init?.body ?? "{}")))
+      return Response.json({
+        id: "chatcmpl_text_vision",
+        choices: [{ message: { content: "vision model grounded answer" } }],
+      })
+    }) as typeof fetch
+
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const runtime = await startDefaultRuntime({
+      home,
+      agentsDir: resolve(import.meta.dir, "../../../agents"),
+      configPath: join(home, "missing-config.yaml"),
+      env: {
+        OPENAI_API_KEY: "test-openai-key",
+        OPEN_WEB_AGENT_MODEL: "gpt-test",
+      },
+    })
+
+    try {
+      const completed = new Promise<{ type: string; payload: Record<string, unknown> }>((resolveDone) => {
+        const unsubscribe = runtime.eventBus.subscribe((event) => {
+          if (event.type === "run.completed" || event.type === "run.failed") {
+            unsubscribe()
+            resolveDone({ type: event.type, payload: event.payload })
+          }
+        })
+      })
+      const sessionResponse = await fetch(`${runtime.url}/sessions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectPath: "/tmp/project" }),
+      })
+      const session = (await sessionResponse.json()) as { sessionId: string }
+      const runResponse = await fetch(`${runtime.url}/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId: session.sessionId,
+          prompt: "Use mixed grounding on example.com",
+          agentId: "text-vision-mixed-grounding",
+          modelId: "openai",
+          environmentId: "mock-browser",
+        }),
+      })
+      expect(runResponse.ok).toBe(true)
+
+      const result = await completed
+      const providerBody = providerRequests[0] as { messages: Array<{ role: string; content: unknown }> } | undefined
+      const userContent = providerBody?.messages.find((message) => message.role === "user")?.content
+      const contentParts = Array.isArray(userContent) ? userContent : []
+      const imagePart = contentParts.find((part) => isRecord(part) && part.type === "image_url")
+
+      expect(result).toEqual({
+        type: "run.completed",
+        payload: { finalAnswer: "vision model grounded answer" },
+      })
+      expect(contentParts).toContainEqual(expect.objectContaining({ type: "text" }))
+      expect(imagePart).toMatchObject({
+        type: "image_url",
+        image_url: { url: expect.stringContaining("data:") },
+      })
+    } finally {
+      await runtime.stop()
+      globalThis.fetch = originalFetch
     }
   })
 
@@ -309,4 +581,8 @@ async function fetchPlugins(url: string): Promise<{
   const response = await fetch(`${url}/plugins`)
   expect(response.ok).toBe(true)
   return response.json()
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

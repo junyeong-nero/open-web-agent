@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { describe, expect, it } from "bun:test"
-import { TextareaRenderable } from "@opentui/core"
+import { BoxRenderable, TextareaRenderable } from "@opentui/core"
 import { testRender } from "@opentui/solid"
 import type { ModelActivity } from "../state/types"
 import { getTheme } from "../theme/themes"
@@ -17,6 +17,72 @@ const idleModelActivity: ModelActivity = {
 }
 
 describe("PromptInput", () => {
+  it("reports ordinary text edits", async () => {
+    const changes: string[] = []
+    const setup = await testRender(
+      () => (
+        <PromptInput
+          value=""
+          agent={null}
+          model={null}
+          modelActivity={idleModelActivity}
+          runStatus="idle"
+          theme={getTheme("opencode")}
+          onChange={(value) => changes.push(value)}
+          onSubmit={() => {}}
+        />
+      ),
+      { width: 80, height: 12 },
+    )
+
+    try {
+      await setup.flush()
+      await setup.mockInput.typeText("/ag")
+      await setup.flush()
+
+      expect(changes.at(-1)).toBe("/ag")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  it("autocompletes slash commands typed after render", async () => {
+    const changes: string[] = []
+    const setup = await testRender(
+      () => (
+        <PromptInput
+          value=""
+          agent={null}
+          model={null}
+          modelActivity={idleModelActivity}
+          runStatus="idle"
+          theme={getTheme("opencode")}
+          onChange={(value) => changes.push(value)}
+          onSubmit={() => {}}
+        />
+      ),
+      { width: 80, height: 12 },
+    )
+
+    try {
+      await setup.flush()
+      const textarea = setup.renderer.root.findDescendantById("prompt-input-textarea")
+
+      expect(textarea).toBeInstanceOf(TextareaRenderable)
+
+      await setup.mockInput.typeText("/ag")
+      await setup.flush()
+      changes.length = 0
+      setup.mockInput.pressTab()
+      await setup.flush()
+
+      expect((textarea as TextareaRenderable).plainText).toBe("/agent ")
+      expect(changes).toEqual(["/agent "])
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
   it("autocompletes the displayed slash command suggestion on tab", async () => {
     const changes: string[] = []
     const setup = await testRender(
@@ -47,6 +113,79 @@ describe("PromptInput", () => {
 
       expect((textarea as TextareaRenderable).plainText).toBe("/agent ")
       expect(changes).toEqual(["/agent "])
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  it("moves slash command selection with arrow keys before completing", async () => {
+    const changes: string[] = []
+    const setup = await testRender(
+      () => (
+        <PromptInput
+          value="/"
+          agent={null}
+          model={null}
+          modelActivity={idleModelActivity}
+          runStatus="idle"
+          theme={getTheme("opencode")}
+          onChange={(value) => changes.push(value)}
+          onSubmit={() => {}}
+        />
+      ),
+      { width: 80, height: 12 },
+    )
+
+    try {
+      await setup.flush()
+      changes.length = 0
+      const textarea = setup.renderer.root.findDescendantById("prompt-input-textarea")
+
+      expect(textarea).toBeInstanceOf(TextareaRenderable)
+
+      setup.mockInput.pressArrow("down")
+      setup.mockInput.pressTab()
+      await setup.flush()
+
+      expect((textarea as TextareaRenderable).plainText).toBe("/clear")
+      expect(changes).toEqual(["/clear"])
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  it("lets the mouse cursor choose a slash command suggestion", async () => {
+    const changes: string[] = []
+    const setup = await testRender(
+      () => (
+        <PromptInput
+          value="/"
+          agent={null}
+          model={null}
+          modelActivity={idleModelActivity}
+          runStatus="idle"
+          theme={getTheme("opencode")}
+          onChange={(value) => changes.push(value)}
+          onSubmit={() => {}}
+        />
+      ),
+      { width: 80, height: 12 },
+    )
+
+    try {
+      await setup.flush()
+      changes.length = 0
+      const textarea = setup.renderer.root.findDescendantById("prompt-input-textarea")
+      const detailsSuggestion = setup.renderer.root.findDescendantById("slash-suggestion-2")
+
+      expect(textarea).toBeInstanceOf(TextareaRenderable)
+      expect(detailsSuggestion).toBeInstanceOf(BoxRenderable)
+
+      await setup.mockMouse.click((detailsSuggestion as BoxRenderable).screenX + 1, (detailsSuggestion as BoxRenderable).screenY)
+      await setup.flush()
+
+      expect((textarea as TextareaRenderable).plainText).toBe("/details")
+      expect(changes).toEqual(["/details"])
     } finally {
       setup.renderer.destroy()
     }

@@ -1,4 +1,5 @@
-import { createSignal, onCleanup, onMount, Show } from "solid-js"
+/** @jsxImportSource @opentui/solid */
+import { createSignal, onCleanup, onMount } from "solid-js"
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useSelectionHandler } from "@opentui/solid"
 import { PromptInput } from "./components/prompt-input"
@@ -8,7 +9,7 @@ import { TranscriptPanel } from "./components/transcript-panel"
 import { createEventStream } from "./client/event-source"
 import { createServerClient } from "./client/server-client"
 import { copySelectionToClipboard, pasteSystemClipboardText } from "./clipboard/system-clipboard"
-import { formatSlashCommandHelp, parseSlashCommand } from "./commands/slash-commands"
+import { formatSlashCommandHelp, listSlashCommandSuggestions, parseSlashCommand } from "./commands/slash-commands"
 import { mapKeyEvent } from "./keymap/keybindings"
 import { createInitialState, reduceTuiEvent } from "./state/reducer"
 import type { AgentSummary, EnvironmentSummary, ModelSummary } from "./state/types"
@@ -29,6 +30,7 @@ export function App(props: AppProps) {
   const [state, setState] = createSignal(createInitialState(props.projectPath))
   const [prompt, setPrompt] = createSignal("")
   const [modelSelectorOpen, setModelSelectorOpen] = createSignal(false)
+  const [activePane, setActivePane] = createSignal<"prompt" | "transcript">("prompt")
   let transcriptScroll: ScrollBoxRenderable | undefined
   const currentTheme = (): TuiTheme => getTheme(state().selectedThemeId)
 
@@ -99,6 +101,22 @@ export function App(props: AppProps) {
     if (action === "paste") {
       key.preventDefault()
       void pasteSystemClipboardText(renderer)
+    }
+    if (action === "focus-next" || action === "focus-previous") {
+      if (action === "focus-next" && activePane() === "prompt" && listSlashCommandSuggestions(prompt()).length > 0) return
+      key.preventDefault()
+      setActivePane((pane) => (pane === "prompt" ? "transcript" : "prompt"))
+      return
+    }
+    if (action === "scroll-line-up" && activePane() === "transcript") {
+      key.preventDefault()
+      transcriptScroll?.scrollBy(-1, "content")
+      return
+    }
+    if (action === "scroll-line-down" && activePane() === "transcript") {
+      key.preventDefault()
+      transcriptScroll?.scrollBy(1, "content")
+      return
     }
     if (action === "cancel-or-quit") void cancelOrExit()
     if (action === "scroll-page-up") transcriptScroll?.scrollBy(-0.5, "viewport")
@@ -354,6 +372,8 @@ export function App(props: AppProps) {
         scrollRef={(node) => {
           transcriptScroll = node
         }}
+        focused={activePane() === "transcript"}
+        onFocusRequest={() => setActivePane("transcript")}
       />
       <PromptInput
         value={prompt()}
@@ -362,10 +382,12 @@ export function App(props: AppProps) {
         modelActivity={state().modelActivity}
         runStatus={state().runStatus}
         theme={currentTheme()}
+        focused={activePane() === "prompt"}
         onChange={setPrompt}
         onSubmit={submitPrompt}
+        onFocusRequest={() => setActivePane("prompt")}
       />
-      <Show when={modelSelectorOpen()}>
+      {modelSelectorOpen() ? (
         <ModelSelector
           models={state().availableModels}
           selectedModelId={state().selectedModelId}
@@ -373,7 +395,7 @@ export function App(props: AppProps) {
           onSelect={selectModelFromSelector}
           onCancel={() => setModelSelectorOpen(false)}
         />
-      </Show>
+      ) : null}
     </box>
   )
 }
