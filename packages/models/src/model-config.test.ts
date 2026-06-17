@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { mkdtemp, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
-import { readModelConfig, resolveModelConfigPath } from "./model-config"
+import { readModelConfig, resolveModelConfigPath, resolveProviderDefaultModel } from "./model-config"
 
 describe("readModelConfig", () => {
   it("resolves the default user config path", () => {
@@ -15,6 +15,16 @@ describe("readModelConfig", () => {
     })
   })
 
+  it("maps the built-in default model to provider-specific direct API defaults", () => {
+    const builtInDefault = "nvidia/nemotron-3-super-120b-a12b:free"
+
+    expect(resolveProviderDefaultModel("openrouter", builtInDefault)).toBe(builtInDefault)
+    expect(resolveProviderDefaultModel("openai", builtInDefault)).toBe("gpt-4.1-mini")
+    expect(resolveProviderDefaultModel("gemini", builtInDefault)).toBe("gemini-3.5-flash")
+    expect(resolveProviderDefaultModel("claude", builtInDefault)).toBe("claude-sonnet-4-6")
+    expect(resolveProviderDefaultModel("gemini", "custom-model")).toBe("custom-model")
+  })
+
   it("reads provider keys and default model from env", async () => {
     const dir = await mkdtemp(join(tmpdir(), "owa-model-config-"))
     expect(
@@ -22,6 +32,8 @@ describe("readModelConfig", () => {
         {
           OPENAI_API_KEY: "openai-key",
           OPENROUTER_API_KEY: "openrouter-key",
+          GEMINI_API_KEY: "gemini-key",
+          ANTHROPIC_API_KEY: "anthropic-key",
           OPEN_WEB_AGENT_MODEL: "custom-model",
           OPEN_WEB_AGENT_REASONING_EFFORT: "high",
           OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS: "256000",
@@ -34,6 +46,8 @@ describe("readModelConfig", () => {
       contextWindowTokens: 256000,
       openaiApiKey: "openai-key",
       openrouterApiKey: "openrouter-key",
+      geminiApiKey: "gemini-key",
+      anthropicApiKey: "anthropic-key",
       parameters: {},
     })
   })
@@ -49,6 +63,8 @@ describe("readModelConfig", () => {
         "context_window_tokens: 64000",
         'openai_api_key: "yaml-openai-key"',
         'openrouter_api_key: "yaml-openrouter-key"',
+        'gemini_api_key: "yaml-gemini-key"',
+        'anthropic_api_key: "yaml-anthropic-key"',
         "",
       ].join("\n"),
     )
@@ -59,6 +75,8 @@ describe("readModelConfig", () => {
       contextWindowTokens: 64000,
       openaiApiKey: "yaml-openai-key",
       openrouterApiKey: "yaml-openrouter-key",
+      geminiApiKey: "yaml-gemini-key",
+      anthropicApiKey: "yaml-anthropic-key",
       parameters: {},
     })
   })
@@ -91,6 +109,8 @@ describe("readModelConfig", () => {
       contextWindowTokens: 128000,
       openaiApiKey: null,
       openrouterApiKey: null,
+      geminiApiKey: null,
+      anthropicApiKey: null,
       parameters: {
         temperature: 0.4,
         topP: 0.9,
@@ -115,6 +135,8 @@ describe("readModelConfig", () => {
         "context_window_tokens: 64000",
         'openai_api_key: "yaml-openai-key"',
         'openrouter_api_key: "yaml-openrouter-key"',
+        'gemini_api_key: "yaml-gemini-key"',
+        'anthropic_api_key: "yaml-anthropic-key"',
         "",
       ].join("\n"),
     )
@@ -123,6 +145,8 @@ describe("readModelConfig", () => {
       readModelConfig(
         {
           OPENAI_API_KEY: "env-openai-key",
+          GEMINI_API_KEY: "env-gemini-key",
+          ANTHROPIC_API_KEY: "env-anthropic-key",
           OPEN_WEB_AGENT_MODEL: "env-model",
           OPEN_WEB_AGENT_REASONING_EFFORT: "medium",
           OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS: "128000",
@@ -135,6 +159,8 @@ describe("readModelConfig", () => {
       contextWindowTokens: 128000,
       openaiApiKey: "env-openai-key",
       openrouterApiKey: "yaml-openrouter-key",
+      geminiApiKey: "env-gemini-key",
+      anthropicApiKey: "env-anthropic-key",
       parameters: {},
     })
   })

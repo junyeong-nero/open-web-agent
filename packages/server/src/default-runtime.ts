@@ -17,8 +17,10 @@ import {
   type SessionState,
 } from "@open-web-agent/core"
 import {
+  ClaudeModel,
   createOpenAIModelPool,
   createOpenRouterModelPool,
+  GeminiModel,
   OpenAIModel,
   OpenRouterModel,
   readModelConfig,
@@ -92,6 +94,28 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     })) {
       registry.registerModel(model)
     }
+  }
+  if (modelConfig.geminiApiKey) {
+    registry.registerModel(
+      new GeminiModel({
+        apiKey: modelConfig.geminiApiKey,
+        defaultModel: resolveProviderDefaultModel("gemini", modelConfig.defaultModel),
+        defaultParameters: modelConfig.parameters,
+        reasoningEffort: modelConfig.reasoningEffort,
+        contextWindowTokens: modelConfig.contextWindowTokens,
+      }),
+    )
+  }
+  if (modelConfig.anthropicApiKey) {
+    registry.registerModel(
+      new ClaudeModel({
+        apiKey: modelConfig.anthropicApiKey,
+        defaultModel: resolveProviderDefaultModel("claude", modelConfig.defaultModel),
+        defaultParameters: modelConfig.parameters,
+        reasoningEffort: modelConfig.reasoningEffort,
+        contextWindowTokens: modelConfig.contextWindowTokens,
+      }),
+    )
   }
 
   const defaultModelId = registry.listModels()[0]?.id
@@ -173,7 +197,9 @@ class RuntimeSelectedModel implements ModelPlugin {
   async complete(request: ModelRequest, ctx: RuntimeContext): Promise<ModelResponse> {
     const modelId = ctx.modelId ?? this.defaultModelId
     if (!modelId) {
-      throw new Error("No model selected. Configure OPENAI_API_KEY or OPENROUTER_API_KEY, then use /model <id>.")
+      throw new Error(
+        "No model selected. Configure OPENAI_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY, then use /model <id>.",
+      )
     }
 
     const model = this.registry.getModel(modelId)

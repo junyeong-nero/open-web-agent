@@ -103,7 +103,7 @@ OpenTUI rendered through SolidJS. `tsconfig` uses `jsx: "preserve"` with `jsxImp
 
 ## Configuration & local data
 
-Model settings load from `~/.openwebagents/config.yaml` (note: `.openwebagents`, no hyphen), with **env vars taking precedence**: `OPEN_WEB_AGENT_MODEL`, `OPEN_WEB_AGENT_REASONING_EFFORT`, `OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`. See README for the full YAML shape.
+Model settings load from `~/.openwebagents/config.yaml` (note: `.openwebagents`, no hyphen), with **env vars taking precedence**: `OPEN_WEB_AGENT_MODEL`, `OPEN_WEB_AGENT_REASONING_EFFORT`, `OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`. See README for the full YAML shape.
 
 Run traces and SQLite metadata are written under `OWA_HOME` (note: `.open-web-agent`, **with** hyphen — different dir from the config above), defaulting to `~/.open-web-agent`:
 
