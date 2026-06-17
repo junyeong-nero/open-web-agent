@@ -1,5 +1,6 @@
 import { startDefaultRuntime } from "@open-web-agent/server"
 import { launchTui } from "@open-web-agent/tui"
+import { join } from "node:path"
 
 export interface DefaultCommandInput {
   projectPath: string
@@ -8,7 +9,7 @@ export interface DefaultCommandInput {
 }
 
 export async function defaultCommand(input: DefaultCommandInput): Promise<void> {
-  const runtime = await startDefaultRuntime()
+  const runtime = await startDefaultRuntime({ agentsDir: join(input.projectPath, "agents") })
 
   try {
     await launchTui({

@@ -1,4 +1,4 @@
-import { MockAgent, PlanActAgent, SeeActAgent, SimpleReActAgent } from "@open-web-agent/agents"
+import { loadPythonAgentManifests, MockAgent, PlanActAgent, SeeActAgent, SimpleReActAgent } from "@open-web-agent/agents"
 import {
   MockBrowserToolAdapter,
   MockEnvironment,
@@ -29,6 +29,7 @@ export interface StartDefaultRuntimeOptions {
   environmentDelayMs?: number
   env?: NodeJS.ProcessEnv
   configPath?: string
+  agentsDir?: string
 }
 
 export interface StartedDefaultRuntime {
@@ -82,6 +83,9 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   registry.registerAgent(new SimpleReActAgent(modelBackedAgentOptions))
   registry.registerAgent(new SeeActAgent(modelBackedAgentOptions))
   registry.registerAgent(new PlanActAgent(modelBackedAgentOptions))
+  for (const agent of await loadPythonAgentManifests(options.agentsDir ?? join(home, "agents"))) {
+    registry.registerAgent(agent)
+  }
 
   const mockEnvironment = new MockEnvironment(options.environmentDelayMs)
   const playwrightEnvironment = new PlaywrightEnvironment()

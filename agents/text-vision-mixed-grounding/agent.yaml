@@ -1,0 +1,5 @@
+id: text-vision-mixed-grounding
+name: Text-Vision Mixed Grounding
+description: Uses extracted text and screenshot artifacts to ground browser-only decisions.
+language: python
+entry: main.py

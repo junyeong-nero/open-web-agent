@@ -15,7 +15,13 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()): P
   }
 
   if (args.mode === "run") {
-    await runCommand({ prompt: args.prompt, projectPath: args.projectPath, continueLast: args.continueLast, sessionId: args.sessionId })
+    await runCommand({
+      prompt: args.prompt,
+      projectPath: args.projectPath,
+      continueLast: args.continueLast,
+      sessionId: args.sessionId,
+      agentId: args.agentId,
+    })
     return
   }
 

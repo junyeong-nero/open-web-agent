@@ -24,6 +24,12 @@ bun install
 bun run packages/cli/src/index.ts run "example.com에 접속해서 페이지 제목을 알려줘"
 ```
 
+Select a project-local agent from `agents/<agent-id>/agent.yaml`:
+
+```bash
+bun run packages/cli/src/index.ts run --agent text-vision-mixed-grounding "Use mixed grounding on example.com"
+```
+
 ## Run TUI
 
 ```bash

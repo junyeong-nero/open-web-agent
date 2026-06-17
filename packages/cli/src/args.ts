@@ -2,7 +2,7 @@ import { resolve } from "node:path"
 
 export type CliArgs =
   | { mode: "default"; projectPath: string; continueLast?: boolean; sessionId?: string }
-  | { mode: "run"; prompt: string; projectPath: string; continueLast?: boolean; sessionId?: string }
+  | { mode: "run"; prompt: string; projectPath: string; continueLast?: boolean; sessionId?: string; agentId?: string }
   | { mode: "serve"; hostname: string; port: number }
   | { mode: "eval"; taskIds: string[]; combinations?: Array<{ agentId: string; modelId: string; environmentId: string }> }
   | { mode: "connect"; serverUrl: string }
@@ -27,10 +27,10 @@ export function parseArgs(argv: string[], cwd = process.cwd()): CliArgs {
   }
 
   if (argv[0] === "run") {
-    const { promptParts, continueLast, sessionId } = parseRunFlags(argv.slice(1))
+    const { promptParts, continueLast, sessionId, agentId } = parseRunFlags(argv.slice(1))
     const prompt = promptParts.join(" ").trim()
     if (prompt.length === 0) throw new Error("run requires a prompt")
-    return { mode: "run", prompt, projectPath: cwd, continueLast, sessionId }
+    return { mode: "run", prompt, projectPath: cwd, continueLast, sessionId, agentId }
   }
 
   if (argv[0] === "serve") {
@@ -86,10 +86,11 @@ function parseCombination(value: string): { agentId: string; modelId: string; en
   return { agentId, modelId, environmentId }
 }
 
-function parseRunFlags(argv: string[]): { promptParts: string[]; continueLast?: boolean; sessionId?: string } {
+function parseRunFlags(argv: string[]): { promptParts: string[]; continueLast?: boolean; sessionId?: string; agentId?: string } {
   const promptParts: string[] = []
   let continueLast: boolean | undefined
   let sessionId: string | undefined
+  let agentId: string | undefined
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
@@ -102,10 +103,15 @@ function parseRunFlags(argv: string[]): { promptParts: string[]; continueLast?: 
       index += 1
       continue
     }
+    if (arg === "--agent") {
+      agentId = requiredValue(argv, index, "--agent")
+      index += 1
+      continue
+    }
     promptParts.push(arg)
   }
 
-  return { promptParts, continueLast, sessionId }
+  return { promptParts, continueLast, sessionId, agentId }
 }
 
 function parseServeArgs(argv: string[]): CliArgs {

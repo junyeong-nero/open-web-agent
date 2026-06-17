@@ -22,6 +22,15 @@ describe("parseArgs", () => {
     })
   })
 
+  it("recognizes run mode with an agent selection", () => {
+    expect(parseArgs(["run", "--agent", "text-vision-mixed-grounding", "example.com"], "/tmp/project")).toEqual({
+      mode: "run",
+      prompt: "example.com",
+      projectPath: "/tmp/project",
+      agentId: "text-vision-mixed-grounding",
+    })
+  })
+
   it("recognizes serve mode", () => {
     expect(parseArgs(["serve", "--port", "4096", "--hostname", "127.0.0.1"], "/tmp/project")).toEqual({
       mode: "serve",

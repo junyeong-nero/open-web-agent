@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { mkdtemp, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { startDefaultRuntime } from "./default-runtime"
@@ -40,6 +40,48 @@ describe("startDefaultRuntime", () => {
       const plugins = await fetchPlugins(runtime.url)
 
       expect(plugins.models.map((model) => model.id)).toEqual(["openai", "openrouter"])
+    } finally {
+      await runtime.stop()
+    }
+  })
+
+  it("registers Python agents from a manifest directory", async () => {
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const agentsDir = join(home, "agents")
+    const agentDir = join(agentsDir, "python-fixture-agent")
+    await mkdir(agentDir, { recursive: true })
+    await writeFile(
+      join(agentDir, "agent.yaml"),
+      [
+        "id: python-fixture-agent",
+        "name: Python Fixture Agent",
+        "description: Loaded by the default runtime",
+        "language: python",
+        "entry: main.py",
+        "",
+      ].join("\n"),
+    )
+    await writeFile(
+      join(agentDir, "main.py"),
+      [
+        "import json",
+        "import sys",
+        "json.load(sys.stdin)",
+        'print(json.dumps({"ok": True}))',
+        "",
+      ].join("\n"),
+    )
+    const runtime = await startDefaultRuntime({
+      home,
+      agentsDir,
+      configPath: join(home, "missing-config.yaml"),
+      env: {},
+    })
+
+    try {
+      const plugins = await fetchPlugins(runtime.url)
+
+      expect(plugins.agents.map((agent) => agent.id)).toContain("python-fixture-agent")
     } finally {
       await runtime.stop()
     }
