@@ -2,11 +2,27 @@ import { describe, expect, it } from "bun:test"
 import { mkdtemp, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
-import { readModelConfig, resolveModelConfigPath } from "./model-config"
+import { readModelConfig, resolveModelConfigPath, resolveProviderDefaultModel } from "./model-config"
 
 describe("readModelConfig", () => {
   it("resolves the default user config path", () => {
     expect(resolveModelConfigPath()).toBe(join(homedir(), ".openwebagents", "config.yaml"))
+  })
+
+  it("uses OpenRouter Nemotron as the built-in default model", () => {
+    expect(readModelConfig({}, { configPath: "/tmp/missing-open-web-agent-config.yaml" })).toMatchObject({
+      defaultModel: "nvidia/nemotron-3-super-120b-a12b:free",
+    })
+  })
+
+  it("maps the built-in default model to provider-specific direct API defaults", () => {
+    const builtInDefault = "nvidia/nemotron-3-super-120b-a12b:free"
+
+    expect(resolveProviderDefaultModel("openrouter", builtInDefault)).toBe(builtInDefault)
+    expect(resolveProviderDefaultModel("openai", builtInDefault)).toBe("gpt-4.1-mini")
+    expect(resolveProviderDefaultModel("gemini", builtInDefault)).toBe("gemini-3.5-flash")
+    expect(resolveProviderDefaultModel("claude", builtInDefault)).toBe("claude-sonnet-4-6")
+    expect(resolveProviderDefaultModel("gemini", "custom-model")).toBe("custom-model")
   })
 
   it("reads provider keys and default model from env", async () => {

@@ -1,6 +1,6 @@
 import type { ModelPlugin, ModelRequest, ModelResponse, RuntimeContext } from "@open-web-agent/core"
 import { OpenAICompatibleClient, type FetchLike } from "./openai-compatible-client"
-import { readModelConfig, type ModelParameters } from "./model-config"
+import { readModelConfig, resolveProviderDefaultModel, type ModelParameters } from "./model-config"
 
 export interface ClaudeModelOptions {
   apiKey?: string | null
@@ -24,7 +24,7 @@ export class ClaudeModel implements ModelPlugin {
 
   constructor(options: ClaudeModelOptions = {}) {
     const config = readModelConfig()
-    this.defaultModel = options.defaultModel ?? config.defaultModel
+    this.defaultModel = options.defaultModel ?? resolveProviderDefaultModel("claude", config.defaultModel)
     this.defaultParameters = options.defaultParameters ?? config.parameters
     this.modelName = this.defaultModel
     this.reasoningEffort = options.reasoningEffort ?? config.reasoningEffort

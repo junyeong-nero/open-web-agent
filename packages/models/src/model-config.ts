@@ -29,7 +29,14 @@ export interface ReadModelConfigOptions {
   configPath?: string
 }
 
-const defaultModel = "gpt-4.1-mini"
+export type ModelProvider = "openai" | "openrouter" | "gemini" | "claude"
+
+export const defaultOpenAIModel = "gpt-4.1-mini"
+export const defaultOpenRouterModel = "nvidia/nemotron-3-super-120b-a12b:free"
+export const defaultGeminiModel = "gemini-3.5-flash"
+export const defaultClaudeModel = "claude-sonnet-4-6"
+
+const defaultModel = defaultOpenRouterModel
 const defaultReasoningEffort = "medium"
 const defaultContextWindowTokens = 128000
 
@@ -50,6 +57,13 @@ export function readModelConfig(env: NodeJS.ProcessEnv = process.env, options: R
     anthropicApiKey: env.ANTHROPIC_API_KEY || fileConfig.anthropicApiKey || null,
     parameters: fileConfig.parameters ?? {},
   }
+}
+
+export function resolveProviderDefaultModel(provider: ModelProvider, defaultModel: string): string {
+  if (provider === "openai" && defaultModel === defaultOpenRouterModel) return defaultOpenAIModel
+  if (provider === "gemini" && defaultModel === defaultOpenRouterModel) return defaultGeminiModel
+  if (provider === "claude" && defaultModel === defaultOpenRouterModel) return defaultClaudeModel
+  return defaultModel
 }
 
 function readConfigFile(configPath: string): Partial<ModelConfig> {

@@ -41,7 +41,100 @@ describe("startDefaultRuntime", () => {
     try {
       const plugins = await fetchPlugins(runtime.url)
 
-      expect(plugins.models.map((model) => model.id)).toEqual(["openai", "openrouter", "gemini", "claude"])
+      const modelIds = plugins.models.map((model) => model.id)
+      expect(modelIds).toEqual(
+        expect.arrayContaining([
+          "openrouter",
+          "openrouter:~anthropic/claude-sonnet-latest",
+          "openrouter:~google/gemini-pro-latest",
+          "openai",
+          "openai:gpt-5.5",
+          "openai:gpt-5.3-codex-spark",
+          "gemini",
+          "claude",
+        ]),
+      )
+      expect(modelIds.indexOf("openrouter")).toBeLessThan(modelIds.indexOf("openai"))
+      expect(plugins.models.find((model) => model.id === "openai:gpt-5.5")).toMatchObject({
+        name: "OpenAI",
+        provider: "openai",
+        modelName: "gpt-5.5",
+        contextWindowTokens: 1_000_000,
+      })
+      expect(plugins.models.find((model) => model.id === "openrouter:~google/gemini-pro-latest")).toMatchObject({
+        name: "OpenRouter",
+        provider: "openrouter",
+        modelName: "~google/gemini-pro-latest",
+        contextWindowTokens: 1_048_576,
+      })
+      expect(plugins.models.find((model) => model.id === "gemini")).toMatchObject({
+        provider: "gemini",
+        modelName: "test-model",
+      })
+      expect(plugins.models.find((model) => model.id === "claude")).toMatchObject({
+        provider: "claude",
+        modelName: "test-model",
+      })
+    } finally {
+      await runtime.stop()
+    }
+  })
+
+  it("uses OpenRouter Nemotron as the default provider model when both providers are configured", async () => {
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const runtime = await startDefaultRuntime({
+      home,
+      configPath: join(home, "missing-config.yaml"),
+      env: {
+        OPENAI_API_KEY: "test-openai-key",
+        OPENROUTER_API_KEY: "test-openrouter-key",
+      },
+    })
+
+    try {
+      const plugins = await fetchPlugins(runtime.url)
+
+      expect(plugins.models[0]).toMatchObject({
+        id: "openrouter",
+        provider: "openrouter",
+        modelName: "nvidia/nemotron-3-super-120b-a12b:free",
+      })
+      expect(plugins.models.find((model) => model.id === "openai")).toMatchObject({
+        id: "openai",
+        provider: "openai",
+        modelName: "gpt-4.1-mini",
+      })
+    } finally {
+      await runtime.stop()
+    }
+  })
+
+  it("uses provider-specific defaults for direct Gemini and Claude providers", async () => {
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const runtime = await startDefaultRuntime({
+      home,
+      configPath: join(home, "missing-config.yaml"),
+      env: {
+        GEMINI_API_KEY: "test-gemini-key",
+        ANTHROPIC_API_KEY: "test-anthropic-key",
+      },
+    })
+
+    try {
+      const plugins = await fetchPlugins(runtime.url)
+
+      expect(plugins.models).toEqual([
+        expect.objectContaining({
+          id: "gemini",
+          provider: "gemini",
+          modelName: "gemini-3.5-flash",
+        }),
+        expect.objectContaining({
+          id: "claude",
+          provider: "claude",
+          modelName: "claude-sonnet-4-6",
+        }),
+      ])
     } finally {
       await runtime.stop()
     }
@@ -113,14 +206,22 @@ describe("startDefaultRuntime", () => {
     try {
       const plugins = await fetchPlugins(runtime.url)
 
-      expect(plugins.models.map((model) => model.id)).toEqual(["openai", "openrouter", "gemini", "claude"])
+      expect(plugins.models.map((model) => model.id)).toEqual(
+        expect.arrayContaining(["openrouter", "openrouter:~openai/gpt-latest", "openai", "openai:gpt-5.5", "gemini", "claude"]),
+      )
       expect(plugins.models[0]).toMatchObject({
-        id: "openai",
-        name: "OpenAI",
-        provider: "openai",
+        id: "openrouter",
+        name: "OpenRouter",
+        provider: "openrouter",
         modelName: "config-model",
         reasoningEffort: "medium",
         contextWindowTokens: 128000,
+      })
+      expect(plugins.models.find((model) => model.id === "gemini")).toMatchObject({
+        modelName: "config-model",
+      })
+      expect(plugins.models.find((model) => model.id === "claude")).toMatchObject({
+        modelName: "config-model",
       })
     } finally {
       await runtime.stop()
@@ -214,7 +315,7 @@ describe("startDefaultRuntime", () => {
           sessionId: session.sessionId,
           prompt: "delegate through runtime",
           agentId: "runtime-model-agent",
-          modelId: "openai",
+          modelId: "openai:gpt-5.5",
           environmentId: "mock-browser",
         }),
       })
@@ -227,6 +328,7 @@ describe("startDefaultRuntime", () => {
         payload: { finalAnswer: "delegated runtime model answer" },
       })
       expect(modelEvents).toEqual(["model.called", "model.completed"])
+      expect((providerRequests[0] as { model?: string }).model).toBe("gpt-5.5")
       expect((providerRequests[0] as { messages: Array<{ content: string }> }).messages[0]?.content).toBe(
         "delegate through runtime",
       )

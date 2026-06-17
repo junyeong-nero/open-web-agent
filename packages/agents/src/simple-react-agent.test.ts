@@ -440,6 +440,46 @@ describe("SimpleReActAgent", () => {
     })
   })
 
+  it("normalizes navigate target URLs in browser tool calls", async () => {
+    const model = new FakeModel([
+      JSON.stringify({
+        type: "browser_actions",
+        thought: "Search today's KOSPI index on Naver.",
+        actions: [
+          {
+            id: "action_1",
+            kind: "navigate",
+            reason: "Navigate to naver.com to search for KOSPI index",
+            requiresApproval: false,
+            toolCalls: [
+              {
+                type: "navigate",
+                target: { url: "https://www.naver.com" },
+              },
+            ],
+          },
+        ],
+      }),
+    ])
+
+    const decision = await new SimpleReActAgent({ model, modelName: "fake", maxParseRetries: 0 }).step(state(), ctx())
+
+    expect(decision).toMatchObject({
+      type: "browser_actions",
+      actions: [
+        {
+          toolCalls: [
+            {
+              id: "action_1_tool_1",
+              type: "navigate",
+              url: "https://www.naver.com",
+            },
+          ],
+        },
+      ],
+    })
+  })
+
   it("repairs empty search targets from the current observation", async () => {
     const model = new FakeModel([
       JSON.stringify({

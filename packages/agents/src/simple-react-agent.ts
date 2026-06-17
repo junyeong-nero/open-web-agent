@@ -269,6 +269,13 @@ function normalizeToolCall(toolCall: unknown, actionId: string, toolIndex: numbe
   }
   delete normalized.kind
 
+  if (normalized.type === "navigate" && typeof normalized.url !== "string" && isRecord(normalized.target)) {
+    const targetUrl = normalized.target.url
+    if (typeof targetUrl === "string") {
+      normalized.url = targetUrl
+    }
+  }
+
   if (!isRecord(normalized.target) && typeof normalized.ref === "string" && normalized.ref.length > 0) {
     normalized.target = { selector: selectorForRef(normalized.ref) }
   }

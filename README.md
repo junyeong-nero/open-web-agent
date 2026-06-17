@@ -57,7 +57,7 @@ bun run packages/cli/src/index.ts serve --port 4096 --hostname 127.0.0.1
 Open Web Agent reads user-level model settings from `~/.openwebagents/config.yaml`.
 
 ```yaml
-model: "gpt-4.1-mini"
+model: "nvidia/nemotron-3-super-120b-a12b:free"
 reasoning_effort: "medium"
 context_window_tokens: 128000
 openai_api_key: "sk-..."
