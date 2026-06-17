@@ -18,3 +18,4 @@ packages/*/dist/
 
 # Local agent work artifacts
 .superpowers/
+.worktrees/
