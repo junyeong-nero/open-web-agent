@@ -5,6 +5,7 @@ import {
   formatContextUsage,
   promptHint,
   promptMeta,
+  selectedAgentSummary,
   sessionMeta,
   sessionTitle,
   toTranscriptViewItem,
@@ -53,6 +54,20 @@ describe("session shell formatting", () => {
     expect(sessionMeta(stateWithLog())).toBe("completed · mock-agent · mock-browser")
   })
 
+  it("resolves the selected agent display name with id fallback", () => {
+    expect(
+      selectedAgentSummary({
+        ...stateWithLog(),
+        selectedAgentId: "plan-act-agent",
+        availableAgents: [{ id: "plan-act-agent", name: "PlanAct Agent", description: "Plans before acting." }],
+      }),
+    ).toMatchObject({ id: "plan-act-agent", name: "PlanAct Agent" })
+    expect(selectedAgentSummary({ ...stateWithLog(), selectedAgentId: "see-act", availableAgents: [] })).toMatchObject({
+      id: "see-act",
+      name: "see-act",
+    })
+  })
+
   it("classifies transcript rows for OpenCode-style rendering", () => {
     expect(toTranscriptViewItem(stateWithLog().runLog[0]!)).toMatchObject({
       block: "user",
@@ -72,16 +87,28 @@ describe("session shell formatting", () => {
   })
 
   it("formats prompt metadata and hints", () => {
-    expect(promptMeta(null)).toBe("Build · no model · medium")
+    const agent = { id: "plan-act-agent", name: "PlanAct Agent", description: "Plans before acting." }
+
+    expect(promptMeta(null, null)).toBe("no agent / no model")
+    expect(promptMeta({ id: "see-act", name: "see-act", description: "" }, null)).toBe("see-act / no model")
     expect(
-      promptMeta({
+      promptMeta(agent, {
         id: "openai",
         name: "OpenAI",
         provider: "openai",
-        modelName: "gpt-test",
-        reasoningEffort: "high",
+        modelName: "GPT-5.5",
+        reasoningEffort: "xhigh",
       }),
-    ).toBe("Build · gpt-test OpenAI · high")
+    ).toBe("PlanAct / GPT-5.5 / xhigh")
+    expect(
+      promptMeta(agent, {
+        id: "openrouter",
+        name: "OpenRouter",
+        provider: "openrouter",
+        modelName: "GPT-5.5",
+        reasoningEffort: null,
+      }),
+    ).toBe("PlanAct / GPT-5.5")
     expect(promptHint("running", "7.2K (2%)")).toBe("7.2K (2%)  esc interrupt")
     expect(promptHint("idle", "0 (0%)")).toBe("0 (0%)  esc exit")
   })
