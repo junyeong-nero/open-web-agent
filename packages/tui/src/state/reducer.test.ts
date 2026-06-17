@@ -75,4 +75,40 @@ describe("reduceTuiEvent", () => {
 
     expect(state.plan).toEqual([{ id: "plan_2", title: "Retry click", status: "active" }])
   })
+
+  it("clears local view state while preserving session and run controls", () => {
+    const initial = createInitialState("/tmp/project")
+    const withSession = reduceTuiEvent(initial, { type: "session.created", sessionId: "ses_1" })
+    const running = reduceTuiEvent(withSession, { type: "run.event", event: event("run.started") })
+    const withConversation = reduceTuiEvent(running, {
+      type: "conversation.append",
+      message: { role: "user", content: "find the title" },
+    })
+    const withTimeline = reduceTuiEvent(withConversation, {
+      type: "run.event",
+      event: event("observation.captured", {
+        observation: {
+          url: "https://example.com",
+          title: "Example Domain",
+          text: "Example Domain",
+          screenshotPath: "/tmp/example.png",
+          interactiveElements: [],
+          metadata: {},
+        },
+      }),
+    })
+
+    const state = reduceTuiEvent(withTimeline, { type: "state.clear" })
+
+    expect(state.projectPath).toBe("/tmp/project")
+    expect(state.activeSessionId).toBe("ses_1")
+    expect(state.activeRunId).toBe("run_1")
+    expect(state.runStatus).toBe("running")
+    expect(state.inspectorVisible).toBe(true)
+    expect(state.selectedEvent).toBeNull()
+    expect(state.conversation).toEqual([])
+    expect(state.timeline).toEqual([])
+    expect(state.plan).toEqual([])
+    expect(state.browser.url).toBe("about:blank")
+  })
 })

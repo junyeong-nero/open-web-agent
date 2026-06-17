@@ -93,6 +93,11 @@ export function App(props: AppProps) {
       setPrompt("")
       return
     }
+    if (command.kind === "clear") {
+      setState((current) => reduceTuiEvent(current, { type: "state.clear" }))
+      setPrompt("")
+      return
+    }
     if (command.kind === "new") {
       setPrompt("")
       await createNewSession()
@@ -107,7 +112,7 @@ export function App(props: AppProps) {
       setState((current) =>
         reduceTuiEvent(current, {
           type: "conversation.append",
-          message: { role: "system", content: "/help /details /new /stop /quit" },
+          message: { role: "system", content: "/help /clear /details /new /stop /quit" },
         }),
       )
       setPrompt("")
