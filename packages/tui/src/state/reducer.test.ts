@@ -18,9 +18,9 @@ function event(type: RunEvent["type"], payload: Record<string, unknown> = {}): R
 describe("reduceTuiEvent", () => {
   it("uses opencode shell defaults", () => {
     expect(createInitialState("/tmp/project")).toMatchObject({
-      selectedAgentId: "mock-agent",
+      selectedAgentId: "see-act",
       selectedModelId: null,
-      selectedEnvironmentId: "mock-browser",
+      selectedEnvironmentId: "playwright-browser",
       selectedThemeId: "opencode",
       availableAgents: [],
       availableModels: [],
@@ -124,6 +124,7 @@ describe("reduceTuiEvent", () => {
       type: "plugins.loaded",
       agents: [
         { id: "mock-agent", name: "Mock Agent", description: "Deterministic" },
+        { id: "see-act", name: "See-Act Agent", description: "Model-driven browser control" },
         { id: "plan-act-agent", name: "PlanAct Agent", description: "Plans first" },
       ],
       models: [
@@ -139,13 +140,13 @@ describe("reduceTuiEvent", () => {
     const selectedModel = reduceTuiEvent(selectedAgent, { type: "model.selected", modelId: "openrouter" })
     const selectedBrowser = reduceTuiEvent(selectedModel, { type: "environment.selected", environmentId: "playwright-browser" })
 
-    expect(loaded.selectedAgentId).toBe("mock-agent")
+    expect(loaded.selectedAgentId).toBe("see-act")
     expect(loaded.selectedModelId).toBe("openai")
-    expect(loaded.selectedEnvironmentId).toBe("mock-browser")
+    expect(loaded.selectedEnvironmentId).toBe("playwright-browser")
     expect(selectedBrowser.selectedAgentId).toBe("plan-act-agent")
     expect(selectedBrowser.selectedModelId).toBe("openrouter")
     expect(selectedBrowser.selectedEnvironmentId).toBe("playwright-browser")
-    expect(selectedBrowser.availableAgents.map((agent) => agent.id)).toEqual(["mock-agent", "plan-act-agent"])
+    expect(selectedBrowser.availableAgents.map((agent) => agent.id)).toEqual(["mock-agent", "see-act", "plan-act-agent"])
     expect(selectedBrowser.availableModels.map((model) => model.id)).toEqual(["openai", "openrouter"])
     expect(selectedBrowser.availableEnvironments.map((environment) => environment.id)).toEqual(["mock-browser", "playwright-browser"])
   })

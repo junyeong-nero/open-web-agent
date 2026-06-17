@@ -1,4 +1,4 @@
-import { MockAgent, PlanActAgent, SimpleReActAgent } from "@open-web-agent/agents"
+import { MockAgent, PlanActAgent, SeeActAgent, SimpleReActAgent } from "@open-web-agent/agents"
 import { MockEnvironment, PlaywrightEnvironment } from "@open-web-agent/browser"
 import {
   EventBus,
@@ -65,6 +65,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   const defaultModelId = registry.listModels()[0]?.id
   const selectedModel = new RuntimeSelectedModel(registry, defaultModelId)
   registry.registerAgent(new SimpleReActAgent({ model: selectedModel, modelName: modelConfig.defaultModel }))
+  registry.registerAgent(new SeeActAgent({ model: selectedModel, modelName: modelConfig.defaultModel }))
   registry.registerAgent(new PlanActAgent({ model: selectedModel, modelName: modelConfig.defaultModel }))
 
   registry.registerEnvironment(new MockEnvironment(options.environmentDelayMs))
