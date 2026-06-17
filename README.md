@@ -36,6 +36,19 @@ bun run packages/cli/src/index.ts
 bun run packages/cli/src/index.ts serve --port 4096 --hostname 127.0.0.1
 ```
 
+## Configuration
+
+Open Web Agent reads user-level model settings from `~/.openwebagents/config.yaml`.
+
+```yaml
+model: "gpt-4.1-mini"
+openai_api_key: "sk-..."
+openrouter_api_key: "sk-or-..."
+```
+
+Set one or both provider keys. Environment variables still take precedence when present:
+`OPEN_WEB_AGENT_MODEL`, `OPENAI_API_KEY`, and `OPENROUTER_API_KEY`.
+
 ## Development Commands
 
 ```bash

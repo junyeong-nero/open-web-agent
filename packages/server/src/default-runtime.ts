@@ -23,6 +23,7 @@ export interface StartDefaultRuntimeOptions {
   port?: number
   environmentDelayMs?: number
   env?: NodeJS.ProcessEnv
+  configPath?: string
 }
 
 export interface StartedDefaultRuntime {
@@ -39,7 +40,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   const home = options.home ?? resolveOwaHome()
   const eventBus = new EventBus()
   const registry = new PluginRegistry()
-  const modelConfig = readModelConfig(options.env ?? process.env)
+  const modelConfig = readModelConfig(options.env ?? process.env, { configPath: options.configPath })
 
   registry.registerAgent(new MockAgent())
   if (modelConfig.openaiApiKey) {
