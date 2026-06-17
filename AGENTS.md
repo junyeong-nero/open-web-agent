@@ -33,6 +33,19 @@ bun run packages/cli/src/index.ts eval --task <id> --combo agent/model/env # rep
 
 There is no build/bundle step for development — `tsc -b` is **typecheck only** (composite projects emit declarations to `packages/*/dist`, which is gitignored). Always run `bun run typecheck` after changes; per-package strict TypeScript is enforced.
 
+## Commit & PR conventions
+
+Prefix every commit message and pull request title with a bracketed type tag: `[type] contents`.
+
+- `[feat]` — new functionality
+- `[fix]` — bug fixes
+- `[refactor]` — code restructuring with no behavior change
+- `[test]` — adding or updating tests
+- `[docs]` — documentation-only changes (README, CLAUDE.md, etc.)
+- `[chore]` — tooling, deps, and other non-functional changes
+
+Example: `[fix] update TUI prompt footer metadata`. Keep the description lowercase and in the imperative mood after the tag, matching existing history.
+
 ## Architecture
 
 ### Execution flow (the core loop)
