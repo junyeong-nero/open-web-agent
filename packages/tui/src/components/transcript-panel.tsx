@@ -9,6 +9,8 @@ export interface TranscriptPanelProps {
   state: TuiState
   theme: TuiTheme
   scrollRef?: (node: ScrollBoxRenderable) => void
+  focused?: boolean
+  onFocusRequest?: () => void
 }
 
 export function TranscriptPanel(props: TranscriptPanelProps) {
@@ -23,11 +25,14 @@ export function TranscriptPanel(props: TranscriptPanelProps) {
       paddingY={1}
       backgroundColor={props.theme.surface}
       contentOptions={{ rowGap: 2 }}
-      focusable={false}
+      focusable
+      focused={props.focused}
       stickyScroll={true}
       stickyStart="bottom"
       scrollY={true}
       scrollX={false}
+      onMouseDown={props.onFocusRequest}
+      onMouseScroll={props.onFocusRequest}
     >
       {items().length === 0 ? (
         <text fg={props.theme.textMuted}>Waiting for a task. Type in the prompt below.</text>

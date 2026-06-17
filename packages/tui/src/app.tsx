@@ -27,6 +27,7 @@ export function App(props: AppProps) {
   const client = createServerClient(props.serverUrl)
   const [state, setState] = createSignal(createInitialState(props.projectPath))
   const [prompt, setPrompt] = createSignal("")
+  const [activePane, setActivePane] = createSignal<"prompt" | "transcript">("prompt")
   let transcriptScroll: ScrollBoxRenderable | undefined
   const currentTheme = (): TuiTheme => getTheme(state().selectedThemeId)
 
@@ -97,6 +98,21 @@ export function App(props: AppProps) {
     if (action === "paste") {
       key.preventDefault()
       void pasteSystemClipboardText(renderer)
+    }
+    if (action === "focus-next" || action === "focus-previous") {
+      key.preventDefault()
+      setActivePane((pane) => (pane === "prompt" ? "transcript" : "prompt"))
+      return
+    }
+    if (action === "scroll-line-up" && activePane() === "transcript") {
+      key.preventDefault()
+      transcriptScroll?.scrollBy(-1, "content")
+      return
+    }
+    if (action === "scroll-line-down" && activePane() === "transcript") {
+      key.preventDefault()
+      transcriptScroll?.scrollBy(1, "content")
+      return
     }
     if (action === "cancel-or-quit") void cancelOrExit()
     if (action === "scroll-page-up") transcriptScroll?.scrollBy(-0.5, "viewport")
@@ -344,6 +360,8 @@ export function App(props: AppProps) {
         scrollRef={(node) => {
           transcriptScroll = node
         }}
+        focused={activePane() === "transcript"}
+        onFocusRequest={() => setActivePane("transcript")}
       />
       <PromptInput
         value={prompt()}
@@ -352,8 +370,10 @@ export function App(props: AppProps) {
         modelActivity={state().modelActivity}
         runStatus={state().runStatus}
         theme={currentTheme()}
+        focused={activePane() === "prompt"}
         onChange={setPrompt}
         onSubmit={submitPrompt}
+        onFocusRequest={() => setActivePane("prompt")}
       />
     </box>
   )
