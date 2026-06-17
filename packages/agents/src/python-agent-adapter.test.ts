@@ -2,7 +2,16 @@ import { describe, expect, it } from "bun:test"
 import { mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { EventBus, type AgentState, type RunEvent, type RunEventType, type RuntimeContext } from "@open-web-agent/core"
+import {
+  EventBus,
+  type AgentState,
+  type ModelPlugin,
+  type ModelRequest,
+  type ModelResponse,
+  type RunEvent,
+  type RunEventType,
+  type RuntimeContext,
+} from "@open-web-agent/core"
 import { PythonAgentAdapter } from "./python-agent-adapter"
 
 const python = process.env.PYTHON ?? "python3"
@@ -65,6 +74,24 @@ async function writePythonScript(contents: string): Promise<string> {
   const path = join(dir, "agent.py")
   await writeFile(path, contents)
   return path
+}
+
+class FakeModel implements ModelPlugin {
+  id = "fake-model"
+  name = "Fake Model"
+  provider = "fake"
+  requests: ModelRequest[] = []
+
+  async complete(request: ModelRequest): Promise<ModelResponse> {
+    this.requests.push(request)
+    return {
+      id: "fake-response",
+      text: "model delegated answer",
+      raw: { ok: true },
+      usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+      latencyMs: 4,
+    }
+  }
 }
 
 describe("PythonAgentAdapter", () => {
@@ -136,6 +163,54 @@ else:
       confidence: 1,
     })
     expect(finalAnswer).toBe("grounded")
+  })
+
+  it("lets jsonl Python agents delegate model calls to the runtime model", async () => {
+    const script = await writePythonScript(`
+import json
+import sys
+
+request = json.loads(sys.stdin.readline())
+print(json.dumps({
+    "command": "model.complete",
+    "id": "model_1",
+    "request": {
+        "model": "test-model",
+        "messages": [{"role": "user", "content": "answer from model"}],
+        "temperature": 0,
+        "responseFormat": "text"
+    }
+}), flush=True)
+model_response = json.loads(sys.stdin.readline())
+print(json.dumps({
+    "decision": {
+        "type": "final_answer",
+        "thought": request["method"],
+        "finalAnswer": model_response["response"]["text"],
+        "confidence": 1
+    }
+}), flush=True)
+`)
+    const model = new FakeModel()
+    const agent = new PythonAgentAdapter({
+      id: "python-model-agent",
+      name: "Python Model Agent",
+      description: "Delegates model calls",
+      command: [python, script],
+      protocol: "jsonl",
+      model,
+    })
+
+    const decision = await agent.step(state(), ctx())
+
+    expect(model.requests).toHaveLength(1)
+    expect(model.requests[0]?.messages[0]?.content).toBe("answer from model")
+    expect(decision).toEqual({
+      type: "final_answer",
+      thought: "step",
+      finalAnswer: "model delegated answer",
+      confidence: 1,
+    })
   })
 
   it("includes stderr when the process exits non-zero", async () => {
