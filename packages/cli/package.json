@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@open-web-agent/core": "workspace:*",
+    "@open-web-agent/eval": "workspace:*",
     "@open-web-agent/server": "workspace:*",
     "@open-web-agent/tui": "workspace:*"
   }

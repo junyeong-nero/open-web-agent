@@ -35,8 +35,12 @@
     "packages/cli": {
       "name": "@open-web-agent/cli",
       "version": "0.1.0",
+      "bin": {
+        "open-web-agent": "./src/index.ts",
+      },
       "dependencies": {
         "@open-web-agent/core": "workspace:*",
+        "@open-web-agent/eval": "workspace:*",
         "@open-web-agent/server": "workspace:*",
         "@open-web-agent/tui": "workspace:*",
       },
@@ -46,6 +50,13 @@
       "version": "0.1.0",
       "dependencies": {
         "zod": "4.4.3",
+      },
+    },
+    "packages/eval": {
+      "name": "@open-web-agent/eval",
+      "version": "0.1.0",
+      "dependencies": {
+        "@open-web-agent/core": "workspace:*",
       },
     },
     "packages/models": {
@@ -157,6 +168,8 @@
     "@open-web-agent/cli": ["@open-web-agent/cli@workspace:packages/cli"],
 
     "@open-web-agent/core": ["@open-web-agent/core@workspace:packages/core"],
+
+    "@open-web-agent/eval": ["@open-web-agent/eval@workspace:packages/eval"],
 
     "@open-web-agent/models": ["@open-web-agent/models@workspace:packages/models"],
 

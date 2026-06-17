@@ -4,6 +4,7 @@ export type CliArgs =
   | { mode: "default"; projectPath: string; continueLast?: boolean; sessionId?: string }
   | { mode: "run"; prompt: string; projectPath: string; continueLast?: boolean; sessionId?: string }
   | { mode: "serve"; hostname: string; port: number }
+  | { mode: "eval"; taskIds: string[]; combinations?: Array<{ agentId: string; modelId: string; environmentId: string }> }
   | { mode: "connect"; serverUrl: string }
 
 export function parseArgs(argv: string[], cwd = process.cwd()): CliArgs {
@@ -36,11 +37,53 @@ export function parseArgs(argv: string[], cwd = process.cwd()): CliArgs {
     return parseServeArgs(argv.slice(1))
   }
 
+  if (argv[0] === "eval") {
+    return parseEvalArgs(argv.slice(1))
+  }
+
   if (argv.length === 1) {
     return { mode: "default", projectPath: resolve(cwd, argv[0] ?? ".") }
   }
 
   throw new Error(`Unknown arguments: ${argv.join(" ")}`)
+}
+
+function parseEvalArgs(argv: string[]): CliArgs {
+  const taskIds: string[] = []
+  const combinations: Array<{ agentId: string; modelId: string; environmentId: string }> = []
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+
+    if (arg === "--task") {
+      taskIds.push(requiredValue(argv, index, "--task"))
+      index += 1
+      continue
+    }
+
+    if (arg === "--combo") {
+      combinations.push(parseCombination(requiredValue(argv, index, "--combo")))
+      index += 1
+      continue
+    }
+
+    throw new Error(`Unknown eval argument: ${arg}`)
+  }
+
+  return {
+    mode: "eval",
+    taskIds,
+    ...(combinations.length > 0 ? { combinations } : {}),
+  }
+}
+
+function parseCombination(value: string): { agentId: string; modelId: string; environmentId: string } {
+  const [agentId, modelId, environmentId] = value.split("/")
+  if (!agentId || !modelId || !environmentId) {
+    throw new Error("--combo must use agent/model/environment")
+  }
+
+  return { agentId, modelId, environmentId }
 }
 
 function parseRunFlags(argv: string[]): { promptParts: string[]; continueLast?: boolean; sessionId?: string } {

@@ -30,6 +30,13 @@ describe("parseArgs", () => {
     })
   })
 
+  it("recognizes eval mode", () => {
+    expect(parseArgs(["eval", "--task", "example-domain-title"], "/tmp/project")).toEqual({
+      mode: "eval",
+      taskIds: ["example-domain-title"],
+    })
+  })
+
   it("recognizes connect mode", () => {
     expect(parseArgs(["--connect", "http://127.0.0.1:4096"], "/tmp/project")).toEqual({
       mode: "connect",
