@@ -7,6 +7,7 @@ export interface SessionState {
   id: string
   projectPath: string
   projectHash: string
+  environmentId?: string | null
   title?: string | null
   pinned?: boolean
   deletedAt?: string | null

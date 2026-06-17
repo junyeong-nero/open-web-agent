@@ -40,6 +40,10 @@ export class RunOrchestrator {
     this.now = options.now ?? (() => new Date())
   }
 
+  get defaultEnvironmentId(): string {
+    return this.options.environmentId
+  }
+
   startRun(input: StartRunInput): StartedRun {
     const runId = makeRunId()
     const abortController = new AbortController()
@@ -168,8 +172,6 @@ export class RunOrchestrator {
 
       await emit("run.failed", { message: error instanceof Error ? error.message : String(error) })
       return { runId, status: "failed", finalAnswer: null }
-    } finally {
-      await environment.close(ctx)
     }
   }
 

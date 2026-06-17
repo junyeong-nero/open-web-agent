@@ -4,6 +4,7 @@ export interface StoredSession {
   id: string
   projectPath: string
   projectHash: string
+  environmentId: string | null
   title: string | null
   pinned: boolean
   deletedAt: string | null
@@ -11,6 +12,7 @@ export interface StoredSession {
 }
 
 export interface StoredSessionUpdate {
+  environmentId?: string | null
   title?: string | null
   pinned?: boolean
 }
@@ -45,6 +47,7 @@ export class SQLiteStore {
         id text primary key,
         project_path text not null,
         project_hash text not null,
+        environment_id text,
         title text,
         pinned integer not null default 0,
         deleted_at text,
@@ -70,6 +73,7 @@ export class SQLiteStore {
     `)
 
     this.ensureColumn("sessions", "title", "title text")
+    this.ensureColumn("sessions", "environment_id", "environment_id text")
     this.ensureColumn("sessions", "pinned", "pinned integer not null default 0")
     this.ensureColumn("sessions", "deleted_at", "deleted_at text")
   }
@@ -77,16 +81,26 @@ export class SQLiteStore {
   upsertSession(session: StoredSession): void {
     this.db
       .query(
-        `insert into sessions (id, project_path, project_hash, title, pinned, deleted_at, created_at)
-         values (?, ?, ?, ?, ?, ?, ?)
+        `insert into sessions (id, project_path, project_hash, environment_id, title, pinned, deleted_at, created_at)
+         values (?, ?, ?, ?, ?, ?, ?, ?)
          on conflict(id) do update set
            project_path = excluded.project_path,
            project_hash = excluded.project_hash,
+           environment_id = excluded.environment_id,
            title = excluded.title,
            pinned = excluded.pinned,
            deleted_at = excluded.deleted_at`,
       )
-      .run(session.id, session.projectPath, session.projectHash, session.title, session.pinned ? 1 : 0, session.deletedAt, session.createdAt)
+      .run(
+        session.id,
+        session.projectPath,
+        session.projectHash,
+        session.environmentId,
+        session.title,
+        session.pinned ? 1 : 0,
+        session.deletedAt,
+        session.createdAt,
+      )
   }
 
   getSession(id: string): StoredSession | null {
@@ -102,9 +116,12 @@ export class SQLiteStore {
     const current = this.getSession(id)
     if (!current) return null
 
+    const environmentId = update.environmentId === undefined ? current.environmentId : update.environmentId
     const title = update.title === undefined ? current.title : update.title
     const pinned = update.pinned === undefined ? current.pinned : update.pinned
-    this.db.query(`update sessions set title = ?, pinned = ? where id = ? and deleted_at is null`).run(title, pinned ? 1 : 0, id)
+    this.db
+      .query(`update sessions set environment_id = ?, title = ?, pinned = ? where id = ? and deleted_at is null`)
+      .run(environmentId, title, pinned ? 1 : 0, id)
     return this.getSession(id)
   }
 
@@ -175,6 +192,7 @@ interface SessionRow {
   id: string
   project_path: string
   project_hash: string
+  environment_id: string | null
   title: string | null
   pinned: number
   deleted_at: string | null
@@ -203,6 +221,7 @@ function toSession(row: SessionRow): StoredSession {
     id: row.id,
     projectPath: row.project_path,
     projectHash: row.project_hash,
+    environmentId: row.environment_id,
     title: row.title,
     pinned: row.pinned === 1,
     deletedAt: row.deleted_at,

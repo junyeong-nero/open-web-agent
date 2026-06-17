@@ -60,6 +60,8 @@ export interface SessionSummary {
   deletedAt: string | null
   createdAt: string
   runStatus: RunStatus
+  environmentId?: string | null
+  browser?: Observation | null
 }
 
 export interface SessionViewState {

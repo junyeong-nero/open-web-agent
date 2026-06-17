@@ -13,7 +13,7 @@ import { copySelectionToClipboard, pasteSystemClipboardText } from "./clipboard/
 import { formatSlashCommandHelp, listSlashCommandSuggestions, parseSlashCommand } from "./commands/slash-commands"
 import { mapKeyEvent } from "./keymap/keybindings"
 import { createInitialState, reduceTuiEvent } from "./state/reducer"
-import type { AgentSummary, EnvironmentSummary, ModelSummary, SessionSummary } from "./state/types"
+import type { AgentSummary, EnvironmentSummary, ModelSummary, SessionSummary, TuiState } from "./state/types"
 import { getTheme, listThemes, type TuiTheme } from "./theme/themes"
 import { selectedAgentSummary, selectedModelSummary } from "./components/session-shell-format"
 
@@ -46,7 +46,7 @@ export function App(props: AppProps) {
 
   onMount(async () => {
     const session = await resolveStartupSession()
-    setState((current) => reduceTuiEvent(current, { type: "session.created", sessionId: session.id, session }))
+    setState((current) => activateSessionSummary(current, session))
     await refreshSessions()
     await loadPlugins()
 
@@ -64,10 +64,10 @@ export function App(props: AppProps) {
     if (props.continueLast) {
       const sessions = await client.listSessions()
       const latest = sessions.sessions.at(-1)
-      if (latest) return latest
+      if (latest) return client.getSession(latest.id)
     }
 
-    const session = await client.createSession(props.projectPath)
+    const session = await client.createSession(props.projectPath, state().selectedEnvironmentId)
     return session.session
   }
 
@@ -150,8 +150,8 @@ export function App(props: AppProps) {
   })
 
   async function createNewSession() {
-    const session = await client.createSession(props.projectPath)
-    setState((current) => reduceTuiEvent(current, { type: "session.created", sessionId: session.sessionId, session: session.session }))
+    const session = await client.createSession(props.projectPath, state().selectedEnvironmentId)
+    setState((current) => activateSessionSummary(current, session.session))
     await refreshSessions()
   }
 
@@ -265,12 +265,7 @@ export function App(props: AppProps) {
     if (!session) return
     try {
       const latest = await client.getSession(session.id)
-      setState((current) =>
-        reduceTuiEvent(reduceTuiEvent(current, { type: "session.updated", session: latest }), {
-          type: "session.selected",
-          sessionId: latest.id,
-        }),
-      )
+      setState((current) => activateSessionSummary(current, latest))
       closeSessionPalette()
     } catch (error) {
       appendSystemMessage(`Failed to open session: ${formatError(error)}`)
@@ -611,6 +606,14 @@ export function App(props: AppProps) {
       ) : null}
     </box>
   )
+}
+
+function activateSessionSummary(state: TuiState, session: SessionSummary): TuiState {
+  const selected = reduceTuiEvent(reduceTuiEvent(state, { type: "session.updated", session }), {
+    type: "session.selected",
+    sessionId: session.id,
+  })
+  return session.environmentId ? reduceTuiEvent(selected, { type: "environment.selected", environmentId: session.environmentId }) : selected
 }
 
 function formatAgentStatus(selectedAgentId: string, agents: AgentSummary[]): string {

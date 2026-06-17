@@ -6,10 +6,10 @@ import type { RuntimeContext } from "@open-web-agent/core"
 import { EventBus } from "@open-web-agent/core"
 import { MockBrowserToolAdapter, MockEnvironment, sleep } from "./mock-environment"
 
-async function context(signal = new AbortController().signal, runId = "run_1"): Promise<RuntimeContext> {
+async function context(signal = new AbortController().signal, runId = "run_1", sessionId = "ses_1"): Promise<RuntimeContext> {
   return {
     session: {
-      id: "ses_1",
+      id: sessionId,
       projectPath: "/tmp/project",
       projectHash: "hash",
       createdAt: "2026-06-17T00:00:00.000Z",
@@ -46,18 +46,20 @@ describe("MockEnvironment", () => {
     })
   })
 
-  it("keeps observations isolated per run", async () => {
+  it("keeps observations isolated per session and retained across runs", async () => {
     const env = new MockEnvironment(0)
     const tools = new MockBrowserToolAdapter(env)
-    const first = await context(undefined, "run_1")
-    const second = await context(undefined, "run_2")
+    const firstRun = await context(undefined, "run_1", "ses_1")
+    const secondRunSameSession = await context(undefined, "run_2", "ses_1")
+    const otherSession = await context(undefined, "run_3", "ses_2")
 
-    await env.reset(first)
-    await tools.execute({ id: "tool_1", type: "navigate", url: "https://example.com" }, first)
-    await env.reset(second)
+    await env.reset(firstRun)
+    await tools.execute({ id: "tool_1", type: "navigate", url: "https://example.com" }, firstRun)
+    await env.reset(secondRunSameSession)
+    await env.reset(otherSession)
 
-    expect((await env.observe(first)).title).toBe("Example Domain")
-    expect((await env.observe(second)).url).toBe("about:blank")
+    expect((await env.observe(secondRunSameSession)).title).toBe("Example Domain")
+    expect((await env.observe(otherSession)).url).toBe("about:blank")
   })
 
   it("rejects sleep when the abort signal is cancelled", async () => {

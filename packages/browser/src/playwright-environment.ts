@@ -32,18 +32,36 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
 
   constructor(private readonly options: PlaywrightEnvironmentOptions = {}) {}
 
+  async openSession(ctx: RuntimeContext): Promise<void> {
+    await this.ensureState(ctx)
+  }
+
+  async attachSession(ctx: RuntimeContext): Promise<void> {
+    const state = await this.ensureState(ctx)
+    await state.page.bringToFront().catch(() => {})
+  }
+
   async reset(ctx: RuntimeContext): Promise<void> {
-    await this.close(ctx)
+    await this.attachSession(ctx)
+  }
+
+  private async ensureState(ctx: RuntimeContext): Promise<PlaywrightRunState> {
+    const key = this.keyFor(ctx)
+    const existing = this.runs.get(key)
+    if (existing) return existing
+
     const browser = await withAbort(this.launchBrowser(), ctx.abortSignal)
     const context = await browser.newContext()
     const page = await context.newPage()
-    this.runs.set(ctx.runId, {
+    const state = {
       browser,
       context,
       page,
       lastScreenshotPath: null,
       screenshotCount: 0,
-    })
+    }
+    this.runs.set(key, state)
+    return state
   }
 
   async observe(ctx: RuntimeContext): Promise<Observation> {
@@ -66,9 +84,10 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
   }
 
   async close(ctx: RuntimeContext): Promise<void> {
-    const state = this.runs.get(ctx.runId)
+    const key = this.keyFor(ctx)
+    const state = this.runs.get(key)
     if (!state) return
-    this.runs.delete(ctx.runId)
+    this.runs.delete(key)
     await state.context.close().catch(() => {})
     await state.browser.close().catch(() => {})
   }
@@ -87,9 +106,13 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
   }
 
   private requireState(ctx: RuntimeContext): PlaywrightRunState {
-    const state = this.runs.get(ctx.runId)
-    if (!state) throw new Error("PlaywrightEnvironment has not been reset")
+    const state = this.runs.get(this.keyFor(ctx))
+    if (!state) throw new Error("PlaywrightEnvironment has not been opened for the session")
     return state
+  }
+
+  private keyFor(ctx: RuntimeContext): string {
+    return ctx.session.id
   }
 
   private async readObservation(state: PlaywrightRunState): Promise<Observation> {

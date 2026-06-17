@@ -3,6 +3,7 @@ import type { PluginRegistry, RunOrchestrator, RunResult, SessionState } from "@
 import { randomUUID } from "node:crypto"
 import type { SQLiteStore } from "@open-web-agent/storage"
 import { CreateRunRequestSchema } from "../schemas/api"
+import type { BrowserSessionManager } from "../browser-session-manager"
 
 export interface RunRecord {
   runId: string
@@ -17,6 +18,7 @@ export interface RunRouteDeps {
   sessions: Map<string, SessionState>
   runs: Map<string, RunRecord>
   storage?: SQLiteStore
+  browserSessions: BrowserSessionManager
 }
 
 export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
@@ -34,25 +36,40 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
     if (parsed.data.modelId && !deps.registry.listModels().some((model) => model.id === parsed.data.modelId)) {
       return c.json({ error: "Unknown model" }, 400)
     }
-    if (
-      parsed.data.environmentId &&
-      !deps.registry.listEnvironments().some((environment) => environment.id === parsed.data.environmentId)
-    ) {
+    const environmentId = parsed.data.environmentId ?? session.environmentId ?? deps.browserSessions.defaultEnvironmentId
+    if (!deps.registry.listEnvironments().some((environment) => environment.id === environmentId)) {
       return c.json({ error: "Unknown browser" }, 400)
     }
 
+    const runSession: SessionState =
+      session.environmentId === environmentId ? session : { ...session, environmentId }
+    if (runSession !== session) {
+      deps.sessions.set(runSession.id, runSession)
+      deps.storage?.upsertSession({
+        id: runSession.id,
+        projectPath: runSession.projectPath,
+        projectHash: runSession.projectHash,
+        environmentId: runSession.environmentId ?? null,
+        title: runSession.title ?? null,
+        pinned: runSession.pinned ?? false,
+        deletedAt: runSession.deletedAt ?? null,
+        createdAt: runSession.createdAt,
+      })
+    }
+    await deps.browserSessions.attach(runSession, environmentId)
+
     const started = deps.orchestrator.startRun({
-      session,
+      session: runSession,
       prompt: parsed.data.prompt,
       agentId: parsed.data.agentId,
       modelId: parsed.data.modelId,
-      environmentId: parsed.data.environmentId,
+      environmentId,
     })
-    deps.runs.set(started.runId, { runId: started.runId, sessionId: session.id, status: "running", finalAnswer: null })
+    deps.runs.set(started.runId, { runId: started.runId, sessionId: runSession.id, status: "running", finalAnswer: null })
     const createdAt = new Date().toISOString()
     deps.storage?.upsertRun({
       id: started.runId,
-      sessionId: session.id,
+      sessionId: runSession.id,
       status: "running",
       finalAnswer: null,
       createdAt,
@@ -60,7 +77,7 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
     })
     deps.storage?.appendMessage({
       id: `msg_${randomUUID().replaceAll("-", "")}`,
-      sessionId: session.id,
+      sessionId: runSession.id,
       role: "user",
       content: parsed.data.prompt,
       createdAt,
@@ -70,13 +87,13 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
         const updatedAt = new Date().toISOString()
         deps.runs.set(started.runId, {
           runId: started.runId,
-          sessionId: session.id,
+          sessionId: runSession.id,
           status: result.status,
           finalAnswer: result.finalAnswer,
         })
         deps.storage?.upsertRun({
           id: started.runId,
-          sessionId: session.id,
+          sessionId: runSession.id,
           status: result.status,
           finalAnswer: result.finalAnswer,
           createdAt,
@@ -85,7 +102,7 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
         if (result.finalAnswer) {
           deps.storage?.appendMessage({
             id: `msg_${randomUUID().replaceAll("-", "")}`,
-            sessionId: session.id,
+            sessionId: runSession.id,
             role: "assistant",
             content: result.finalAnswer,
             createdAt: updatedAt,
@@ -97,13 +114,13 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
         const message = error instanceof Error ? error.message : String(error)
         deps.runs.set(started.runId, {
           runId: started.runId,
-          sessionId: session.id,
+          sessionId: runSession.id,
           status: "failed",
           finalAnswer: message,
         })
         deps.storage?.upsertRun({
           id: started.runId,
-          sessionId: session.id,
+          sessionId: runSession.id,
           status: "failed",
           finalAnswer: message,
           createdAt,
