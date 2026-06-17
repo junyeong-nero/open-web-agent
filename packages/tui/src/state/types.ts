@@ -1,4 +1,5 @@
 import type { Observation, RunEvent } from "@open-web-agent/core"
+import type { RunLogItem } from "../log/run-log"
 
 export interface ConversationMessage {
   role: "user" | "assistant" | "system"
@@ -31,6 +32,7 @@ export interface TuiState {
   selectedEvent: RunEvent | null
   conversation: ConversationMessage[]
   timeline: TimelineItem[]
+  runLog: RunLogItem[]
   plan: PlanItem[]
   browser: Observation
 }

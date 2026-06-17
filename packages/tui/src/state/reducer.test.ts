@@ -117,7 +117,47 @@ describe("reduceTuiEvent", () => {
     expect(state.selectedEvent).toBeNull()
     expect(state.conversation).toEqual([])
     expect(state.timeline).toEqual([])
+    expect(state.runLog).toEqual([])
     expect(state.plan).toEqual([])
     expect(state.browser.url).toBe("about:blank")
+  })
+
+  it("stores system command responses in the run log", () => {
+    const state = reduceTuiEvent(createInitialState("/tmp/project"), {
+      type: "conversation.append",
+      message: { role: "system", content: "Theme set to opencode" },
+    })
+
+    expect(state.runLog).toContainEqual({
+      id: "system-0",
+      sequence: 0,
+      kind: "system",
+      message: "Theme set to opencode",
+      accent: "warning",
+    })
+  })
+
+  it("stores linear run log entries from run events", () => {
+    const started = reduceTuiEvent(createInitialState("/tmp/project"), {
+      type: "run.event",
+      event: event("run.started", { prompt: "Open example.com" }),
+    })
+    const tool = reduceTuiEvent(started, {
+      type: "run.event",
+      event: event("browser.tool.completed", {
+        toolCall: { id: "tool_1", type: "navigate", url: "https://example.com" },
+        result: { ok: true, message: "navigated", observation: null, metadata: {} },
+      }),
+    })
+    const completed = reduceTuiEvent(tool, {
+      type: "run.event",
+      event: event("run.completed", { finalAnswer: "Example Domain" }),
+    })
+
+    expect(completed.runLog.map((item) => [item.kind, item.message])).toEqual([
+      ["user.task", "Open example.com"],
+      ["tool.result", "navigate ok navigated"],
+      ["agent.answer", "Example Domain"],
+    ])
   })
 })

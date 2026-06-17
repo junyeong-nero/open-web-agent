@@ -1,5 +1,6 @@
 import { ObservationSchema, type Observation, type RunEvent } from "@open-web-agent/core"
 import { EMPTY_OBSERVATION, type ConversationMessage, type PlanItem, type TimelineItem, type TuiState } from "./types"
+import { toRunLogItem } from "../log/run-log"
 
 export type TuiEvent =
   | { type: "session.created"; sessionId: string }
@@ -24,6 +25,7 @@ export function createInitialState(projectPath: string): TuiState {
     selectedEvent: null,
     conversation: [],
     timeline: [],
+    runLog: [],
     plan: [],
     browser: EMPTY_OBSERVATION,
   }
@@ -37,6 +39,7 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
       selectedEvent: null,
       conversation: [],
       timeline: [],
+      runLog: [],
       plan: [],
       browser: EMPTY_OBSERVATION,
     }
@@ -45,7 +48,20 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
   if (event.type === "theme.selected") return { ...state, selectedThemeId: event.themeId }
   if (event.type === "slash.details") return { ...state, inspectorVisible: !state.inspectorVisible }
   if (event.type === "conversation.append") {
-    return { ...state, conversation: [...state.conversation, event.message] }
+    const runLog =
+      event.message.role === "system"
+        ? [
+            ...state.runLog,
+            {
+              id: `system-${state.runLog.length}`,
+              sequence: state.runLog.length,
+              kind: "system",
+              message: event.message.content,
+              accent: "warning" as const,
+            },
+          ]
+        : state.runLog
+    return { ...state, conversation: [...state.conversation, event.message], runLog }
   }
 
   const runEvent = event.event
@@ -53,6 +69,7 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
     ...state,
     selectedEvent: runEvent,
     timeline: [...state.timeline, toTimelineItem(runEvent)],
+    runLog: appendRunLog(state.runLog, runEvent),
   }
 
   if (runEvent.type === "session.created") {
@@ -134,4 +151,9 @@ function readPlanItems(value: unknown, fallback: PlanItem[]): PlanItem[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
+}
+
+function appendRunLog(current: TuiState["runLog"], event: RunEvent): TuiState["runLog"] {
+  const item = toRunLogItem(event)
+  return item ? [...current, item] : current
 }
