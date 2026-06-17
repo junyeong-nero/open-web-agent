@@ -14,6 +14,7 @@ export interface PromptInputProps {
   modelActivity: ModelActivity
   runStatus: TuiState["runStatus"]
   theme: TuiTheme
+  focused?: boolean
   onChange(value: string): void
   onSubmit(): void
 }
@@ -76,7 +77,7 @@ export function PromptInput(props: PromptInputProps) {
           ref={(node) => {
             textarea = node as TextareaRenderable & { plainText?: string }
           }}
-          focused
+          focused={props.focused ?? true}
           minHeight={1}
           maxHeight={6}
           initialValue={props.value}

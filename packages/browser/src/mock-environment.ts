@@ -30,27 +30,29 @@ const EXAMPLE_OBSERVATION: Observation = {
 export class MockEnvironment implements BrowserEnvironment {
   id = "mock-browser"
   name = "Mock Browser"
-  private observation: Observation = { ...BLANK_OBSERVATION }
+  private observations = new Map<string, Observation>()
 
   constructor(readonly delayMs = 25) {}
 
-  async reset(_ctx: RuntimeContext): Promise<void> {
-    this.observation = { ...BLANK_OBSERVATION }
+  async reset(ctx: RuntimeContext): Promise<void> {
+    this.observations.set(ctx.runId, { ...BLANK_OBSERVATION })
   }
 
-  async observe(_ctx: RuntimeContext): Promise<Observation> {
-    return this.observation
+  async observe(ctx: RuntimeContext): Promise<Observation> {
+    return this.currentObservation(ctx)
   }
 
-  currentObservation(): Observation {
-    return this.observation
+  currentObservation(ctx: RuntimeContext): Observation {
+    return this.observations.get(ctx.runId) ?? { ...BLANK_OBSERVATION }
   }
 
-  updateObservation(observation: Observation): void {
-    this.observation = observation
+  updateObservation(ctx: RuntimeContext, observation: Observation): void {
+    this.observations.set(ctx.runId, observation)
   }
 
-  async close(_ctx: RuntimeContext): Promise<void> {}
+  async close(ctx: RuntimeContext): Promise<void> {
+    this.observations.delete(ctx.runId)
+  }
 }
 
 export class MockBrowserToolAdapter implements ToolAdapter {
@@ -65,7 +67,7 @@ export class MockBrowserToolAdapter implements ToolAdapter {
 
     if (call.type === "navigate") {
       const observation = { ...EXAMPLE_OBSERVATION }
-      this.environment.updateObservation(observation)
+      this.environment.updateObservation(ctx, observation)
       return { ok: true, message: "navigated", observation, metadata: { url: call.url } }
     }
 
@@ -73,20 +75,20 @@ export class MockBrowserToolAdapter implements ToolAdapter {
       const screenshotPath = join(ctx.runDir, "screenshots", "step-0001.txt")
       await mkdir(join(ctx.runDir, "screenshots"), { recursive: true })
       await writeFile(screenshotPath, "mock screenshot for Example Domain\n")
-      const observation = { ...this.environment.currentObservation(), screenshotPath }
-      this.environment.updateObservation(observation)
+      const observation = { ...this.environment.currentObservation(ctx), screenshotPath }
+      this.environment.updateObservation(ctx, observation)
       return { ok: true, message: "screenshot captured", observation, metadata: { screenshotPath } }
     }
 
     if (call.type === "extract_text") {
-      const observation = this.environment.currentObservation()
+      const observation = this.environment.currentObservation(ctx)
       return { ok: true, message: "text extracted", observation, metadata: { text: observation.text } }
     }
 
     return {
       ok: false,
       message: `Unsupported mock tool: ${call.type}`,
-      observation: this.environment.currentObservation(),
+      observation: this.environment.currentObservation(ctx),
       metadata: {},
     }
   }

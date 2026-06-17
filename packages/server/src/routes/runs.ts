@@ -6,6 +6,7 @@ import { CreateRunRequestSchema } from "../schemas/api"
 
 export interface RunRecord {
   runId: string
+  sessionId: string
   status: "running" | RunResult["status"]
   finalAnswer: string | null
 }
@@ -23,8 +24,9 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
     const parsed = CreateRunRequestSchema.safeParse(await readJson(c.req))
     if (!parsed.success) return c.json({ error: "Invalid run request" }, 400)
 
-    const session = deps.sessions.get(parsed.data.sessionId)
-    if (!session) return c.json({ error: "Unknown session" }, 404)
+    const session = deps.sessions.get(parsed.data.sessionId) ?? deps.storage?.getSession(parsed.data.sessionId)
+    if (!session || session.deletedAt) return c.json({ error: "Unknown session" }, 404)
+    deps.sessions.set(session.id, session)
 
     if (parsed.data.agentId && !deps.registry.listAgents().some((agent) => agent.id === parsed.data.agentId)) {
       return c.json({ error: "Unknown agent" }, 400)
@@ -46,7 +48,7 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
       modelId: parsed.data.modelId,
       environmentId: parsed.data.environmentId,
     })
-    deps.runs.set(started.runId, { runId: started.runId, status: "running", finalAnswer: null })
+    deps.runs.set(started.runId, { runId: started.runId, sessionId: session.id, status: "running", finalAnswer: null })
     const createdAt = new Date().toISOString()
     deps.storage?.upsertRun({
       id: started.runId,
@@ -68,6 +70,7 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
         const updatedAt = new Date().toISOString()
         deps.runs.set(started.runId, {
           runId: started.runId,
+          sessionId: session.id,
           status: result.status,
           finalAnswer: result.finalAnswer,
         })
@@ -94,6 +97,7 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
         const message = error instanceof Error ? error.message : String(error)
         deps.runs.set(started.runId, {
           runId: started.runId,
+          sessionId: session.id,
           status: "failed",
           finalAnswer: message,
         })

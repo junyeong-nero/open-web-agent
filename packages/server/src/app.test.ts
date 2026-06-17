@@ -166,7 +166,12 @@ describe("createApp", () => {
     const sessionId = await createSession(request)
 
     expect(sessionId).toStartWith("ses_")
-    expect(sessions.get(sessionId)?.projectPath).toBe("/tmp/open-web-agent-project")
+    expect(sessions.get(sessionId)).toMatchObject({
+      projectPath: "/tmp/open-web-agent-project",
+      title: null,
+      pinned: false,
+      deletedAt: null,
+    })
   })
 
   it("GET /sessions lists persisted sessions after app restart", async () => {
@@ -181,6 +186,38 @@ describe("createApp", () => {
 
     expect(body.sessions).toMatchObject([{ id: sessionId, projectPath: "/tmp/open-web-agent-project" }])
     storage.close()
+  })
+
+  it("PATCH /sessions/:sessionId renames and pins a session", async () => {
+    const { request } = await setup()
+    const sessionId = await createSession(request)
+
+    const response = await request(`/sessions/${sessionId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title: "Repo commit check", pinned: true }),
+    })
+    const body = await json<{ id: string; title: string; pinned: boolean }>(response)
+
+    expect(body).toMatchObject({ id: sessionId, title: "Repo commit check", pinned: true })
+    expect(await json<{ sessions: Array<{ id: string; title: string; pinned: boolean }> }>(await request("/sessions"))).toMatchObject({
+      sessions: [{ id: sessionId, title: "Repo commit check", pinned: true }],
+    })
+  })
+
+  it("DELETE /sessions/:sessionId soft deletes a session and rejects new runs", async () => {
+    const { request } = await setup()
+    const sessionId = await createSession(request)
+
+    expect((await request(`/sessions/${sessionId}`, { method: "DELETE" })).status).toBe(204)
+    expect(await json<{ sessions: unknown[] }>(await request("/sessions"))).toEqual({ sessions: [] })
+
+    const runResponse = await request("/runs", {
+      method: "POST",
+      body: JSON.stringify({ sessionId, prompt: "should not run" }),
+    })
+
+    expect(runResponse.status).toBe(404)
+    expect(await runResponse.json()).toEqual({ error: "Unknown session" })
   })
 
   it("POST /runs starts a mock run", async () => {

@@ -14,6 +14,9 @@ export interface TranscriptViewItem {
 }
 
 export function sessionTitle(state: TuiState): string {
+  const activeSessionTitle = state.sessions.find((session) => session.id === state.activeSessionId)?.title?.trim()
+  if (activeSessionTitle) return activeSessionTitle
+
   const latestTask = [...state.runLog]
     .reverse()
     .find((item) => item.kind === "user.task" && item.message.trim().length > 0)

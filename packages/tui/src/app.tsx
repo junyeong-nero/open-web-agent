@@ -3,6 +3,7 @@ import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useSelectionHandler } from "@opentui/solid"
 import { PromptInput } from "./components/prompt-input"
 import { SessionHeader } from "./components/session-header"
+import { filterSessions, SessionPalette, sessionDisplayName, type SessionPaletteMode } from "./components/session-palette"
 import { TranscriptPanel } from "./components/transcript-panel"
 import { createEventStream } from "./client/event-source"
 import { createServerClient } from "./client/server-client"
@@ -10,7 +11,7 @@ import { copySelectionToClipboard, pasteSystemClipboardText } from "./clipboard/
 import { formatSlashCommandHelp, parseSlashCommand } from "./commands/slash-commands"
 import { mapKeyEvent } from "./keymap/keybindings"
 import { createInitialState, reduceTuiEvent } from "./state/reducer"
-import type { AgentSummary, EnvironmentSummary, ModelSummary } from "./state/types"
+import type { AgentSummary, EnvironmentSummary, ModelSummary, SessionSummary } from "./state/types"
 import { getTheme, listThemes, type TuiTheme } from "./theme/themes"
 import { selectedAgentSummary, selectedModelSummary } from "./components/session-shell-format"
 
@@ -27,12 +28,22 @@ export function App(props: AppProps) {
   const client = createServerClient(props.serverUrl)
   const [state, setState] = createSignal(createInitialState(props.projectPath))
   const [prompt, setPrompt] = createSignal("")
+  const [sessionPaletteOpen, setSessionPaletteOpen] = createSignal(false)
+  const [sessionPaletteIndex, setSessionPaletteIndex] = createSignal(0)
+  const [sessionPaletteQuery, setSessionPaletteQuery] = createSignal("")
+  const [sessionPaletteMode, setSessionPaletteMode] = createSignal<SessionPaletteMode>("search")
+  const [sessionRenameValue, setSessionRenameValue] = createSignal("")
+  const [sessionLoadingPhase, setSessionLoadingPhase] = createSignal(0)
   let transcriptScroll: ScrollBoxRenderable | undefined
   const currentTheme = (): TuiTheme => getTheme(state().selectedThemeId)
+  const sessionSpinner = setInterval(() => setSessionLoadingPhase((phase) => (phase + 1) % 4), 140)
+
+  onCleanup(() => clearInterval(sessionSpinner))
 
   onMount(async () => {
-    const sessionId = await resolveStartupSession()
-    setState((current) => reduceTuiEvent(current, { type: "session.created", sessionId }))
+    const session = await resolveStartupSession()
+    setState((current) => reduceTuiEvent(current, { type: "session.created", sessionId: session.id, session }))
+    await refreshSessions()
     await loadPlugins()
 
     const stream = createEventStream(props.serverUrl, (event) => {
@@ -42,19 +53,23 @@ export function App(props: AppProps) {
     onCleanup(() => stream.close())
   })
 
-  async function resolveStartupSession(): Promise<string> {
+  async function resolveStartupSession(): Promise<SessionSummary> {
     if (props.sessionId) {
-      const session = await client.getSession(props.sessionId)
-      return session.id
+      return client.getSession(props.sessionId)
     }
     if (props.continueLast) {
       const sessions = await client.listSessions()
       const latest = sessions.sessions.at(-1)
-      if (latest) return latest.id
+      if (latest) return latest
     }
 
     const session = await client.createSession(props.projectPath)
-    return session.sessionId
+    return session.session
+  }
+
+  async function refreshSessions() {
+    const sessions = await client.listSessions()
+    setState((current) => reduceTuiEvent(current, { type: "sessions.loaded", sessions: sessions.sessions }))
   }
 
   async function loadPlugins() {
@@ -79,6 +94,11 @@ export function App(props: AppProps) {
   }
 
   useKeyboard((key) => {
+    if (sessionPaletteOpen()) {
+      handleSessionPaletteKey(key)
+      return
+    }
+
     const action = mapKeyEvent(key)
     if (action === "quit") exit()
     if (action === "new") void createNewSession()
@@ -111,7 +131,183 @@ export function App(props: AppProps) {
 
   async function createNewSession() {
     const session = await client.createSession(props.projectPath)
-    setState(() => reduceTuiEvent(createInitialState(props.projectPath), { type: "session.created", sessionId: session.sessionId }))
+    setState((current) => reduceTuiEvent(current, { type: "session.created", sessionId: session.sessionId, session: session.session }))
+    await refreshSessions()
+  }
+
+  async function openSessionPalette() {
+    setSessionPaletteOpen(true)
+    setSessionPaletteMode("search")
+    setSessionPaletteQuery("")
+    setSessionPaletteIndex(0)
+    await refreshSessions().catch((error) => appendSystemMessage(`Failed to load sessions: ${formatError(error)}`))
+  }
+
+  function closeSessionPalette() {
+    setSessionPaletteOpen(false)
+    setSessionPaletteMode("search")
+    setSessionRenameValue("")
+  }
+
+  function visibleSessions(): SessionSummary[] {
+    return filterSessions(state().sessions, sessionPaletteQuery())
+  }
+
+  function selectedPaletteSession(): SessionSummary | null {
+    const sessions = visibleSessions()
+    if (sessions.length === 0) return null
+    return sessions[clampedSessionPaletteIndex()] ?? null
+  }
+
+  function clampedSessionPaletteIndex(): number {
+    const count = visibleSessions().length
+    if (count === 0) return 0
+    return Math.min(sessionPaletteIndex(), count - 1)
+  }
+
+  function handleSessionPaletteKey(key: {
+    name?: string
+    ctrl?: boolean
+    meta?: boolean
+    super?: boolean
+    sequence?: string
+    preventDefault?: () => void
+  }) {
+    key.preventDefault?.()
+    if (key.name === "escape" || key.name === "esc") {
+      if (sessionPaletteMode() === "rename") {
+        setSessionPaletteMode("search")
+        setSessionRenameValue("")
+        return
+      }
+      closeSessionPalette()
+      return
+    }
+
+    if (sessionPaletteMode() === "rename") {
+      if (key.name === "return" || key.name === "enter" || key.name === "linefeed") {
+        void renameSelectedSession()
+        return
+      }
+      if (key.name === "backspace" || key.sequence === "\u007f") {
+        setSessionRenameValue((value) => value.slice(0, -1))
+        return
+      }
+      const text = printableKeyText(key)
+      if (text) setSessionRenameValue((value) => value + text)
+      return
+    }
+
+    if (key.name === "up" || isControlKey(key, "p", "\u0010")) {
+      moveSessionSelection(-1)
+      return
+    }
+    if (key.name === "down") {
+      moveSessionSelection(1)
+      return
+    }
+    if (isControlKey(key, "d", "\u0004")) {
+      void deleteSelectedSession()
+      return
+    }
+    if (isControlKey(key, "f", "\u0006")) {
+      void toggleSelectedSessionPin()
+      return
+    }
+    if (isControlKey(key, "n", "\u000e")) {
+      beginRenameSelectedSession()
+      return
+    }
+    if (key.name === "return" || key.name === "enter" || key.name === "linefeed") {
+      void selectPaletteSession()
+      return
+    }
+    if (key.name === "backspace" || key.sequence === "\u007f") {
+      setSessionPaletteQuery((query) => query.slice(0, -1))
+      setSessionPaletteIndex(0)
+      return
+    }
+    const text = printableKeyText(key)
+    if (text) {
+      setSessionPaletteQuery((query) => query + text)
+      setSessionPaletteIndex(0)
+    }
+  }
+
+  function moveSessionSelection(delta: number) {
+    const count = visibleSessions().length
+    if (count === 0) return
+    setSessionPaletteIndex((index) => (index + delta + count) % count)
+  }
+
+  async function selectPaletteSession() {
+    const session = selectedPaletteSession()
+    if (!session) return
+    try {
+      const latest = await client.getSession(session.id)
+      setState((current) =>
+        reduceTuiEvent(reduceTuiEvent(current, { type: "session.updated", session: latest }), {
+          type: "session.selected",
+          sessionId: latest.id,
+        }),
+      )
+      closeSessionPalette()
+    } catch (error) {
+      appendSystemMessage(`Failed to open session: ${formatError(error)}`)
+    }
+  }
+
+  function beginRenameSelectedSession() {
+    const session = selectedPaletteSession()
+    if (!session) return
+    setSessionPaletteMode("rename")
+    setSessionRenameValue(session.title ?? sessionDisplayName(session))
+  }
+
+  async function renameSelectedSession() {
+    const session = selectedPaletteSession()
+    if (!session) return
+    const title = sessionRenameValue().trim()
+    try {
+      const updated = await client.updateSession(session.id, { title: title.length > 0 ? title : null })
+      setState((current) => reduceTuiEvent(current, { type: "session.updated", session: updated }))
+      setSessionPaletteMode("search")
+      setSessionRenameValue("")
+    } catch (error) {
+      appendSystemMessage(`Failed to rename session: ${formatError(error)}`)
+    }
+  }
+
+  async function toggleSelectedSessionPin() {
+    const session = selectedPaletteSession()
+    if (!session) return
+    try {
+      const updated = await client.updateSession(session.id, { pinned: !session.pinned })
+      setState((current) => reduceTuiEvent(current, { type: "session.updated", session: updated }))
+    } catch (error) {
+      appendSystemMessage(`Failed to pin session: ${formatError(error)}`)
+    }
+  }
+
+  async function deleteSelectedSession() {
+    const session = selectedPaletteSession()
+    if (!session) return
+    try {
+      await client.deleteSession(session.id)
+      setState((current) => reduceTuiEvent(current, { type: "session.deleted", sessionId: session.id }))
+      setSessionPaletteIndex((index) => Math.max(0, Math.min(index, visibleSessions().length - 1)))
+    } catch (error) {
+      appendSystemMessage(`Failed to delete session: ${formatError(error)}`)
+    }
+  }
+
+  function appendSystemMessage(content: string) {
+    setState((current) =>
+      reduceTuiEvent(current, {
+        type: "conversation.append",
+        message: { role: "system", content },
+      }),
+    )
   }
 
   async function cancelOrExit() {
@@ -150,6 +346,11 @@ export function App(props: AppProps) {
     if (command.kind === "new") {
       setPrompt("")
       await createNewSession()
+      return
+    }
+    if (command.kind === "session") {
+      setPrompt("")
+      await openSessionPalette()
       return
     }
     if (command.kind === "stop") {
@@ -338,6 +539,18 @@ export function App(props: AppProps) {
   return (
     <box flexDirection="column" width="100%" height="100%" paddingX={2} paddingY={1} rowGap={1} backgroundColor={currentTheme().surface}>
       <SessionHeader state={state()} theme={currentTheme()} />
+      {sessionPaletteOpen() ? (
+        <SessionPalette
+          sessions={state().sessions}
+          activeSessionId={state().activeSessionId}
+          selectedIndex={clampedSessionPaletteIndex()}
+          query={sessionPaletteQuery()}
+          mode={sessionPaletteMode()}
+          renameValue={sessionRenameValue()}
+          loadingPhase={sessionLoadingPhase()}
+          theme={currentTheme()}
+        />
+      ) : null}
       <TranscriptPanel
         state={state()}
         theme={currentTheme()}
@@ -352,6 +565,7 @@ export function App(props: AppProps) {
         modelActivity={state().modelActivity}
         runStatus={state().runStatus}
         theme={currentTheme()}
+        focused={!sessionPaletteOpen()}
         onChange={setPrompt}
         onSubmit={submitPrompt}
       />
@@ -394,4 +608,19 @@ function formatAvailableThemes(): string {
   return `Available themes: ${listThemes()
     .map((theme) => theme.id)
     .join(", ")}`
+}
+
+function printableKeyText(key: { sequence?: string; ctrl?: boolean; meta?: boolean; super?: boolean }): string | null {
+  if (key.ctrl || key.meta || key.super) return null
+  if (!key.sequence || key.sequence.length !== 1) return null
+  if (key.sequence < " " || key.sequence === "\u007f") return null
+  return key.sequence
+}
+
+function isControlKey(key: { name?: string; ctrl?: boolean; sequence?: string }, name: string, sequence: string): boolean {
+  return (key.ctrl === true && key.name === name) || key.sequence === sequence
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

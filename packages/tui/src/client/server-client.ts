@@ -20,19 +20,36 @@ export interface PluginList {
   environments: PluginSummary[]
 }
 
+export interface SessionSummary {
+  id: string
+  projectPath: string
+  projectHash: string
+  title: string | null
+  pinned: boolean
+  deletedAt: string | null
+  createdAt: string
+  runStatus: "idle" | "running" | "completed" | "failed" | "cancelled"
+}
+
 export function createServerClient(baseUrl: string) {
   return {
     async health(): Promise<{ ok: true }> {
       return request(`${baseUrl}/health`)
     },
-    async createSession(projectPath: string): Promise<{ sessionId: string }> {
+    async createSession(projectPath: string): Promise<{ sessionId: string; session: SessionSummary }> {
       return request(`${baseUrl}/sessions`, { method: "POST", body: JSON.stringify({ projectPath }) })
     },
-    async listSessions(): Promise<{ sessions: Array<{ id: string; projectPath: string; createdAt: string }> }> {
+    async listSessions(): Promise<{ sessions: SessionSummary[] }> {
       return request(`${baseUrl}/sessions`)
     },
-    async getSession(sessionId: string): Promise<{ id: string; projectPath: string; createdAt: string }> {
+    async getSession(sessionId: string): Promise<SessionSummary> {
       return request(`${baseUrl}/sessions/${sessionId}`)
+    },
+    async updateSession(sessionId: string, update: { title?: string | null; pinned?: boolean }): Promise<SessionSummary> {
+      return request(`${baseUrl}/sessions/${sessionId}`, { method: "PATCH", body: JSON.stringify(update) })
+    },
+    async deleteSession(sessionId: string): Promise<void> {
+      await request<void>(`${baseUrl}/sessions/${sessionId}`, { method: "DELETE" })
     },
     async submitRun(
       sessionId: string,
@@ -65,5 +82,6 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
   })
   if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`)
+  if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
 }

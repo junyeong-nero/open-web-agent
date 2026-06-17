@@ -10,6 +10,10 @@ describe("parseSlashCommand", () => {
     expect(parseSlashCommand("/clear")).toEqual({ kind: "clear" })
   })
 
+  it("recognizes session command", () => {
+    expect(parseSlashCommand("/session")).toEqual({ kind: "session" })
+  })
+
   it("recognizes agent command without an id", () => {
     expect(parseSlashCommand("/agent")).toEqual({ kind: "agent", agentId: null })
   })
@@ -49,6 +53,7 @@ describe("listSlashCommandSuggestions", () => {
       "/help",
       "/clear",
       "/details",
+      "/session",
       "/agent",
       "/model",
       "/browser",
@@ -91,6 +96,8 @@ describe("completeSlashCommand", () => {
 
 describe("formatSlashCommandHelp", () => {
   it("formats help text from displayed slash commands", () => {
-    expect(formatSlashCommandHelp()).toBe("/help /clear /details /agent [id] /model [id] /browser [id] /themes [id] /new /stop /quit")
+    expect(formatSlashCommandHelp()).toBe(
+      "/help /clear /details /session /agent [id] /model [id] /browser [id] /themes [id] /new /stop /quit",
+    )
   })
 })

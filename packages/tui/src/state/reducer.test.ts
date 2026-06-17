@@ -28,6 +28,121 @@ describe("reduceTuiEvent", () => {
     })
   })
 
+  it("stores session summaries and keeps pinned sessions first", () => {
+    const state = reduceTuiEvent(createInitialState("/tmp/project"), {
+      type: "sessions.loaded",
+      sessions: [
+        {
+          id: "ses_1",
+          projectPath: "/tmp/project",
+          projectHash: "hash",
+          title: "Repo summary",
+          pinned: false,
+          deletedAt: null,
+          createdAt: "2026-06-17T00:00:00.000Z",
+          runStatus: "idle",
+        },
+        {
+          id: "ses_2",
+          projectPath: "/tmp/project",
+          projectHash: "hash",
+          title: "Release triage",
+          pinned: true,
+          deletedAt: null,
+          createdAt: "2026-06-17T00:01:00.000Z",
+          runStatus: "idle",
+        },
+      ],
+    })
+
+    expect(state.sessions.map((session) => session.id)).toEqual(["ses_2", "ses_1"])
+    expect(state.sessions[0]).toMatchObject({ title: "Release triage", pinned: true })
+  })
+
+  it("tracks background session runs without changing the active transcript", () => {
+    const withSessions = reduceTuiEvent(createInitialState("/tmp/project"), {
+      type: "sessions.loaded",
+      sessions: [
+        {
+          id: "ses_1",
+          projectPath: "/tmp/project",
+          projectHash: "hash",
+          title: "Active",
+          pinned: false,
+          deletedAt: null,
+          createdAt: "2026-06-17T00:00:00.000Z",
+          runStatus: "idle",
+        },
+        {
+          id: "ses_2",
+          projectPath: "/tmp/project",
+          projectHash: "hash",
+          title: "Background",
+          pinned: false,
+          deletedAt: null,
+          createdAt: "2026-06-17T00:01:00.000Z",
+          runStatus: "idle",
+        },
+      ],
+    })
+    const active = reduceTuiEvent(withSessions, { type: "session.selected", sessionId: "ses_1" })
+
+    const state = reduceTuiEvent(active, {
+      type: "run.event",
+      event: {
+        ...event("run.started", { prompt: "background task" }),
+        id: "evt_background_started",
+        runId: "run_2",
+        sessionId: "ses_2",
+      },
+    })
+
+    expect(state.activeSessionId).toBe("ses_1")
+    expect(state.runLog).toEqual([])
+    expect(state.runningSessionIds).toEqual(["ses_2"])
+    expect(state.sessions.find((session) => session.id === "ses_2")?.runStatus).toBe("running")
+  })
+
+  it("restores a session view when switching sessions", () => {
+    const withSessions = reduceTuiEvent(createInitialState("/tmp/project"), {
+      type: "sessions.loaded",
+      sessions: [
+        {
+          id: "ses_1",
+          projectPath: "/tmp/project",
+          projectHash: "hash",
+          title: "First",
+          pinned: false,
+          deletedAt: null,
+          createdAt: "2026-06-17T00:00:00.000Z",
+          runStatus: "idle",
+        },
+        {
+          id: "ses_2",
+          projectPath: "/tmp/project",
+          projectHash: "hash",
+          title: "Second",
+          pinned: false,
+          deletedAt: null,
+          createdAt: "2026-06-17T00:01:00.000Z",
+          runStatus: "idle",
+        },
+      ],
+    })
+    const first = reduceTuiEvent(withSessions, { type: "session.selected", sessionId: "ses_1" })
+    const withFirstLog = reduceTuiEvent(first, { type: "run.event", event: event("run.started", { prompt: "first task" }) })
+    const second = reduceTuiEvent(withFirstLog, { type: "session.selected", sessionId: "ses_2" })
+    const withSecondLog = reduceTuiEvent(second, {
+      type: "run.event",
+      event: { ...event("run.started", { prompt: "second task" }), id: "evt_second_started", runId: "run_2", sessionId: "ses_2" },
+    })
+
+    const restored = reduceTuiEvent(withSecondLog, { type: "session.selected", sessionId: "ses_1" })
+
+    expect(restored.runLog.map((item) => item.message)).toEqual(["first task"])
+    expect(restored.runStatus).toBe("running")
+  })
+
   it("adds timeline item for browser action events", () => {
     const state = reduceTuiEvent(createInitialState("/tmp/project"), {
       type: "run.event",

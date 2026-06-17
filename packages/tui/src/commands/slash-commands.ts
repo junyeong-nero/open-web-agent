@@ -3,6 +3,7 @@ export type SlashCommand =
   | { kind: "help" }
   | { kind: "clear" }
   | { kind: "details" }
+  | { kind: "session" }
   | { kind: "agent"; agentId: string | null }
   | { kind: "model"; modelId: string | null }
   | { kind: "browser"; environmentId: string | null }
@@ -26,6 +27,7 @@ const commandDefinitions = [
   { name: "/help", kind: "help", description: "Show available commands", argumentHint: null },
   { name: "/clear", kind: "clear", description: "Clear the current session view", argumentHint: null },
   { name: "/details", kind: "details", description: "Toggle the details inspector", argumentHint: null },
+  { name: "/session", kind: "session", description: "Open session manager", argumentHint: null },
   { name: "/agent", kind: "agent", description: "Switch agent", argumentHint: "[id]" },
   { name: "/model", kind: "model", description: "Switch model", argumentHint: "[id]" },
   { name: "/browser", kind: "browser", description: "Switch browser", argumentHint: "[id]" },

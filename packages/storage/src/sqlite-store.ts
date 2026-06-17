@@ -4,7 +4,15 @@ export interface StoredSession {
   id: string
   projectPath: string
   projectHash: string
+  title: string | null
+  pinned: boolean
+  deletedAt: string | null
   createdAt: string
+}
+
+export interface StoredSessionUpdate {
+  title?: string | null
+  pinned?: boolean
 }
 
 export interface StoredRun {
@@ -37,6 +45,9 @@ export class SQLiteStore {
         id text primary key,
         project_path text not null,
         project_hash text not null,
+        title text,
+        pinned integer not null default 0,
+        deleted_at text,
         created_at text not null
       );
 
@@ -57,27 +68,51 @@ export class SQLiteStore {
         created_at text not null
       );
     `)
+
+    this.ensureColumn("sessions", "title", "title text")
+    this.ensureColumn("sessions", "pinned", "pinned integer not null default 0")
+    this.ensureColumn("sessions", "deleted_at", "deleted_at text")
   }
 
   upsertSession(session: StoredSession): void {
     this.db
       .query(
-        `insert into sessions (id, project_path, project_hash, created_at)
-         values (?, ?, ?, ?)
+        `insert into sessions (id, project_path, project_hash, title, pinned, deleted_at, created_at)
+         values (?, ?, ?, ?, ?, ?, ?)
          on conflict(id) do update set
            project_path = excluded.project_path,
-           project_hash = excluded.project_hash`,
+           project_hash = excluded.project_hash,
+           title = excluded.title,
+           pinned = excluded.pinned,
+           deleted_at = excluded.deleted_at`,
       )
-      .run(session.id, session.projectPath, session.projectHash, session.createdAt)
+      .run(session.id, session.projectPath, session.projectHash, session.title, session.pinned ? 1 : 0, session.deletedAt, session.createdAt)
   }
 
   getSession(id: string): StoredSession | null {
-    const row = this.db.query(`select * from sessions where id = ?`).get(id) as SessionRow | null
+    const row = this.db.query(`select * from sessions where id = ? and deleted_at is null`).get(id) as SessionRow | null
     return row ? toSession(row) : null
   }
 
   listSessions(): StoredSession[] {
-    return (this.db.query(`select * from sessions order by created_at asc`).all() as SessionRow[]).map(toSession)
+    return (this.db.query(`select * from sessions where deleted_at is null order by created_at asc`).all() as SessionRow[]).map(toSession)
+  }
+
+  updateSession(id: string, update: StoredSessionUpdate): StoredSession | null {
+    const current = this.getSession(id)
+    if (!current) return null
+
+    const title = update.title === undefined ? current.title : update.title
+    const pinned = update.pinned === undefined ? current.pinned : update.pinned
+    this.db.query(`update sessions set title = ?, pinned = ? where id = ? and deleted_at is null`).run(title, pinned ? 1 : 0, id)
+    return this.getSession(id)
+  }
+
+  deleteSession(id: string, deletedAt: string): boolean {
+    const result = this.db
+      .query(`update sessions set deleted_at = ? where id = ? and deleted_at is null`)
+      .run(deletedAt, id) as { changes: number }
+    return result.changes > 0
   }
 
   upsertRun(run: StoredRun): void {
@@ -128,12 +163,21 @@ export class SQLiteStore {
   close(): void {
     this.db.close()
   }
+
+  private ensureColumn(table: string, column: string, definition: string): void {
+    const columns = this.db.query(`pragma table_info(${table})`).all() as Array<{ name: string }>
+    if (columns.some((info) => info.name === column)) return
+    this.db.exec(`alter table ${table} add column ${definition}`)
+  }
 }
 
 interface SessionRow {
   id: string
   project_path: string
   project_hash: string
+  title: string | null
+  pinned: number
+  deleted_at: string | null
   created_at: string
 }
 
@@ -159,6 +203,9 @@ function toSession(row: SessionRow): StoredSession {
     id: row.id,
     projectPath: row.project_path,
     projectHash: row.project_hash,
+    title: row.title,
+    pinned: row.pinned === 1,
+    deletedAt: row.deleted_at,
     createdAt: row.created_at,
   }
 }
