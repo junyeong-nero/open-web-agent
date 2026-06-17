@@ -6,6 +6,7 @@ export type TuiEvent =
   | { type: "run.event"; event: RunEvent }
   | { type: "slash.details" }
   | { type: "conversation.append"; message: ConversationMessage }
+  | { type: "state.clear" }
   | { type: "state.reset"; projectPath: string }
 
 export function createInitialState(projectPath: string): TuiState {
@@ -25,6 +26,16 @@ export function createInitialState(projectPath: string): TuiState {
 
 export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
   if (event.type === "state.reset") return createInitialState(event.projectPath)
+  if (event.type === "state.clear") {
+    return {
+      ...state,
+      selectedEvent: null,
+      conversation: [],
+      timeline: [],
+      plan: [],
+      browser: EMPTY_OBSERVATION,
+    }
+  }
   if (event.type === "session.created") return { ...state, activeSessionId: event.sessionId, runStatus: "idle" }
   if (event.type === "slash.details") return { ...state, inspectorVisible: !state.inspectorVisible }
   if (event.type === "conversation.append") {

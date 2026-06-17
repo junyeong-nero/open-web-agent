@@ -1,6 +1,7 @@
 export type SlashCommand =
   | { kind: "prompt"; value: string }
   | { kind: "help" }
+  | { kind: "clear" }
   | { kind: "details" }
   | { kind: "new" }
   | { kind: "stop" }
@@ -9,6 +10,7 @@ export type SlashCommand =
 
 const commands = new Map<string, SlashCommand["kind"]>([
   ["/help", "help"],
+  ["/clear", "clear"],
   ["/details", "details"],
   ["/new", "new"],
   ["/stop", "stop"],
