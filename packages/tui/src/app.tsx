@@ -1,4 +1,5 @@
 import { createSignal, onCleanup, onMount } from "solid-js"
+import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer } from "@opentui/solid"
 import { PromptInput } from "./components/prompt-input"
 import { SessionHeader } from "./components/session-header"
@@ -24,6 +25,7 @@ export function App(props: AppProps) {
   const client = createServerClient(props.serverUrl)
   const [state, setState] = createSignal(createInitialState(props.projectPath))
   const [prompt, setPrompt] = createSignal("")
+  let transcriptScroll: ScrollBoxRenderable | undefined
   const currentTheme = (): TuiTheme => getTheme(state().selectedThemeId)
 
   onMount(async () => {
@@ -79,6 +81,10 @@ export function App(props: AppProps) {
     if (action === "quit") exit()
     if (action === "new") void createNewSession()
     if (action === "cancel-or-quit") void cancelOrExit()
+    if (action === "scroll-page-up") transcriptScroll?.scrollBy(-0.5, "viewport")
+    if (action === "scroll-page-down") transcriptScroll?.scrollBy(0.5, "viewport")
+    if (action === "scroll-top") transcriptScroll?.scrollBy(-1, "content")
+    if (action === "scroll-bottom") transcriptScroll?.scrollBy(1, "content")
     if (action === "submit") void submitPrompt()
   })
 
@@ -311,7 +317,13 @@ export function App(props: AppProps) {
   return (
     <box flexDirection="column" width="100%" height="100%" backgroundColor={currentTheme().surface}>
       <SessionHeader state={state()} theme={currentTheme()} />
-      <TranscriptPanel state={state()} theme={currentTheme()} />
+      <TranscriptPanel
+        state={state()}
+        theme={currentTheme()}
+        scrollRef={(node) => {
+          transcriptScroll = node
+        }}
+      />
       <PromptInput
         value={prompt()}
         agentId={state().selectedAgentId}

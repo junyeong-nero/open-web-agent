@@ -1,4 +1,6 @@
+/** @jsxImportSource @opentui/solid */
 import { For } from "solid-js"
+import type { ScrollBoxRenderable } from "@opentui/core"
 import type { TuiState } from "../state/types"
 import { themeColor, type TuiTheme } from "../theme/themes"
 import { toTranscriptViewItem, type TranscriptViewItem } from "./session-shell-format"
@@ -6,19 +8,33 @@ import { toTranscriptViewItem, type TranscriptViewItem } from "./session-shell-f
 export interface TranscriptPanelProps {
   state: TuiState
   theme: TuiTheme
+  scrollRef?: (node: ScrollBoxRenderable) => void
 }
 
 export function TranscriptPanel(props: TranscriptPanelProps) {
   const items = () => props.state.runLog.map(toTranscriptViewItem)
 
   return (
-    <box flexGrow={1} paddingX={2} paddingY={1} backgroundColor={props.theme.surface} rowGap={1}>
+    <scrollbox
+      id="transcript-scroll"
+      ref={props.scrollRef}
+      flexGrow={1}
+      paddingX={2}
+      paddingY={1}
+      backgroundColor={props.theme.surface}
+      contentOptions={{ rowGap: 1 }}
+      focusable={false}
+      stickyScroll={true}
+      stickyStart="bottom"
+      scrollY={true}
+      scrollX={false}
+    >
       {items().length === 0 ? (
         <text fg={props.theme.textMuted}>Waiting for a task. Type in the prompt below.</text>
       ) : (
         <For each={items()}>{(item) => renderTranscriptItem(item, props.theme)}</For>
       )}
-    </box>
+    </scrollbox>
   )
 }
 
