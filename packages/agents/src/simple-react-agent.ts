@@ -50,7 +50,8 @@ export class SimpleReActAgent implements AgentPlugin {
       }
     }
 
-    throw new Error(`Invalid model decision after retry. Raw output: ${lastRaw}`)
+    const errorDetail = lastError ? ` Last error: ${lastError}` : ""
+    throw new Error(`Invalid model decision after retry.${errorDetail} Raw output: ${lastRaw}`)
   }
 
   async finalize(state: AgentState, _ctx: RuntimeContext): Promise<string> {
@@ -71,6 +72,8 @@ export class SimpleReActAgent implements AgentPlugin {
             '{"type":"browser_actions","thought":string|null,"actions":[{"id":string,"kind":string,"reason":string|null,"requiresApproval":boolean,"toolCalls":[...]}]}',
             '{"type":"final_answer","thought":string|null,"finalAnswer":string,"confidence":number|null}',
             "Browser tool calls must be nested under browser_actions.actions[].toolCalls.",
+            'Type example: {"id":"tool_1","type":"type","target":{"selector":"input[name=\\"query\\"]"},"value":"tomorrow weather"}',
+            'Click example: {"id":"tool_2","type":"click","target":{"selector":"button[type=\\"submit\\"]"}}',
           ].join("\n"),
         },
         {
@@ -271,6 +274,14 @@ function normalizeToolCall(toolCall: unknown, actionId: string, toolIndex: numbe
   }
   delete normalized.ref
 
+  if (isTargetedToolCallType(normalized.type) && typeof normalized.selector === "string" && normalized.selector.length > 0) {
+    const target = isRecord(normalized.target) ? normalized.target : {}
+    if (typeof target.selector !== "string" || target.selector.length === 0) {
+      normalized.target = { ...target, selector: normalized.selector }
+    }
+  }
+  delete normalized.selector
+
   if (normalized.type === "type" && typeof normalized.value !== "string" && typeof normalized.text === "string") {
     normalized.value = normalized.text
   }
@@ -283,6 +294,10 @@ function normalizeToolCall(toolCall: unknown, actionId: string, toolIndex: numbe
   }
 
   return normalized
+}
+
+function isTargetedToolCallType(value: unknown): value is "click" | "type" {
+  return value === "click" || value === "type"
 }
 
 function selectorForRef(ref: string): string {
