@@ -1,5 +1,10 @@
 import { loadPythonAgentManifests, MockAgent, PlanActAgent, SeeActAgent, SimpleReActAgent } from "@open-web-agent/agents"
-import { MockEnvironment, PlaywrightEnvironment } from "@open-web-agent/browser"
+import {
+  MockBrowserToolAdapter,
+  MockEnvironment,
+  PlaywrightBrowserToolAdapter,
+  PlaywrightEnvironment,
+} from "@open-web-agent/browser"
 import {
   EventBus,
   PluginRegistry,
@@ -42,6 +47,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   const eventBus = new EventBus()
   const registry = new PluginRegistry()
   const modelConfig = readModelConfig(options.env ?? process.env, { configPath: options.configPath })
+  const modelCallTimeoutMs = readModelCallTimeoutMs(options.env ?? process.env)
 
   registry.registerAgent(new MockAgent())
   if (modelConfig.openaiApiKey) {
@@ -69,15 +75,24 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
 
   const defaultModelId = registry.listModels()[0]?.id
   const selectedModel = new RuntimeSelectedModel(registry, defaultModelId)
-  registry.registerAgent(new SimpleReActAgent({ model: selectedModel, modelName: modelConfig.defaultModel }))
-  registry.registerAgent(new SeeActAgent({ model: selectedModel, modelName: modelConfig.defaultModel }))
-  registry.registerAgent(new PlanActAgent({ model: selectedModel, modelName: modelConfig.defaultModel }))
+  const modelBackedAgentOptions = {
+    model: selectedModel,
+    modelName: modelConfig.defaultModel,
+    timeoutMs: modelCallTimeoutMs,
+  }
+  registry.registerAgent(new SimpleReActAgent(modelBackedAgentOptions))
+  registry.registerAgent(new SeeActAgent(modelBackedAgentOptions))
+  registry.registerAgent(new PlanActAgent(modelBackedAgentOptions))
   for (const agent of await loadPythonAgentManifests(options.agentsDir ?? join(home, "agents"))) {
     registry.registerAgent(agent)
   }
 
-  registry.registerEnvironment(new MockEnvironment(options.environmentDelayMs))
-  registry.registerEnvironment(new PlaywrightEnvironment())
+  const mockEnvironment = new MockEnvironment(options.environmentDelayMs)
+  const playwrightEnvironment = new PlaywrightEnvironment()
+  registry.registerEnvironment(mockEnvironment)
+  registry.registerToolAdapter(new MockBrowserToolAdapter(mockEnvironment))
+  registry.registerEnvironment(playwrightEnvironment)
+  registry.registerToolAdapter(new PlaywrightBrowserToolAdapter(playwrightEnvironment))
 
   const sessions = new Map<string, SessionState>()
   const orchestrator = new RunOrchestrator({
@@ -110,6 +125,17 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
       storage.close()
     },
   }
+}
+
+function readModelCallTimeoutMs(env: NodeJS.ProcessEnv): number | undefined {
+  const value = env.OPEN_WEB_AGENT_MODEL_TIMEOUT_MS
+  if (!value) return undefined
+
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error("Invalid OPEN_WEB_AGENT_MODEL_TIMEOUT_MS: must be a positive integer")
+  }
+  return parsed
 }
 
 class RuntimeSelectedModel implements ModelPlugin {

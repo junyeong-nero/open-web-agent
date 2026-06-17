@@ -3,17 +3,15 @@ import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { MockAgent } from "@open-web-agent/agents"
-import { MockEnvironment } from "@open-web-agent/browser"
+import { MockBrowserToolAdapter, MockEnvironment } from "@open-web-agent/browser"
 import {
   EventBus,
   PluginRegistry,
   RunOrchestrator,
-  type ActionResult,
   type AgentDecision,
   type AgentPlugin,
   type AgentState,
   type BrowserEnvironment,
-  type BrowserToolCall,
   type ModelPlugin,
   type ModelRequest,
   type ModelResponse,
@@ -34,7 +32,9 @@ async function setup(delayMs = 0, storage?: SQLiteStore, includeAlternateAgent =
     registry.registerModel(new TestModel())
     registry.registerEnvironment(new AlternateEnvironment())
   }
-  registry.registerEnvironment(new MockEnvironment(delayMs))
+  const mockEnvironment = new MockEnvironment(delayMs)
+  registry.registerEnvironment(mockEnvironment)
+  registry.registerToolAdapter(new MockBrowserToolAdapter(mockEnvironment))
 
   const orchestrator = new RunOrchestrator({
     home: await mkdtemp(join(tmpdir(), "owa-server-")),
@@ -119,10 +119,6 @@ class AlternateEnvironment implements BrowserEnvironment {
 
   async observe(_ctx: RuntimeContext): Promise<Observation> {
     return { url: "about:alternate", title: "Alternate", text: null, screenshotPath: null, interactiveElements: [], metadata: {} }
-  }
-
-  async execute(_call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
-    return { ok: true, message: `environment=${ctx.environmentId}`, observation: await this.observe(ctx), metadata: {} }
   }
 
   async close(_ctx: RuntimeContext): Promise<void> {}

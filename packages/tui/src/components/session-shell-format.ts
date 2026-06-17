@@ -1,5 +1,5 @@
 import type { RunLogItem } from "../log/run-log"
-import type { ModelActivity, ModelSummary, TuiState } from "../state/types"
+import type { AgentSummary, ModelActivity, ModelSummary, TuiState } from "../state/types"
 import type { ThemeAccent } from "../theme/themes"
 
 export type TranscriptBlock = "user" | "assistant" | "tool" | "status" | "system"
@@ -45,13 +45,22 @@ export function selectedModelSummary(state: TuiState): ModelSummary | null {
   return state.availableModels.find((model) => model.id === state.selectedModelId) ?? null
 }
 
-export function promptMeta(model: ModelSummary | null): string {
-  if (!model) return "Build · no model · medium"
+export function selectedAgentSummary(state: TuiState): AgentSummary | null {
+  if (!state.selectedAgentId) return null
+  return (
+    state.availableAgents.find((agent) => agent.id === state.selectedAgentId) ?? {
+      id: state.selectedAgentId,
+      name: state.selectedAgentId,
+      description: "",
+    }
+  )
+}
 
-  const modelName = model.modelName ?? model.name
-  const provider = model.name || model.provider
-  const reasoningEffort = model.reasoningEffort ?? "medium"
-  return `Build · ${modelName} ${provider} · ${reasoningEffort}`
+export function promptMeta(agent: AgentSummary | null, model: ModelSummary | null): string {
+  const agentName = displayValue(compactAgentName(agent?.name), "no agent")
+  const modelName = displayValue(model?.modelName ?? model?.name, "no model")
+  const reasoningEffort = displayValue(model?.reasoningEffort, null)
+  return [agentName, modelName, reasoningEffort].filter((value): value is string => value != null).join(" / ")
 }
 
 export function promptHint(runStatus: TuiState["runStatus"], contextUsage: string): string {
@@ -89,4 +98,19 @@ function formatTokenCount(value: number): string {
 function sumNullable(left: number | null | undefined, right: number | null | undefined): number | null {
   if (left == null && right == null) return null
   return (left ?? 0) + (right ?? 0)
+}
+
+function displayValue(value: string | null | undefined, fallback: string): string
+function displayValue(value: string | null | undefined, fallback: null): string | null
+function displayValue(value: string | null | undefined, fallback: string | null): string | null {
+  const trimmed = value?.trim()
+  return trimmed && trimmed.length > 0 ? trimmed : fallback
+}
+
+function compactAgentName(value: string | null | undefined): string | null {
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+
+  const compact = trimmed.replace(/\s+Agent$/i, "")
+  return compact.length > 0 ? compact : trimmed
 }

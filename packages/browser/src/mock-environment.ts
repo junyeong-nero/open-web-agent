@@ -1,6 +1,13 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import type { ActionResult, BrowserEnvironment, BrowserToolCall, Observation, RuntimeContext } from "@open-web-agent/core"
+import type {
+  ActionResult,
+  BrowserEnvironment,
+  BrowserToolCall,
+  Observation,
+  RuntimeContext,
+  ToolAdapter,
+} from "@open-web-agent/core"
 
 const BLANK_OBSERVATION: Observation = {
   url: "about:blank",
@@ -25,7 +32,7 @@ export class MockEnvironment implements BrowserEnvironment {
   name = "Mock Browser"
   private observation: Observation = { ...BLANK_OBSERVATION }
 
-  constructor(private readonly delayMs = 25) {}
+  constructor(readonly delayMs = 25) {}
 
   async reset(_ctx: RuntimeContext): Promise<void> {
     this.observation = { ...BLANK_OBSERVATION }
@@ -35,30 +42,54 @@ export class MockEnvironment implements BrowserEnvironment {
     return this.observation
   }
 
+  currentObservation(): Observation {
+    return this.observation
+  }
+
+  updateObservation(observation: Observation): void {
+    this.observation = observation
+  }
+
+  async close(_ctx: RuntimeContext): Promise<void> {}
+}
+
+export class MockBrowserToolAdapter implements ToolAdapter {
+  id = "mock-browser-tools"
+  name = "Mock Browser Tools"
+  environmentId = "mock-browser"
+
+  constructor(private readonly environment: MockEnvironment) {}
+
   async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
-    await sleep(this.delayMs, ctx.abortSignal)
+    await sleep(this.environment.delayMs, ctx.abortSignal)
 
     if (call.type === "navigate") {
-      this.observation = { ...EXAMPLE_OBSERVATION }
-      return { ok: true, message: "navigated", observation: this.observation, metadata: { url: call.url } }
+      const observation = { ...EXAMPLE_OBSERVATION }
+      this.environment.updateObservation(observation)
+      return { ok: true, message: "navigated", observation, metadata: { url: call.url } }
     }
 
     if (call.type === "screenshot") {
       const screenshotPath = join(ctx.runDir, "screenshots", "step-0001.txt")
       await mkdir(join(ctx.runDir, "screenshots"), { recursive: true })
       await writeFile(screenshotPath, "mock screenshot for Example Domain\n")
-      this.observation = { ...this.observation, screenshotPath }
-      return { ok: true, message: "screenshot captured", observation: this.observation, metadata: { screenshotPath } }
+      const observation = { ...this.environment.currentObservation(), screenshotPath }
+      this.environment.updateObservation(observation)
+      return { ok: true, message: "screenshot captured", observation, metadata: { screenshotPath } }
     }
 
     if (call.type === "extract_text") {
-      return { ok: true, message: "text extracted", observation: this.observation, metadata: { text: this.observation.text } }
+      const observation = this.environment.currentObservation()
+      return { ok: true, message: "text extracted", observation, metadata: { text: observation.text } }
     }
 
-    return { ok: false, message: `Unsupported mock tool: ${call.type}`, observation: this.observation, metadata: {} }
+    return {
+      ok: false,
+      message: `Unsupported mock tool: ${call.type}`,
+      observation: this.environment.currentObservation(),
+      metadata: {},
+    }
   }
-
-  async close(_ctx: RuntimeContext): Promise<void> {}
 }
 
 export function sleep(ms: number, signal: AbortSignal): Promise<void> {

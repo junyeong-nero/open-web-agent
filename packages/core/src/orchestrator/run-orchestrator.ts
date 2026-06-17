@@ -179,7 +179,7 @@ export class RunOrchestrator {
     actionResults: ActionResult[],
     ctx: RuntimeContext,
   ): Promise<void> {
-    const environment = this.options.registry.getEnvironment(ctx.environmentId ?? this.options.environmentId)
+    const toolAdapter = this.options.registry.getToolAdapterForEnvironment(ctx.environmentId ?? this.options.environmentId)
 
     for (const action of decision.actions) {
       await ctx.emit("browser.action.started", { action }, stepId)
@@ -187,7 +187,7 @@ export class RunOrchestrator {
       for (const toolCall of action.toolCalls) {
         throwIfAborted(ctx.abortSignal)
         await ctx.emit("browser.tool.started", { actionId: action.id, toolCall }, stepId)
-        const result = await environment.execute(toolCall, ctx)
+        const result = await toolAdapter.execute(toolCall, ctx)
         actionResults.push(result)
         await ctx.emit("browser.tool.completed", { actionId: action.id, toolCall, result }, stepId)
 

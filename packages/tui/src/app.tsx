@@ -12,7 +12,7 @@ import { mapKeyEvent } from "./keymap/keybindings"
 import { createInitialState, reduceTuiEvent } from "./state/reducer"
 import type { AgentSummary, EnvironmentSummary, ModelSummary } from "./state/types"
 import { getTheme, listThemes, type TuiTheme } from "./theme/themes"
-import { selectedModelSummary } from "./components/session-shell-format"
+import { selectedAgentSummary, selectedModelSummary } from "./components/session-shell-format"
 
 export interface AppProps {
   serverUrl: string
@@ -347,6 +347,7 @@ export function App(props: AppProps) {
       />
       <PromptInput
         value={prompt()}
+        agent={selectedAgentSummary(state())}
         model={selectedModelSummary(state())}
         modelActivity={state().modelActivity}
         runStatus={state().runStatus}

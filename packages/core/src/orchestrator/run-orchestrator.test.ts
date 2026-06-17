@@ -5,7 +5,7 @@ import { join } from "node:path"
 import type { AgentDecision } from "../contracts/agent"
 import type { ActionResult, BrowserToolCall, Observation } from "../contracts/browser"
 import type { RunEvent } from "../contracts/event"
-import type { AgentPlugin, BrowserEnvironment } from "../contracts/plugin"
+import type { AgentPlugin, BrowserEnvironment, ToolAdapter } from "../contracts/plugin"
 import { EventBus } from "../events/event-bus"
 import { PluginRegistry } from "../registry/plugin-registry"
 import { JsonlEventStore } from "../storage/jsonl-event-store"
@@ -80,7 +80,7 @@ class TestEnvironment implements BrowserEnvironment {
     return this.observation
   }
 
-  async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
+  async applyBrowserTool(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
     await delay(this.delayMs, ctx.abortSignal)
 
     if (call.type === "navigate") {
@@ -102,6 +102,20 @@ class TestEnvironment implements BrowserEnvironment {
   }
 
   async close(): Promise<void> {}
+}
+
+class TestBrowserToolAdapter implements ToolAdapter {
+  id = "test-browser-tools"
+  name = "Test Browser Tools"
+  environmentId = "test-browser"
+  calls: BrowserToolCall[] = []
+
+  constructor(private readonly environment: TestEnvironment) {}
+
+  async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
+    this.calls.push(call)
+    return this.environment.applyBrowserTool(call, ctx)
+  }
 }
 
 function delay(ms: number, signal: AbortSignal): Promise<void> {
@@ -132,6 +146,7 @@ function session(): SessionState {
 async function orchestrator(delayMs = 0): Promise<{
   orchestrator: RunOrchestrator
   observedEvents: RunEvent[]
+  toolAdapter: TestBrowserToolAdapter
   home: string
 }> {
   const eventBus = new EventBus()
@@ -141,8 +156,11 @@ async function orchestrator(delayMs = 0): Promise<{
   })
 
   const registry = new PluginRegistry()
+  const environment = new TestEnvironment(delayMs)
+  const toolAdapter = new TestBrowserToolAdapter(environment)
   registry.registerAgent(new TestAgent())
-  registry.registerEnvironment(new TestEnvironment(delayMs))
+  registry.registerEnvironment(environment)
+  registry.registerToolAdapter(toolAdapter)
 
   const home = await mkdtemp(join(tmpdir(), "owa-orchestrator-"))
 
@@ -157,6 +175,7 @@ async function orchestrator(delayMs = 0): Promise<{
       now: () => new Date("2026-06-17T00:00:00.000Z"),
     }),
     observedEvents,
+    toolAdapter,
     home,
   }
 }
@@ -173,6 +192,7 @@ describe("RunOrchestrator", () => {
     const result = await started.result
 
     expect(result.finalAnswer).toBe(finalAnswer)
+    expect(setup.toolAdapter.calls.map((call) => call.type)).toEqual(["navigate", "screenshot", "extract_text"])
     expect(setup.observedEvents.map((event) => event.type)).toEqual([
       "session.created",
       "run.started",
