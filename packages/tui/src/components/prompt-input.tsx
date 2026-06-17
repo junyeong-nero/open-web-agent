@@ -1,5 +1,7 @@
 import type { TextareaRenderable } from "@opentui/core"
 import type { KeyEvent } from "@opentui/core"
+import { For, Show } from "solid-js"
+import { listSlashCommandSuggestions } from "../commands/slash-commands"
 import type { TuiState } from "../state/types"
 import type { TuiTheme } from "../theme/themes"
 import { promptHint, promptMeta } from "./session-shell-format"
@@ -27,6 +29,7 @@ export function PromptInput(props: PromptInputProps) {
   ]
 
   const currentValue = () => textarea?.plainText ?? props.value
+  const commandSuggestions = () => listSlashCommandSuggestions(props.value)
   const handleContentChange = (_event: unknown) => {
     props.onChange(currentValue())
   }
@@ -66,6 +69,44 @@ export function PromptInput(props: PromptInputProps) {
           onSubmit={handleSubmit}
         />
       </box>
+      <Show when={commandSuggestions().length > 0}>
+        <box
+          flexDirection="column"
+          border={["left"]}
+          borderColor={props.theme.task}
+          backgroundColor={props.theme.panelAlt}
+          paddingX={2}
+          paddingBottom={1}
+        >
+          <For each={commandSuggestions()}>
+            {(command, index) => {
+              const selected = () => index() === 0
+              return (
+                <box
+                  flexDirection="row"
+                  gap={2}
+                  backgroundColor={selected() ? props.theme.task : props.theme.panelAlt}
+                  paddingX={selected() ? 1 : 0}
+                >
+                  <text fg={selected() ? props.theme.surface : props.theme.text} wrapMode="none">
+                    {command.name}
+                  </text>
+                  <Show when={command.argumentHint}>
+                    {(argumentHint) => (
+                      <text fg={selected() ? props.theme.surface : props.theme.textMuted} wrapMode="none">
+                        {argumentHint()}
+                      </text>
+                    )}
+                  </Show>
+                  <text fg={selected() ? props.theme.surface : props.theme.textMuted} wrapMode="none">
+                    {command.description}
+                  </text>
+                </box>
+              )
+            }}
+          </For>
+        </box>
+      </Show>
       <box flexDirection="row" justifyContent="space-between" paddingX={2} paddingBottom={1} gap={2}>
         <text fg={props.theme.text} wrapMode="none">
           {promptMeta(props.agentId, props.modelId)}

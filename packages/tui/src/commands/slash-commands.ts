@@ -12,18 +12,46 @@ export type SlashCommand =
   | { kind: "quit" }
   | { kind: "unknown"; command: string }
 
-const commands = new Map<string, SlashCommand["kind"]>([
-  ["/help", "help"],
-  ["/clear", "clear"],
-  ["/details", "details"],
-  ["/agent", "agent"],
-  ["/model", "model"],
-  ["/browser", "browser"],
-  ["/theme", "theme"],
-  ["/new", "new"],
-  ["/stop", "stop"],
-  ["/quit", "quit"],
+export interface SlashCommandSuggestion {
+  name: string
+  description: string
+  argumentHint: string | null
+}
+
+interface SlashCommandDefinition extends SlashCommandSuggestion {
+  kind: Exclude<SlashCommand["kind"], "prompt" | "unknown">
+}
+
+const commandDefinitions = [
+  { name: "/help", kind: "help", description: "Show available commands", argumentHint: null },
+  { name: "/clear", kind: "clear", description: "Clear the current session view", argumentHint: null },
+  { name: "/details", kind: "details", description: "Toggle the details inspector", argumentHint: null },
+  { name: "/agent", kind: "agent", description: "Switch agent", argumentHint: "[id]" },
+  { name: "/model", kind: "model", description: "Switch model", argumentHint: "[id]" },
+  { name: "/browser", kind: "browser", description: "Switch browser", argumentHint: "[id]" },
+  { name: "/themes", kind: "theme", description: "Switch theme", argumentHint: "[id]" },
+  { name: "/new", kind: "new", description: "Start a new session", argumentHint: null },
+  { name: "/stop", kind: "stop", description: "Stop the current run", argumentHint: null },
+  { name: "/quit", kind: "quit", description: "Exit the TUI", argumentHint: null },
+] satisfies SlashCommandDefinition[]
+
+const commandAliases = new Map<string, SlashCommandDefinition["kind"]>([["/theme", "theme"]])
+const commands = new Map<string, SlashCommandDefinition["kind"]>([
+  ...commandDefinitions.map((command) => [command.name, command.kind] as const),
+  ...commandAliases,
 ])
+
+export function formatSlashCommandHelp(): string {
+  return commandDefinitions.map((command) => (command.argumentHint ? `${command.name} ${command.argumentHint}` : command.name)).join(" ")
+}
+
+export function listSlashCommandSuggestions(input: string): SlashCommandSuggestion[] {
+  if (!input.startsWith("/") || /\s/.test(input)) return []
+
+  return commandDefinitions
+    .filter((command) => command.name.startsWith(input))
+    .map(({ name, description, argumentHint }) => ({ name, description, argumentHint }))
+}
 
 export function parseSlashCommand(input: string): SlashCommand {
   const value = input.trim()
