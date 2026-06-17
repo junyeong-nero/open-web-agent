@@ -11,6 +11,7 @@
     "@open-web-agent/agents": "workspace:*",
     "@open-web-agent/browser": "workspace:*",
     "@open-web-agent/core": "workspace:*",
+    "@open-web-agent/storage": "workspace:*",
     "hono": "4.12.25",
     "zod": "4.4.3"
   }

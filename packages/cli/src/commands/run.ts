@@ -4,6 +4,8 @@ import { resolveOwaHome, type BrowserToolCall, type RunEvent } from "@open-web-a
 export interface RunCommandInput {
   prompt: string
   projectPath: string
+  continueLast?: boolean
+  sessionId?: string
 }
 
 export interface RunCommandOptions {
@@ -27,10 +29,7 @@ export async function runCommand(input: RunCommandInput, options: RunCommandOpti
   })
 
   try {
-    const session = await requestJson<{ sessionId: string }>(`${runtime.url}/sessions`, {
-      method: "POST",
-      body: JSON.stringify({ projectPath: input.projectPath }),
-    })
+    const session = await resolveSession(runtime.url, input)
     const run = await requestJson<{ runId: string }>(`${runtime.url}/runs`, {
       method: "POST",
       body: JSON.stringify({ sessionId: session.sessionId, prompt: input.prompt }),
@@ -42,6 +41,20 @@ export async function runCommand(input: RunCommandInput, options: RunCommandOpti
     unsubscribe()
     await runtime.stop()
   }
+}
+
+async function resolveSession(serverUrl: string, input: RunCommandInput): Promise<{ sessionId: string }> {
+  if (input.sessionId) return { sessionId: input.sessionId }
+  if (input.continueLast) {
+    const sessions = await requestJson<{ sessions: Array<{ id: string }> }>(`${serverUrl}/sessions`)
+    const latest = sessions.sessions.at(-1)
+    if (latest) return { sessionId: latest.id }
+  }
+
+  return requestJson<{ sessionId: string }>(`${serverUrl}/sessions`, {
+    method: "POST",
+    body: JSON.stringify({ projectPath: input.projectPath }),
+  })
 }
 
 export function formatCompactEvent(event: RunEvent): string | null {

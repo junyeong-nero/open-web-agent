@@ -1,5 +1,7 @@
 import type { Hono } from "hono"
 import type { RunOrchestrator, RunResult, SessionState } from "@open-web-agent/core"
+import { randomUUID } from "node:crypto"
+import type { SQLiteStore } from "@open-web-agent/storage"
 import { CreateRunRequestSchema } from "../schemas/api"
 
 export interface RunRecord {
@@ -12,6 +14,7 @@ export interface RunRouteDeps {
   orchestrator: RunOrchestrator
   sessions: Map<string, SessionState>
   runs: Map<string, RunRecord>
+  storage?: SQLiteStore
 }
 
 export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
@@ -24,19 +27,63 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
 
     const started = deps.orchestrator.startRun({ session, prompt: parsed.data.prompt })
     deps.runs.set(started.runId, { runId: started.runId, status: "running", finalAnswer: null })
+    const createdAt = new Date().toISOString()
+    deps.storage?.upsertRun({
+      id: started.runId,
+      sessionId: session.id,
+      status: "running",
+      finalAnswer: null,
+      createdAt,
+      updatedAt: createdAt,
+    })
+    deps.storage?.appendMessage({
+      id: `msg_${randomUUID().replaceAll("-", "")}`,
+      sessionId: session.id,
+      role: "user",
+      content: parsed.data.prompt,
+      createdAt,
+    })
     void started.result
       .then((result) => {
+        const updatedAt = new Date().toISOString()
         deps.runs.set(started.runId, {
           runId: started.runId,
           status: result.status,
           finalAnswer: result.finalAnswer,
         })
+        deps.storage?.upsertRun({
+          id: started.runId,
+          sessionId: session.id,
+          status: result.status,
+          finalAnswer: result.finalAnswer,
+          createdAt,
+          updatedAt,
+        })
+        if (result.finalAnswer) {
+          deps.storage?.appendMessage({
+            id: `msg_${randomUUID().replaceAll("-", "")}`,
+            sessionId: session.id,
+            role: "assistant",
+            content: result.finalAnswer,
+            createdAt: updatedAt,
+          })
+        }
       })
       .catch((error) => {
+        const updatedAt = new Date().toISOString()
+        const message = error instanceof Error ? error.message : String(error)
         deps.runs.set(started.runId, {
           runId: started.runId,
           status: "failed",
-          finalAnswer: error instanceof Error ? error.message : String(error),
+          finalAnswer: message,
+        })
+        deps.storage?.upsertRun({
+          id: started.runId,
+          sessionId: session.id,
+          status: "failed",
+          finalAnswer: message,
+          createdAt,
+          updatedAt,
         })
       })
 

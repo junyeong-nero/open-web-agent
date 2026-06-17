@@ -15,6 +15,8 @@ import { createInitialState, reduceTuiEvent } from "./state/reducer"
 export interface AppProps {
   serverUrl: string
   projectPath: string
+  continueLast?: boolean
+  sessionId?: string
   onExit(): void
 }
 
@@ -25,8 +27,8 @@ export function App(props: AppProps) {
   const [prompt, setPrompt] = createSignal("")
 
   onMount(async () => {
-    const session = await client.createSession(props.projectPath)
-    setState((current) => reduceTuiEvent(current, { type: "session.created", sessionId: session.sessionId }))
+    const sessionId = await resolveStartupSession()
+    setState((current) => reduceTuiEvent(current, { type: "session.created", sessionId }))
 
     const stream = createEventStream(props.serverUrl, (event) => {
       setState((current) => reduceTuiEvent(current, { type: "run.event", event }))
@@ -34,6 +36,21 @@ export function App(props: AppProps) {
 
     onCleanup(() => stream.close())
   })
+
+  async function resolveStartupSession(): Promise<string> {
+    if (props.sessionId) {
+      const session = await client.getSession(props.sessionId)
+      return session.id
+    }
+    if (props.continueLast) {
+      const sessions = await client.listSessions()
+      const latest = sessions.sessions.at(-1)
+      if (latest) return latest.id
+    }
+
+    const session = await client.createSession(props.projectPath)
+    return session.sessionId
+  }
 
   useKeyboard((key) => {
     const action = mapKeyEvent(key)

@@ -36,4 +36,20 @@ describe("parseArgs", () => {
       serverUrl: "http://127.0.0.1:4096",
     })
   })
+
+  it("recognizes continue mode", () => {
+    expect(parseArgs(["--continue"], "/tmp/project")).toEqual({
+      mode: "default",
+      projectPath: "/tmp/project",
+      continueLast: true,
+    })
+  })
+
+  it("recognizes explicit session mode", () => {
+    expect(parseArgs(["--session", "ses_1"], "/tmp/project")).toEqual({
+      mode: "default",
+      projectPath: "/tmp/project",
+      sessionId: "ses_1",
+    })
+  })
 })

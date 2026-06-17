@@ -9,12 +9,12 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()): P
   const args = parseArgs(argv, cwd)
 
   if (args.mode === "default") {
-    await defaultCommand({ projectPath: args.projectPath })
+    await defaultCommand({ projectPath: args.projectPath, continueLast: args.continueLast, sessionId: args.sessionId })
     return
   }
 
   if (args.mode === "run") {
-    await runCommand({ prompt: args.prompt, projectPath: args.projectPath })
+    await runCommand({ prompt: args.prompt, projectPath: args.projectPath, continueLast: args.continueLast, sessionId: args.sessionId })
     return
   }
 

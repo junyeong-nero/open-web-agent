@@ -4,6 +4,8 @@ import { App } from "./app"
 export interface LaunchTuiOptions {
   serverUrl: string
   projectPath: string
+  continueLast?: boolean
+  sessionId?: string
 }
 
 export async function launchTui(options: LaunchTuiOptions): Promise<void> {

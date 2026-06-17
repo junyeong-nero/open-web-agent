@@ -1,8 +1,8 @@
 import { resolve } from "node:path"
 
 export type CliArgs =
-  | { mode: "default"; projectPath: string }
-  | { mode: "run"; prompt: string; projectPath: string }
+  | { mode: "default"; projectPath: string; continueLast?: boolean; sessionId?: string }
+  | { mode: "run"; prompt: string; projectPath: string; continueLast?: boolean; sessionId?: string }
   | { mode: "serve"; hostname: string; port: number }
   | { mode: "connect"; serverUrl: string }
 
@@ -15,10 +15,21 @@ export function parseArgs(argv: string[], cwd = process.cwd()): CliArgs {
     return { mode: "connect", serverUrl }
   }
 
+  if (argv[0] === "--continue") {
+    return { mode: "default", projectPath: cwd, continueLast: true }
+  }
+
+  if (argv[0] === "--session") {
+    const sessionId = argv[1]
+    if (!sessionId) throw new Error("--session requires a session ID")
+    return { mode: "default", projectPath: cwd, sessionId }
+  }
+
   if (argv[0] === "run") {
-    const prompt = argv.slice(1).join(" ").trim()
+    const { promptParts, continueLast, sessionId } = parseRunFlags(argv.slice(1))
+    const prompt = promptParts.join(" ").trim()
     if (prompt.length === 0) throw new Error("run requires a prompt")
-    return { mode: "run", prompt, projectPath: cwd }
+    return { mode: "run", prompt, projectPath: cwd, continueLast, sessionId }
   }
 
   if (argv[0] === "serve") {
@@ -30,6 +41,28 @@ export function parseArgs(argv: string[], cwd = process.cwd()): CliArgs {
   }
 
   throw new Error(`Unknown arguments: ${argv.join(" ")}`)
+}
+
+function parseRunFlags(argv: string[]): { promptParts: string[]; continueLast?: boolean; sessionId?: string } {
+  const promptParts: string[] = []
+  let continueLast: boolean | undefined
+  let sessionId: string | undefined
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+    if (arg === "--continue") {
+      continueLast = true
+      continue
+    }
+    if (arg === "--session") {
+      sessionId = requiredValue(argv, index, "--session")
+      index += 1
+      continue
+    }
+    promptParts.push(arg)
+  }
+
+  return { promptParts, continueLast, sessionId }
 }
 
 function parseServeArgs(argv: string[]): CliArgs {

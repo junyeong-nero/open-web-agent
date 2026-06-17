@@ -5,9 +5,10 @@ import { join } from "node:path"
 import { MockAgent } from "@open-web-agent/agents"
 import { MockEnvironment } from "@open-web-agent/browser"
 import { EventBus, PluginRegistry, RunOrchestrator, type RunEvent } from "@open-web-agent/core"
+import { SQLiteStore } from "@open-web-agent/storage"
 import { createApp } from "./app"
 
-async function setup(delayMs = 0) {
+async function setup(delayMs = 0, storage?: SQLiteStore) {
   const eventBus = new EventBus()
   const registry = new PluginRegistry()
   registry.registerAgent(new MockAgent())
@@ -24,7 +25,7 @@ async function setup(delayMs = 0) {
   })
 
   const sessions = new Map()
-  const app = createApp({ eventBus, orchestrator, registry, sessions })
+  const app = createApp({ eventBus, orchestrator, registry, sessions, storage })
 
   return {
     app,
@@ -84,6 +85,20 @@ describe("createApp", () => {
 
     expect(sessionId).toStartWith("ses_")
     expect(sessions.get(sessionId)?.projectPath).toBe("/tmp/open-web-agent-project")
+  })
+
+  it("GET /sessions lists persisted sessions after app restart", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "owa-server-store-"))
+    const storage = new SQLiteStore(join(directory, "metadata.sqlite"))
+    storage.migrate()
+    const first = await setup(0, storage)
+    const sessionId = await createSession(first.request)
+
+    const second = await setup(0, storage)
+    const body = await json<{ sessions: Array<{ id: string; projectPath: string }> }>(await second.request("/sessions"))
+
+    expect(body.sessions).toMatchObject([{ id: sessionId, projectPath: "/tmp/open-web-agent-project" }])
+    storage.close()
   })
 
   it("POST /runs starts a mock run", async () => {
