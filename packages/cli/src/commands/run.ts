@@ -17,7 +17,11 @@ export interface RunCommandOptions {
 
 export async function runCommand(input: RunCommandInput, options: RunCommandOptions = {}): Promise<void> {
   const stdout = options.stdout ?? ((line: string) => console.log(line))
-  const runtime = await startDefaultRuntime({ home: resolveOwaHome(options.env), agentsDir: join(input.projectPath, "agents") })
+  const runtime = await startDefaultRuntime({
+    home: resolveOwaHome(options.env),
+    agentsDir: join(input.projectPath, "agents"),
+    env: options.env,
+  })
   let resolveTerminalEvent: (event: RunEvent) => void = () => {}
   const terminalEvent = new Promise<RunEvent>((resolve) => {
     resolveTerminalEvent = resolve

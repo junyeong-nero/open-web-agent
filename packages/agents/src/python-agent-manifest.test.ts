@@ -2,7 +2,14 @@ import { describe, expect, it } from "bun:test"
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { EventBus, type AgentState, type RuntimeContext } from "@open-web-agent/core"
+import {
+  EventBus,
+  type AgentState,
+  type ModelPlugin,
+  type ModelRequest,
+  type ModelResponse,
+  type RuntimeContext,
+} from "@open-web-agent/core"
 import { loadPythonAgentManifests } from "./python-agent-manifest"
 
 const python = process.env.PYTHON ?? "python3"
@@ -39,6 +46,24 @@ function ctx(): RuntimeContext {
 
 async function makeAgentsDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "owa-python-agent-manifests-"))
+}
+
+class FakeModel implements ModelPlugin {
+  id = "fake-model"
+  name = "Fake Model"
+  provider = "fake"
+  requests: ModelRequest[] = []
+
+  async complete(request: ModelRequest): Promise<ModelResponse> {
+    this.requests.push(request)
+    return {
+      id: "fake-response",
+      text: "manifest model answer",
+      raw: {},
+      usage: null,
+      latencyMs: 0,
+    }
+  }
 }
 
 describe("loadPythonAgentManifests", () => {
@@ -108,6 +133,43 @@ describe("loadPythonAgentManifests", () => {
     const decision = await agents[0]?.step(state(), ctx())
 
     expect(decision).toMatchObject({ type: "final_answer", finalAnswer: "custom command" })
+  })
+
+  it("loads jsonl Python agents that delegate to the supplied runtime model", async () => {
+    const agentsDir = await makeAgentsDir()
+    const agentDir = join(agentsDir, "jsonl-agent")
+    await mkdir(agentDir)
+    await writeFile(
+      join(agentDir, "agent.yaml"),
+      [
+        "id: jsonl-agent",
+        "name: JSONL Agent",
+        "description: Delegates model calls",
+        "language: python",
+        "entry: main.py",
+        "protocol: jsonl",
+        "",
+      ].join("\n"),
+    )
+    await writeFile(
+      join(agentDir, "main.py"),
+      [
+        "import json",
+        "import sys",
+        "json.loads(sys.stdin.readline())",
+        'print(json.dumps({"command":"model.complete","id":"m1","request":{"model":"test","messages":[{"role":"user","content":"hi"}],"temperature":0,"responseFormat":"text"}}), flush=True)',
+        "model_response = json.loads(sys.stdin.readline())",
+        'print(json.dumps({"decision":{"type":"final_answer","thought":None,"finalAnswer":model_response["response"]["text"],"confidence":1}}), flush=True)',
+        "",
+      ].join("\n"),
+    )
+    const model = new FakeModel()
+
+    const agents = await loadPythonAgentManifests(agentsDir, { pythonCommand: python, model })
+    const decision = await agents[0]?.step(state(), ctx())
+
+    expect(model.requests).toHaveLength(1)
+    expect(decision).toMatchObject({ type: "final_answer", finalAnswer: "manifest model answer" })
   })
 
   it("rejects non-Python manifests", async () => {

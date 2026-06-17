@@ -2,10 +2,12 @@ import { spawn } from "node:child_process"
 import { z } from "zod"
 import {
   AgentDecisionSchema,
+  ModelRequestSchema,
   RunEventTypeSchema,
   type AgentDecision,
   type AgentPlugin,
   type AgentState,
+  type ModelPlugin,
   type RuntimeContext,
   type RunEventType,
 } from "@open-web-agent/core"
@@ -18,6 +20,8 @@ export interface PythonAgentAdapterOptions {
   cwd?: string
   env?: Record<string, string>
   timeoutMs?: number
+  protocol?: "oneshot" | "jsonl"
+  model?: ModelPlugin
 }
 
 type PythonAgentMethod = "initialize" | "step" | "finalize"
@@ -53,6 +57,12 @@ const FinalizeResponseSchema = z.object({
   events: z.array(PythonAgentEventSchema).optional(),
 })
 
+const PythonAgentCommandSchema = z.object({
+  command: z.literal("model.complete"),
+  id: z.string().min(1),
+  request: ModelRequestSchema,
+})
+
 export class PythonAgentAdapter implements AgentPlugin {
   id: string
   name: string
@@ -61,6 +71,8 @@ export class PythonAgentAdapter implements AgentPlugin {
   private readonly cwd: string | undefined
   private readonly env: Record<string, string> | undefined
   private readonly timeoutMs: number
+  private readonly protocol: "oneshot" | "jsonl"
+  private readonly model: ModelPlugin | undefined
 
   constructor(options: PythonAgentAdapterOptions) {
     if (options.command.length === 0) throw new Error(`Python agent ${options.id} command must not be empty`)
@@ -72,6 +84,8 @@ export class PythonAgentAdapter implements AgentPlugin {
     this.cwd = options.cwd
     this.env = options.env
     this.timeoutMs = options.timeoutMs ?? 30_000
+    this.protocol = options.protocol ?? "oneshot"
+    this.model = options.model
   }
 
   async initialize(ctx: RuntimeContext): Promise<void> {
@@ -83,7 +97,7 @@ export class PythonAgentAdapter implements AgentPlugin {
           agent: this.agentMetadata(),
           context: serializeContext(ctx),
         },
-        ctx.abortSignal,
+        ctx,
       ),
     )
     await emitPythonEvents(ctx, response.events)
@@ -99,7 +113,7 @@ export class PythonAgentAdapter implements AgentPlugin {
           state,
           context: serializeContext(ctx),
         },
-        ctx.abortSignal,
+        ctx,
       ),
     )
     await emitPythonEvents(ctx, response.events)
@@ -116,7 +130,7 @@ export class PythonAgentAdapter implements AgentPlugin {
           state,
           context: serializeContext(ctx),
         },
-        ctx.abortSignal,
+        ctx,
       ),
     )
     await emitPythonEvents(ctx, response.events)
@@ -131,7 +145,16 @@ export class PythonAgentAdapter implements AgentPlugin {
     }
   }
 
-  private callPython(method: PythonAgentMethod, request: Record<string, unknown>, abortSignal: AbortSignal): Promise<unknown> {
+  private callPython(method: PythonAgentMethod, request: Record<string, unknown>, ctx: RuntimeContext): Promise<unknown> {
+    if (this.protocol === "jsonl") return this.callPythonJsonl(method, request, ctx)
+    return this.callPythonOneshot(method, request, ctx.abortSignal)
+  }
+
+  private callPythonOneshot(
+    method: PythonAgentMethod,
+    request: Record<string, unknown>,
+    abortSignal: AbortSignal,
+  ): Promise<unknown> {
     const [executable, ...args] = this.command
     if (!executable) throw new Error(`Python agent ${this.id} command must not be empty`)
     if (abortSignal.aborted) return Promise.reject(new DOMException("Run cancelled", "AbortError"))
@@ -208,6 +231,161 @@ export class PythonAgentAdapter implements AgentPlugin {
       child.stdin.end(JSON.stringify(request))
     })
   }
+
+  private callPythonJsonl(method: PythonAgentMethod, request: Record<string, unknown>, ctx: RuntimeContext): Promise<unknown> {
+    const [executable, ...args] = this.command
+    if (!executable) throw new Error(`Python agent ${this.id} command must not be empty`)
+    if (ctx.abortSignal.aborted) return Promise.reject(new DOMException("Run cancelled", "AbortError"))
+
+    return new Promise((resolve, reject) => {
+      const child = spawn(executable, args, {
+        cwd: this.cwd,
+        env: { ...process.env, ...this.env },
+        stdio: ["pipe", "pipe", "pipe"],
+      })
+      let stdoutBuffer = ""
+      let stderr = ""
+      let finalResponse: unknown
+      let hasFinalResponse = false
+      let settled = false
+
+      const timeout = setTimeout(() => {
+        fail(new Error(`Python agent ${this.id} ${method} timed out after ${this.timeoutMs}ms`))
+      }, this.timeoutMs)
+
+      const cleanup = () => {
+        clearTimeout(timeout)
+        ctx.abortSignal.removeEventListener("abort", onAbort)
+      }
+
+      const fail = (error: Error) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        child.kill()
+        reject(error)
+      }
+
+      const writeJsonLine = (value: unknown) => {
+        if (settled || child.stdin.destroyed || !child.stdin.writable) return
+        child.stdin.write(`${JSON.stringify(value)}\n`)
+      }
+
+      const handleCommand = async (value: unknown) => {
+        const parsed = PythonAgentCommandSchema.safeParse(value)
+        if (!parsed.success) {
+          fail(new Error(`Python agent ${this.id} ${method} returned invalid command: ${parsed.error.message}`))
+          return
+        }
+
+        if (!this.model) {
+          writeJsonLine({
+            id: parsed.data.id,
+            ok: false,
+            error: "No runtime model is configured for Python agent command model.complete",
+          })
+          return
+        }
+
+        try {
+          const response = await this.model.complete(parsed.data.request, ctx)
+          writeJsonLine({ id: parsed.data.id, ok: true, response })
+        } catch (error) {
+          writeJsonLine({
+            id: parsed.data.id,
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+
+      const handleLine = (line: string) => {
+        const trimmed = line.trim()
+        if (!trimmed) return
+
+        let parsed: unknown
+        try {
+          parsed = JSON.parse(trimmed)
+        } catch (error) {
+          fail(
+            new Error(
+              `Python agent ${this.id} ${method} returned invalid JSON line: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            ),
+          )
+          return
+        }
+
+        if (isRecord(parsed) && typeof parsed.command === "string") {
+          void handleCommand(parsed)
+          return
+        }
+
+        finalResponse = parsed
+        hasFinalResponse = true
+        child.stdin.end()
+      }
+
+      const flushStdoutLines = () => {
+        let newlineIndex = stdoutBuffer.indexOf("\n")
+        while (newlineIndex >= 0) {
+          const line = stdoutBuffer.slice(0, newlineIndex)
+          stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1)
+          handleLine(line)
+          newlineIndex = stdoutBuffer.indexOf("\n")
+        }
+      }
+
+      const onAbort = () => {
+        fail(new DOMException("Run cancelled", "AbortError"))
+      }
+
+      ctx.abortSignal.addEventListener("abort", onAbort, { once: true })
+
+      child.stdout.setEncoding("utf8")
+      child.stderr.setEncoding("utf8")
+      child.stdout.on("data", (chunk) => {
+        stdoutBuffer += chunk
+        flushStdoutLines()
+      })
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk
+      })
+      child.on("error", (error) => {
+        fail(new Error(`Python agent ${this.id} ${method} failed to start: ${error.message}`))
+      })
+      child.on("close", (code, signal) => {
+        if (settled) return
+        if (stdoutBuffer.trim()) {
+          handleLine(stdoutBuffer)
+          stdoutBuffer = ""
+        }
+        if (settled) return
+        settled = true
+        cleanup()
+
+        if (code !== 0) {
+          const details = stderr.trim() || `signal ${signal ?? "unknown"}`
+          reject(new Error(`Python agent ${this.id} ${method} failed with exit code ${code ?? "null"}: ${details}`))
+          return
+        }
+
+        if (!hasFinalResponse) {
+          reject(new Error(`Python agent ${this.id} ${method} exited without a final JSON response`))
+          return
+        }
+
+        resolve(finalResponse)
+      })
+
+      writeJsonLine(request)
+    })
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function serializeContext(ctx: RuntimeContext): SerializableRuntimeContext {
