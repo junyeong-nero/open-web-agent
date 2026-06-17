@@ -9,7 +9,14 @@ export interface AgentPluginSummary extends PluginSummary {
 
 export interface PluginList {
   agents: AgentPluginSummary[]
-  models: Array<PluginSummary & { provider: string }>
+  models: Array<
+    PluginSummary & {
+      provider: string
+      modelName?: string
+      reasoningEffort?: string | null
+      contextWindowTokens?: number | null
+    }
+  >
   environments: PluginSummary[]
 }
 

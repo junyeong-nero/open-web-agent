@@ -42,6 +42,8 @@ Open Web Agent reads user-level model settings from `~/.openwebagents/config.yam
 
 ```yaml
 model: "gpt-4.1-mini"
+reasoning_effort: "medium"
+context_window_tokens: 128000
 openai_api_key: "sk-..."
 openrouter_api_key: "sk-or-..."
 
@@ -59,7 +61,9 @@ parameters:
 ```
 
 Set one or both provider keys. Environment variables still take precedence when present:
-`OPEN_WEB_AGENT_MODEL`, `OPENAI_API_KEY`, and `OPENROUTER_API_KEY`.
+`OPEN_WEB_AGENT_MODEL`, `OPEN_WEB_AGENT_REASONING_EFFORT`,
+`OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS`, `OPENAI_API_KEY`, and
+`OPENROUTER_API_KEY`.
 
 ## Development Commands
 

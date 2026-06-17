@@ -49,6 +49,8 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
         apiKey: modelConfig.openaiApiKey,
         defaultModel: modelConfig.defaultModel,
         defaultParameters: modelConfig.parameters,
+        reasoningEffort: modelConfig.reasoningEffort,
+        contextWindowTokens: modelConfig.contextWindowTokens,
       }),
     )
   }
@@ -58,6 +60,8 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
         apiKey: modelConfig.openrouterApiKey,
         defaultModel: modelConfig.defaultModel,
         defaultParameters: modelConfig.parameters,
+        reasoningEffort: modelConfig.reasoningEffort,
+        contextWindowTokens: modelConfig.contextWindowTokens,
       }),
     )
   }
@@ -120,6 +124,25 @@ class RuntimeSelectedModel implements ModelPlugin {
       throw new Error("No model selected. Configure OPENAI_API_KEY or OPENROUTER_API_KEY, then use /model <id>.")
     }
 
-    return this.registry.getModel(modelId).complete(request, ctx)
+    const model = this.registry.getModel(modelId)
+    const metadata = {
+      modelId,
+      modelName: model.modelName ?? request.model,
+      provider: model.provider,
+      reasoningEffort: model.reasoningEffort ?? null,
+      contextWindowTokens: model.contextWindowTokens ?? null,
+    }
+
+    await ctx.emit("model.called", metadata)
+    const response = await model.complete(request, ctx)
+    await ctx.emit("model.completed", {
+      ...metadata,
+      response: {
+        id: response.id,
+        usage: response.usage,
+        latencyMs: response.latencyMs,
+      },
+    })
+    return response
   }
 }

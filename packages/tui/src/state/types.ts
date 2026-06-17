@@ -1,4 +1,4 @@
-import type { Observation, RunEvent } from "@open-web-agent/core"
+import type { ModelUsage, Observation, RunEvent } from "@open-web-agent/core"
 import type { RunLogItem } from "../log/run-log"
 
 export interface ConversationMessage {
@@ -29,6 +29,19 @@ export interface ModelSummary {
   id: string
   name: string
   provider: string
+  modelName?: string
+  reasoningEffort?: string | null
+  contextWindowTokens?: number | null
+}
+
+export interface ModelActivity {
+  status: "idle" | "running"
+  modelId: string | null
+  modelName: string | null
+  provider: string | null
+  reasoningEffort: string | null
+  contextWindowTokens: number | null
+  usage: ModelUsage | null
 }
 
 export interface EnvironmentSummary {
@@ -48,6 +61,7 @@ export interface TuiState {
   availableModels: ModelSummary[]
   availableEnvironments: EnvironmentSummary[]
   runStatus: "idle" | "running" | "completed" | "failed" | "cancelled"
+  modelActivity: ModelActivity
   inspectorVisible: boolean
   selectedEvent: RunEvent | null
   seenRunEventIds: string[]

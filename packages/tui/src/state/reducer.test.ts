@@ -128,8 +128,15 @@ describe("reduceTuiEvent", () => {
         { id: "plan-act-agent", name: "PlanAct Agent", description: "Plans first" },
       ],
       models: [
-        { id: "openai", name: "OpenAI", provider: "openai" },
-        { id: "openrouter", name: "OpenRouter", provider: "openrouter" },
+        {
+          id: "openai",
+          name: "OpenAI",
+          provider: "openai",
+          modelName: "gpt-test",
+          reasoningEffort: "medium",
+          contextWindowTokens: 128000,
+        },
+        { id: "openrouter", name: "OpenRouter", provider: "openrouter", modelName: "openai/gpt-test" },
       ],
       environments: [
         { id: "mock-browser", name: "Mock Browser" },
@@ -148,7 +155,60 @@ describe("reduceTuiEvent", () => {
     expect(selectedBrowser.selectedEnvironmentId).toBe("playwright-browser")
     expect(selectedBrowser.availableAgents.map((agent) => agent.id)).toEqual(["mock-agent", "see-act", "plan-act-agent"])
     expect(selectedBrowser.availableModels.map((model) => model.id)).toEqual(["openai", "openrouter"])
+    expect(selectedBrowser.availableModels[0]).toMatchObject({
+      modelName: "gpt-test",
+      reasoningEffort: "medium",
+      contextWindowTokens: 128000,
+    })
     expect(selectedBrowser.availableEnvironments.map((environment) => environment.id)).toEqual(["mock-browser", "playwright-browser"])
+  })
+
+  it("tracks model inference activity and context usage from model events", () => {
+    const loaded = reduceTuiEvent(createInitialState("/tmp/project"), {
+      type: "plugins.loaded",
+      agents: [],
+      models: [
+        {
+          id: "openai",
+          name: "OpenAI",
+          provider: "openai",
+          modelName: "gpt-test",
+          reasoningEffort: "high",
+          contextWindowTokens: 400000,
+        },
+      ],
+      environments: [],
+    })
+    const called = reduceTuiEvent(loaded, {
+      type: "run.event",
+      event: event("model.called", {
+        modelId: "openai",
+        modelName: "gpt-test",
+        provider: "openai",
+        reasoningEffort: "high",
+        contextWindowTokens: 400000,
+      }),
+    })
+    const completed = reduceTuiEvent(called, {
+      type: "run.event",
+      event: event("model.completed", {
+        modelId: "openai",
+        modelName: "gpt-test",
+        provider: "openai",
+        reasoningEffort: "high",
+        contextWindowTokens: 400000,
+        response: {
+          usage: { inputTokens: 7200, outputTokens: 40, totalTokens: 7240 },
+          latencyMs: 1200,
+        },
+      }),
+    })
+
+    expect(called.modelActivity.status).toBe("running")
+    expect(called.modelActivity.modelName).toBe("gpt-test")
+    expect(completed.modelActivity.status).toBe("idle")
+    expect(completed.modelActivity.usage).toEqual({ inputTokens: 7200, outputTokens: 40, totalTokens: 7240 })
+    expect(completed.modelActivity.contextWindowTokens).toBe(400000)
   })
 
   it("stores selected theme", () => {

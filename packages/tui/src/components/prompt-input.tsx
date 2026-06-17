@@ -1,16 +1,15 @@
 import type { TextareaRenderable } from "@opentui/core"
 import type { KeyEvent } from "@opentui/core"
-import { For, Show } from "solid-js"
+import { createSignal, For, onCleanup, Show } from "solid-js"
 import { listSlashCommandSuggestions } from "../commands/slash-commands"
-import type { TuiState } from "../state/types"
+import type { ModelActivity, ModelSummary, TuiState } from "../state/types"
 import type { TuiTheme } from "../theme/themes"
-import { promptHint, promptMeta } from "./session-shell-format"
+import { formatContextUsage, promptHint, promptMeta } from "./session-shell-format"
 
 export interface PromptInputProps {
   value: string
-  agentId: string
-  modelId: string | null
-  environmentId: string
+  model: ModelSummary | null
+  modelActivity: ModelActivity
   runStatus: TuiState["runStatus"]
   theme: TuiTheme
   onChange(value: string): void
@@ -19,6 +18,8 @@ export interface PromptInputProps {
 
 export function PromptInput(props: PromptInputProps) {
   let textarea: (TextareaRenderable & { plainText?: string }) | undefined
+  const [barPhase, setBarPhase] = createSignal(0)
+  const interval = setInterval(() => setBarPhase((phase) => (phase + 1) % 14), 120)
   const keyBindings = [
     { name: "return", action: "submit" as const },
     { name: "enter", action: "submit" as const },
@@ -44,6 +45,8 @@ export function PromptInput(props: PromptInputProps) {
       handleSubmit()
     }
   }
+
+  onCleanup(() => clearInterval(interval))
 
   return (
     <box flexDirection="column" flexShrink={0} backgroundColor={props.theme.surface}>
@@ -107,14 +110,28 @@ export function PromptInput(props: PromptInputProps) {
           </For>
         </box>
       </Show>
+      {props.modelActivity.status === "running" ? (
+        <box paddingX={2} paddingTop={1}>
+          <text fg={props.theme.reasoning} wrapMode="none">
+            {inferenceLoadingBar(barPhase())}
+          </text>
+        </box>
+      ) : null}
       <box flexDirection="row" justifyContent="space-between" paddingX={2} paddingBottom={1} gap={2}>
         <text fg={props.theme.text} wrapMode="none">
-          {promptMeta(props.agentId, props.modelId)}
+          {promptMeta(props.model)}
         </text>
         <text fg={props.theme.textMuted} wrapMode="none">
-          {promptHint(props.runStatus)}
+          {promptHint(props.runStatus, formatContextUsage(props.modelActivity))}
         </text>
       </box>
     </box>
   )
+}
+
+function inferenceLoadingBar(phase: number): string {
+  const width = 18
+  const filled = Math.min(width, phase + 5)
+  const empty = Math.max(0, width - filled)
+  return `[${"=".repeat(filled)}>${" ".repeat(empty)}] model inference`
 }

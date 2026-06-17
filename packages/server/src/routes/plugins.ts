@@ -32,6 +32,9 @@ function listModels(registry: PluginRegistry) {
     id: model.id,
     name: model.name,
     provider: model.provider,
+    modelName: model.modelName,
+    reasoningEffort: model.reasoningEffort,
+    contextWindowTokens: model.contextWindowTokens ?? null,
   }))
 }
 

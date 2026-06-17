@@ -19,10 +19,10 @@ export function TranscriptPanel(props: TranscriptPanelProps) {
       id="transcript-scroll"
       ref={props.scrollRef}
       flexGrow={1}
-      paddingX={2}
+      paddingX={1}
       paddingY={1}
       backgroundColor={props.theme.surface}
-      contentOptions={{ rowGap: 1 }}
+      contentOptions={{ rowGap: 2 }}
       focusable={false}
       stickyScroll={true}
       stickyStart="bottom"
@@ -41,7 +41,7 @@ export function TranscriptPanel(props: TranscriptPanelProps) {
 function renderTranscriptItem(item: TranscriptViewItem, theme: TuiTheme) {
   if (item.block === "user") {
     return (
-      <box border={["left"]} borderColor={theme.task} backgroundColor={theme.panel} paddingX={1} paddingY={1}>
+      <box border={["left"]} borderColor={theme.task} backgroundColor={theme.panelAlt} paddingX={2} paddingY={1}>
         <text fg={theme.text} wrapMode="word">
           {item.text}
         </text>

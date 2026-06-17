@@ -6,6 +6,8 @@ export interface OpenRouterModelOptions {
   apiKey?: string | null
   defaultModel?: string
   defaultParameters?: ModelParameters
+  reasoningEffort?: string
+  contextWindowTokens?: number
   fetch?: FetchLike
 }
 
@@ -13,6 +15,9 @@ export class OpenRouterModel implements ModelPlugin {
   id = "openrouter"
   name = "OpenRouter"
   provider = "openrouter"
+  readonly modelName: string
+  readonly reasoningEffort: string
+  readonly contextWindowTokens: number
   private readonly defaultModel: string
   private readonly defaultParameters: ModelParameters
   private readonly client: OpenAICompatibleClient
@@ -21,6 +26,9 @@ export class OpenRouterModel implements ModelPlugin {
     const config = readModelConfig()
     this.defaultModel = options.defaultModel ?? config.defaultModel
     this.defaultParameters = options.defaultParameters ?? config.parameters
+    this.modelName = this.defaultModel
+    this.reasoningEffort = options.reasoningEffort ?? config.reasoningEffort
+    this.contextWindowTokens = options.contextWindowTokens ?? config.contextWindowTokens
     this.client = new OpenAICompatibleClient({
       baseUrl: "https://openrouter.ai/api/v1",
       apiKey: options.apiKey ?? config.openrouterApiKey,

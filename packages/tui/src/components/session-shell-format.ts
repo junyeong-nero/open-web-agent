@@ -1,5 +1,5 @@
 import type { RunLogItem } from "../log/run-log"
-import type { TuiState } from "../state/types"
+import type { ModelActivity, ModelSummary, TuiState } from "../state/types"
 import type { ThemeAccent } from "../theme/themes"
 
 export type TranscriptBlock = "user" | "assistant" | "tool" | "status" | "system"
@@ -40,13 +40,33 @@ export function toTranscriptViewItem(item: RunLogItem): TranscriptViewItem {
   return viewItem(item, "assistant", "", item.message)
 }
 
-export function promptMeta(agentId: string, modelId: string | null): string {
-  return `Build ${agentId} ${modelId ?? "no-model"} open-web-agent`
+export function selectedModelSummary(state: TuiState): ModelSummary | null {
+  if (!state.selectedModelId) return null
+  return state.availableModels.find((model) => model.id === state.selectedModelId) ?? null
 }
 
-export function promptHint(runStatus: TuiState["runStatus"]): string {
+export function promptMeta(model: ModelSummary | null): string {
+  if (!model) return "Build · no model · medium"
+
+  const modelName = model.modelName ?? model.name
+  const provider = model.name || model.provider
+  const reasoningEffort = model.reasoningEffort ?? "medium"
+  return `Build · ${modelName} ${provider} · ${reasoningEffort}`
+}
+
+export function promptHint(runStatus: TuiState["runStatus"], contextUsage: string): string {
   const escapeAction = runStatus === "running" ? "interrupt" : "exit"
-  return `esc ${escapeAction}`
+  return `${contextUsage}  esc ${escapeAction}`
+}
+
+export function formatContextUsage(activity: Pick<ModelActivity, "usage" | "contextWindowTokens">): string {
+  const contextTokens =
+    activity.usage?.inputTokens ??
+    activity.usage?.totalTokens ??
+    sumNullable(activity.usage?.inputTokens, activity.usage?.outputTokens) ??
+    0
+  const percentage = activity.contextWindowTokens ? Math.round((contextTokens / activity.contextWindowTokens) * 100) : 0
+  return `${formatTokenCount(contextTokens)} (${percentage}%)`
 }
 
 function viewItem(item: RunLogItem, block: TranscriptBlock, prefix: string, text: string): TranscriptViewItem {
@@ -58,4 +78,15 @@ function viewItem(item: RunLogItem, block: TranscriptBlock, prefix: string, text
     text,
     accent: item.accent,
   }
+}
+
+function formatTokenCount(value: number): string {
+  if (value < 1000) return String(value)
+  if (value < 10000) return `${(value / 1000).toFixed(1)}K`
+  return `${Math.round(value / 1000)}K`
+}
+
+function sumNullable(left: number | null | undefined, right: number | null | undefined): number | null {
+  if (left == null && right == null) return null
+  return (left ?? 0) + (right ?? 0)
 }
