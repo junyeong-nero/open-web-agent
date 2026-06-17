@@ -3,6 +3,8 @@ import {
   type AgentDecision,
   type AgentPlugin,
   type AgentState,
+  type BrowserAction,
+  type BrowserToolCall,
   type ModelPlugin,
   type ModelRequest,
   type Observation,
@@ -15,6 +17,8 @@ export interface SimpleReActAgentOptions {
   timeoutMs?: number
   maxParseRetries?: number
 }
+
+type ObservedElement = Observation["interactiveElements"][number]
 
 export class SimpleReActAgent implements AgentPlugin {
   id = "simple-react-agent"
@@ -40,7 +44,7 @@ export class SimpleReActAgent implements AgentPlugin {
       lastRaw = response.text
 
       try {
-        return parseDecision(response.text)
+        return repairDecisionTargets(parseDecision(response.text), state.lastObservation)
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error)
       }
@@ -128,7 +132,166 @@ function parseDecision(text: string): AgentDecision {
     throw new Error(`Model returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`)
   }
 
-  return AgentDecisionSchema.parse(parsed)
+  return AgentDecisionSchema.parse(normalizeModelDecision(parsed))
+}
+
+function repairDecisionTargets(decision: AgentDecision, observation: Observation | null): AgentDecision {
+  if (decision.type !== "browser_actions" || !observation) return decision
+
+  return {
+    ...decision,
+    actions: decision.actions.map((action) => ({
+      ...action,
+      toolCalls: action.toolCalls.map((toolCall) => repairToolCallTarget(toolCall, action, observation)),
+    })),
+  }
+}
+
+function repairToolCallTarget(
+  toolCall: BrowserToolCall,
+  action: BrowserAction,
+  observation: Observation,
+): BrowserToolCall {
+  if (toolCall.type !== "click" && toolCall.type !== "type") return toolCall
+  if (hasUsableTarget(toolCall.target)) return toolCall
+
+  const element = chooseTargetElement(toolCall.type, action, observation)
+  if (!element) return toolCall
+
+  return {
+    ...toolCall,
+    target: targetFromElement(element),
+  } as BrowserToolCall
+}
+
+function hasUsableTarget(target: Extract<BrowserToolCall, { type: "click" | "type" }>["target"]): boolean {
+  return Boolean(target.selector || target.text || target.role || target.name || target.coordinates || target.elementId)
+}
+
+function chooseTargetElement(
+  toolType: Extract<BrowserToolCall, { type: "click" | "type" }>["type"],
+  action: BrowserAction,
+  observation: Observation,
+): ObservedElement | null {
+  if (toolType === "type") return findInputElement(observation)
+
+  const actionText = `${action.kind} ${action.reason ?? ""}`.toLowerCase()
+  if (actionText.includes("검색창") || actionText.includes("search box") || actionText.includes("input")) {
+    return findInputElement(observation)
+  }
+
+  if (actionText.includes("검색") || actionText.includes("search") || actionText.includes("submit")) {
+    return (
+      observation.interactiveElements.find((element) => isButtonElement(element) && elementMatchesSearch(element)) ??
+      findButtonElement(observation)
+    )
+  }
+
+  return findButtonElement(observation)
+}
+
+function findInputElement(observation: Observation): ObservedElement | null {
+  return observation.interactiveElements.find(isInputElement) ?? null
+}
+
+function findButtonElement(observation: Observation): ObservedElement | null {
+  return observation.interactiveElements.find(isButtonElement) ?? null
+}
+
+function isInputElement(element: ObservedElement): boolean {
+  const role = element.role?.toLowerCase() ?? ""
+  const type = element.attributes.type?.toLowerCase() ?? ""
+  return (
+    ["combobox", "input", "searchbox", "textbox", "textarea"].includes(role) ||
+    ["search", "text", "email", "url", "tel", "number"].includes(type)
+  )
+}
+
+function isButtonElement(element: ObservedElement): boolean {
+  const role = element.role?.toLowerCase() ?? ""
+  const type = element.attributes.type?.toLowerCase() ?? ""
+  return role === "button" || type === "button" || type === "submit"
+}
+
+function elementMatchesSearch(element: ObservedElement): boolean {
+  const text = [element.id, element.name, element.text, element.attributes["aria-label"], element.attributes.title]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .toLowerCase()
+  return text.includes("검색") || text.includes("search")
+}
+
+function targetFromElement(element: ObservedElement): Extract<BrowserToolCall, { type: "click" | "type" }>["target"] {
+  return {
+    elementId: element.id,
+    selector: element.selector,
+    text: element.text,
+    role: element.role,
+    name: element.name,
+    coordinates: null,
+  }
+}
+
+function normalizeModelDecision(value: unknown): unknown {
+  if (!isRecord(value) || value.type !== "browser_actions" || !Array.isArray(value.actions)) return value
+
+  return {
+    ...value,
+    actions: value.actions.map((action, actionIndex) => {
+      if (!isRecord(action) || !Array.isArray(action.toolCalls)) return action
+
+      const actionId = typeof action.id === "string" && action.id.length > 0 ? action.id : `action_${actionIndex + 1}`
+      return {
+        ...action,
+        toolCalls: action.toolCalls.map((toolCall, toolIndex) => normalizeToolCall(toolCall, actionId, toolIndex)),
+      }
+    }),
+  }
+}
+
+function normalizeToolCall(toolCall: unknown, actionId: string, toolIndex: number): unknown {
+  if (!isRecord(toolCall)) return toolCall
+
+  const args = isRecord(toolCall.arguments) ? toolCall.arguments : isRecord(toolCall.args) ? toolCall.args : {}
+  const normalized: Record<string, unknown> = { ...args, ...toolCall }
+  delete normalized.arguments
+  delete normalized.args
+
+  if (typeof normalized.type !== "string" && typeof normalized.name === "string") {
+    normalized.type = normalized.name
+  }
+  delete normalized.name
+  if (typeof normalized.type !== "string" && typeof normalized.kind === "string") {
+    normalized.type = normalized.kind
+  }
+  delete normalized.kind
+
+  if (!isRecord(normalized.target) && typeof normalized.ref === "string" && normalized.ref.length > 0) {
+    normalized.target = { selector: selectorForRef(normalized.ref) }
+  }
+  delete normalized.ref
+
+  if (normalized.type === "type" && typeof normalized.value !== "string" && typeof normalized.text === "string") {
+    normalized.value = normalized.text
+  }
+  if (normalized.type !== "final_answer") {
+    delete normalized.text
+  }
+
+  if (typeof normalized.id !== "string" || normalized.id.length === 0) {
+    normalized.id = `${actionId}_tool_${toolIndex + 1}`
+  }
+
+  return normalized
+}
+
+function selectorForRef(ref: string): string {
+  if (ref.startsWith("#") || ref.startsWith(".") || ref.startsWith("[")) return ref
+  return `#${ref}`
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, signal: AbortSignal): Promise<T> {

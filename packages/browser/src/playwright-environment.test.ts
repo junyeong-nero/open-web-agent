@@ -32,6 +32,8 @@ function fixtureUrl(): string {
       <body>
         <button id="toggle">Reveal</button>
         <input id="name" aria-label="Name" />
+        <input id="hidden-token" type="hidden" name="where" value="nexearch" />
+        <button id="hidden-button" style="display: none">Hidden</button>
         <main id="status">Idle</main>
         <script>
           document.querySelector("#toggle").addEventListener("click", () => {
@@ -90,6 +92,8 @@ describe("PlaywrightEnvironment", () => {
       expect(observation.text).toContain("Typed Ada")
       expect(observation.interactiveElements.some((element) => element.selector === "#toggle")).toBe(true)
       expect(observation.interactiveElements.some((element) => element.selector === "#name")).toBe(true)
+      expect(observation.interactiveElements.some((element) => element.selector === "#hidden-token")).toBe(false)
+      expect(observation.interactiveElements.some((element) => element.selector === "#hidden-button")).toBe(false)
       expect(text.metadata.text).toContain("Typed Ada")
       expect(screenshot.observation?.screenshotPath).toEndWith(".png")
       expect((await stat(screenshot.observation?.screenshotPath ?? "")).isFile()).toBe(true)
