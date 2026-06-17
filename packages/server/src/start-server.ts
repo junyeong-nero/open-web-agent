@@ -24,6 +24,7 @@ export async function startServer(options: StartServerOptions): Promise<StartedS
   const server = Bun.serve({
     hostname,
     port,
+    idleTimeout: 255,
     fetch: (request) => options.app.fetch(request),
   })
   const resolvedPort = server.port
@@ -36,7 +37,7 @@ export async function startServer(options: StartServerOptions): Promise<StartedS
     hostname,
     port: resolvedPort,
     async stop(): Promise<void> {
-      server.stop()
+      await server.stop(true)
     },
   }
 }

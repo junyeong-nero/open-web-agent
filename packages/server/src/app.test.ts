@@ -107,7 +107,7 @@ describe("createApp", () => {
     const response = await request("/events")
     const reader = response.body?.getReader()
     if (!reader) throw new Error("SSE body missing")
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    const connectedText = await readUntil(reader, ": connected")
 
     const event: RunEvent = {
       id: "evt_1",
@@ -120,13 +120,9 @@ describe("createApp", () => {
       createdAt: "2026-06-17T00:00:00.000Z",
     }
     await eventBus.publish(event)
-    const chunk = await Promise.race([
-      reader.read(),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Timed out reading SSE")), 1000)),
-    ])
+    const text = connectedText + (await readUntil(reader, "event: run.started"))
     await reader.cancel()
 
-    const text = new TextDecoder().decode(chunk.value)
     expect(response.headers.get("content-type")).toContain("text/event-stream")
     expect(text).toContain("event: run.started")
     expect(text).toContain("id: 0")
@@ -172,3 +168,15 @@ describe("createApp", () => {
     expect((await cancelled).type).toBe("run.cancelled")
   })
 })
+
+async function readUntil(reader: ReadableStreamDefaultReader<Uint8Array>, pattern: string): Promise<string> {
+  let text = ""
+  while (!text.includes(pattern)) {
+    const chunk = await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Timed out reading SSE")), 1000)),
+    ])
+    text += new TextDecoder().decode(chunk.value)
+  }
+  return text
+}

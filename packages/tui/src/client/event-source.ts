@@ -27,9 +27,7 @@ export function createEventStream(baseUrl: string, onEvent: (event: RunEvent) =>
         if (dataLine) onEvent(RunEventSchema.parse(JSON.parse(dataLine.slice("data: ".length))))
       }
     }
-  })().catch((error) => {
-    if (!controller.signal.aborted) console.error(error)
-  })
+  })().catch(() => {})
 
   return { close: () => controller.abort() }
 }

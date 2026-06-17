@@ -18,6 +18,7 @@ export function registerEventRoutes(app: Hono, deps: EventRouteDeps): void {
       )
 
       stream.onAbort(unsubscribe)
+      await stream.write(": connected\n\n")
 
       while (!stream.aborted && !stream.closed) {
         await stream.sleep(1000)
