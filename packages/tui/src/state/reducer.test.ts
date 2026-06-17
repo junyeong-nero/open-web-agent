@@ -194,4 +194,13 @@ describe("reduceTuiEvent", () => {
       ["agent.answer", "Example Domain"],
     ])
   })
+
+  it("ignores duplicate run events when storing timeline and run log entries", () => {
+    const runStarted = event("run.started", { prompt: "Open example.com" })
+    const once = reduceTuiEvent(createInitialState("/tmp/project"), { type: "run.event", event: runStarted })
+    const twice = reduceTuiEvent(once, { type: "run.event", event: runStarted })
+
+    expect(twice.timeline.map((item) => item.eventId)).toEqual(["evt_run.started"])
+    expect(twice.runLog.map((item) => item.id)).toEqual(["evt_run.started"])
+  })
 })

@@ -50,6 +50,7 @@ export interface TuiState {
   runStatus: "idle" | "running" | "completed" | "failed" | "cancelled"
   inspectorVisible: boolean
   selectedEvent: RunEvent | null
+  seenRunEventIds: string[]
   conversation: ConversationMessage[]
   timeline: TimelineItem[]
   runLog: RunLogItem[]
