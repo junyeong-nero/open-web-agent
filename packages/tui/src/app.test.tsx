@@ -46,7 +46,10 @@ function startTuiServer(): { url: string } {
     fetch(request) {
       const url = new URL(request.url)
       if (url.pathname === "/sessions" && request.method === "POST") {
-        return Response.json({ sessionId: "ses_test" })
+        return Response.json({ sessionId: sessionSummary.id, session: sessionSummary })
+      }
+      if (url.pathname === "/sessions" && request.method === "GET") {
+        return Response.json({ sessions: [sessionSummary] })
       }
       if (url.pathname === "/plugins" && request.method === "GET") {
         return Response.json({ agents: [], models: [], environments: [] })
@@ -59,4 +62,15 @@ function startTuiServer(): { url: string } {
   })
   servers.push(server)
   return { url: `http://${server.hostname}:${server.port}` }
+}
+
+const sessionSummary = {
+  id: "ses_test",
+  projectPath: "/tmp/open-web-agent-test",
+  projectHash: "hash",
+  title: null,
+  pinned: false,
+  deletedAt: null,
+  createdAt: "2026-06-17T00:00:00.000Z",
+  runStatus: "idle",
 }

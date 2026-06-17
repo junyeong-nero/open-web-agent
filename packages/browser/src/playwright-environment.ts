@@ -17,50 +17,60 @@ export interface PlaywrightEnvironmentOptions {
   headless?: boolean
 }
 
+interface PlaywrightRunState {
+  browser: Browser
+  context: BrowserContext
+  page: Page
+  lastScreenshotPath: string | null
+  screenshotCount: number
+}
+
 export class PlaywrightEnvironment implements BrowserEnvironment {
   id = "playwright-browser"
   name = "Playwright Browser"
-  private browser: Browser | null = null
-  private context: BrowserContext | null = null
-  private page: Page | null = null
-  private lastScreenshotPath: string | null = null
-  private screenshotCount = 0
+  private runs = new Map<string, PlaywrightRunState>()
 
   constructor(private readonly options: PlaywrightEnvironmentOptions = {}) {}
 
   async reset(ctx: RuntimeContext): Promise<void> {
     await this.close(ctx)
-    this.browser = await withAbort(this.launchBrowser(), ctx.abortSignal)
-    this.context = await this.browser.newContext()
-    this.page = await this.context.newPage()
-    this.lastScreenshotPath = null
-    this.screenshotCount = 0
+    const browser = await withAbort(this.launchBrowser(), ctx.abortSignal)
+    const context = await browser.newContext()
+    const page = await context.newPage()
+    this.runs.set(ctx.runId, {
+      browser,
+      context,
+      page,
+      lastScreenshotPath: null,
+      screenshotCount: 0,
+    })
   }
 
   async observe(ctx: RuntimeContext): Promise<Observation> {
-    const page = this.requirePage()
-    return withAbort(this.readObservation(page), ctx.abortSignal)
+    const state = this.requireState(ctx)
+    return withAbort(this.readObservation(state), ctx.abortSignal)
   }
 
-  pageForTools(): Page {
-    return this.requirePage()
+  pageForTools(ctx: RuntimeContext): Page {
+    return this.requireState(ctx).page
   }
 
   nextScreenshotPath(ctx: RuntimeContext): string {
-    this.screenshotCount += 1
-    return join(ctx.runDir, "screenshots", `step-${String(this.screenshotCount).padStart(4, "0")}.png`)
+    const state = this.requireState(ctx)
+    state.screenshotCount += 1
+    return join(ctx.runDir, "screenshots", `step-${String(state.screenshotCount).padStart(4, "0")}.png`)
   }
 
-  recordScreenshotPath(screenshotPath: string): void {
-    this.lastScreenshotPath = screenshotPath
+  recordScreenshotPath(ctx: RuntimeContext, screenshotPath: string): void {
+    this.requireState(ctx).lastScreenshotPath = screenshotPath
   }
 
-  async close(_ctx: RuntimeContext): Promise<void> {
-    await this.context?.close().catch(() => {})
-    await this.browser?.close().catch(() => {})
-    this.page = null
-    this.context = null
-    this.browser = null
+  async close(ctx: RuntimeContext): Promise<void> {
+    const state = this.runs.get(ctx.runId)
+    if (!state) return
+    this.runs.delete(ctx.runId)
+    await state.context.close().catch(() => {})
+    await state.browser.close().catch(() => {})
   }
 
   private async launchBrowser(): Promise<Browser> {
@@ -76,12 +86,14 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
     }
   }
 
-  private requirePage(): Page {
-    if (!this.page) throw new Error("PlaywrightEnvironment has not been reset")
-    return this.page
+  private requireState(ctx: RuntimeContext): PlaywrightRunState {
+    const state = this.runs.get(ctx.runId)
+    if (!state) throw new Error("PlaywrightEnvironment has not been reset")
+    return state
   }
 
-  private async readObservation(page: Page): Promise<Observation> {
+  private async readObservation(state: PlaywrightRunState): Promise<Observation> {
+    const { page } = state
     const [title, text, interactiveElements] = await Promise.all([
       page.title().catch(() => null),
       page.locator("body").innerText().catch(() => null),
@@ -148,7 +160,7 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
       url: page.url(),
       title,
       text,
-      screenshotPath: this.lastScreenshotPath,
+      screenshotPath: state.lastScreenshotPath,
       interactiveElements,
       metadata: {},
     }
@@ -163,7 +175,7 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
   constructor(private readonly environment: PlaywrightEnvironment) {}
 
   async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
-    const page = this.environment.pageForTools()
+    const page = this.environment.pageForTools(ctx)
 
     if (call.type === "navigate") {
       await withAbort(page.goto(call.url, { waitUntil: "domcontentloaded" }), ctx.abortSignal)
@@ -230,7 +242,7 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
       const screenshotPath = this.environment.nextScreenshotPath(ctx)
       await mkdir(join(ctx.runDir, "screenshots"), { recursive: true })
       await withAbort(page.screenshot({ path: screenshotPath, fullPage: true }), ctx.abortSignal)
-      this.environment.recordScreenshotPath(screenshotPath)
+      this.environment.recordScreenshotPath(ctx, screenshotPath)
       return {
         ok: true,
         message: "screenshot captured",

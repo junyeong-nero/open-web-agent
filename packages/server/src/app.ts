@@ -21,7 +21,7 @@ export function createApp(deps: CreateAppDeps): Hono {
 
   registerHealthRoutes(app)
   registerEventRoutes(app, { eventBus: deps.eventBus })
-  registerSessionRoutes(app, { sessions: deps.sessions, storage: deps.storage })
+  registerSessionRoutes(app, { sessions: deps.sessions, runs, storage: deps.storage })
   registerRunRoutes(app, {
     orchestrator: deps.orchestrator,
     registry: deps.registry,

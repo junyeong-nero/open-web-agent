@@ -18,6 +18,9 @@ describe("SQLiteStore", () => {
       id: "ses_1",
       projectPath: "/tmp/project",
       projectHash: "hash",
+      title: null,
+      pinned: false,
+      deletedAt: null,
       createdAt: "2026-06-17T00:00:00.000Z",
     })
     sqlite.close()
@@ -30,12 +33,42 @@ describe("SQLiteStore", () => {
     reopened.close()
   })
 
+  it("persists session title, pinned state, and soft deletion", async () => {
+    const sqlite = await store()
+    sqlite.upsertSession({
+      id: "ses_1",
+      projectPath: "/tmp/project",
+      projectHash: "hash",
+      title: null,
+      pinned: false,
+      deletedAt: null,
+      createdAt: "2026-06-17T00:00:00.000Z",
+    })
+
+    sqlite.updateSession("ses_1", { title: "Repo commit check", pinned: true })
+
+    expect(sqlite.getSession("ses_1")).toMatchObject({
+      title: "Repo commit check",
+      pinned: true,
+      deletedAt: null,
+    })
+
+    sqlite.deleteSession("ses_1", "2026-06-17T00:02:00.000Z")
+
+    expect(sqlite.getSession("ses_1")).toBeNull()
+    expect(sqlite.listSessions()).toEqual([])
+    sqlite.close()
+  })
+
   it("persists runs and messages", async () => {
     const sqlite = await store()
     sqlite.upsertSession({
       id: "ses_1",
       projectPath: "/tmp/project",
       projectHash: "hash",
+      title: null,
+      pinned: false,
+      deletedAt: null,
       createdAt: "2026-06-17T00:00:00.000Z",
     })
     sqlite.upsertRun({
@@ -65,6 +98,9 @@ describe("SQLiteStore", () => {
       id: "ses_1",
       projectPath: "/tmp/project",
       projectHash: "hash",
+      title: "Greeting",
+      pinned: false,
+      deletedAt: null,
       createdAt: "2026-06-17T00:00:00.000Z",
     })
     sqlite.appendMessage({

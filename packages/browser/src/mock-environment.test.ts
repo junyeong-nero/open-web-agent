@@ -6,7 +6,7 @@ import type { RuntimeContext } from "@open-web-agent/core"
 import { EventBus } from "@open-web-agent/core"
 import { MockBrowserToolAdapter, MockEnvironment, sleep } from "./mock-environment"
 
-async function context(signal = new AbortController().signal): Promise<RuntimeContext> {
+async function context(signal = new AbortController().signal, runId = "run_1"): Promise<RuntimeContext> {
   return {
     session: {
       id: "ses_1",
@@ -14,7 +14,7 @@ async function context(signal = new AbortController().signal): Promise<RuntimeCo
       projectHash: "hash",
       createdAt: "2026-06-17T00:00:00.000Z",
     },
-    runId: "run_1",
+    runId,
     runDir: await mkdtemp(join(tmpdir(), "owa-mock-env-")),
     eventBus: new EventBus(),
     abortSignal: signal,
@@ -44,6 +44,20 @@ describe("MockEnvironment", () => {
     expect(text.metadata).toEqual({
       text: "Example Domain\nThis domain is for use in illustrative examples in documents.",
     })
+  })
+
+  it("keeps observations isolated per run", async () => {
+    const env = new MockEnvironment(0)
+    const tools = new MockBrowserToolAdapter(env)
+    const first = await context(undefined, "run_1")
+    const second = await context(undefined, "run_2")
+
+    await env.reset(first)
+    await tools.execute({ id: "tool_1", type: "navigate", url: "https://example.com" }, first)
+    await env.reset(second)
+
+    expect((await env.observe(first)).title).toBe("Example Domain")
+    expect((await env.observe(second)).url).toBe("about:blank")
   })
 
   it("rejects sleep when the abort signal is cancelled", async () => {

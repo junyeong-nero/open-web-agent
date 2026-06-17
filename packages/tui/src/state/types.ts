@@ -49,18 +49,22 @@ export interface EnvironmentSummary {
   name: string
 }
 
-export interface TuiState {
+export type RunStatus = "idle" | "running" | "completed" | "failed" | "cancelled"
+
+export interface SessionSummary {
+  id: string
   projectPath: string
-  activeSessionId: string | null
+  projectHash: string
+  title: string | null
+  pinned: boolean
+  deletedAt: string | null
+  createdAt: string
+  runStatus: RunStatus
+}
+
+export interface SessionViewState {
   activeRunId: string | null
-  selectedAgentId: string
-  selectedModelId: string | null
-  selectedEnvironmentId: string
-  selectedThemeId: string
-  availableAgents: AgentSummary[]
-  availableModels: ModelSummary[]
-  availableEnvironments: EnvironmentSummary[]
-  runStatus: "idle" | "running" | "completed" | "failed" | "cancelled"
+  runStatus: RunStatus
   modelActivity: ModelActivity
   inspectorVisible: boolean
   selectedEvent: RunEvent | null
@@ -70,6 +74,21 @@ export interface TuiState {
   runLog: RunLogItem[]
   plan: PlanItem[]
   browser: Observation
+}
+
+export interface TuiState extends SessionViewState {
+  projectPath: string
+  activeSessionId: string | null
+  selectedAgentId: string
+  selectedModelId: string | null
+  selectedEnvironmentId: string
+  selectedThemeId: string
+  availableAgents: AgentSummary[]
+  availableModels: ModelSummary[]
+  availableEnvironments: EnvironmentSummary[]
+  sessions: SessionSummary[]
+  runningSessionIds: string[]
+  sessionViews: Record<string, SessionViewState>
 }
 
 export const EMPTY_OBSERVATION: Observation = {

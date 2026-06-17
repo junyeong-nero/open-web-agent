@@ -6,13 +6,20 @@ import {
   type EnvironmentSummary,
   type ModelSummary,
   type PlanItem,
+  type RunStatus,
+  type SessionSummary,
+  type SessionViewState,
   type TimelineItem,
   type TuiState,
 } from "./types"
 import { toRunLogItem } from "../log/run-log"
 
 export type TuiEvent =
-  | { type: "session.created"; sessionId: string }
+  | { type: "session.created"; sessionId: string; session?: SessionSummary }
+  | { type: "session.selected"; sessionId: string }
+  | { type: "session.updated"; session: SessionSummary }
+  | { type: "session.deleted"; sessionId: string }
+  | { type: "sessions.loaded"; sessions: SessionSummary[] }
   | { type: "plugins.loaded"; agents: AgentSummary[]; models: ModelSummary[]; environments: EnvironmentSummary[] }
   | { type: "agent.selected"; agentId: string }
   | { type: "model.selected"; modelId: string }
@@ -28,7 +35,6 @@ export function createInitialState(projectPath: string): TuiState {
   return {
     projectPath,
     activeSessionId: null,
-    activeRunId: null,
     selectedAgentId: "see-act",
     selectedModelId: null,
     selectedEnvironmentId: "playwright-browser",
@@ -36,24 +42,18 @@ export function createInitialState(projectPath: string): TuiState {
     availableAgents: [],
     availableModels: [],
     availableEnvironments: [],
-    runStatus: "idle",
-    modelActivity: idleModelActivity(),
-    inspectorVisible: true,
-    selectedEvent: null,
-    seenRunEventIds: [],
-    conversation: [],
-    timeline: [],
-    runLog: [],
-    plan: [],
-    browser: EMPTY_OBSERVATION,
+    sessions: [],
+    runningSessionIds: [],
+    sessionViews: {},
+    ...emptySessionView(),
   }
 }
 
 export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
   if (event.type === "state.reset") return createInitialState(event.projectPath)
   if (event.type === "state.clear") {
-    return {
-      ...state,
+    return commitActiveView(state, {
+      ...currentView(state),
       selectedEvent: null,
       conversation: [],
       timeline: [],
@@ -61,9 +61,55 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
       plan: [],
       browser: EMPTY_OBSERVATION,
       modelActivity: idleModelActivity(),
+    })
+  }
+  if (event.type === "sessions.loaded") {
+    const sessions = sortSessions(event.sessions.map(normalizeSession))
+    const sessionViews = { ...state.sessionViews }
+    for (const session of sessions) sessionViews[session.id] ??= emptySessionView()
+    return {
+      ...state,
+      sessions,
+      sessionViews,
+      runningSessionIds: runningSessionIds(sessions),
     }
   }
-  if (event.type === "session.created") return { ...state, activeSessionId: event.sessionId, runStatus: "idle" }
+  if (event.type === "session.created") {
+    const session = event.session ?? fallbackSession(event.sessionId, state.projectPath)
+    const next = {
+      ...state,
+      sessions: upsertSession(state.sessions, normalizeSession(session)),
+      sessionViews: {
+        ...state.sessionViews,
+        [event.sessionId]: state.sessionViews[event.sessionId] ?? emptySessionView(),
+      },
+    }
+    return activateSession({ ...next, runningSessionIds: runningSessionIds(next.sessions) }, event.sessionId)
+  }
+  if (event.type === "session.selected") {
+    return activateSession(
+      {
+        ...state,
+        sessionViews: {
+          ...state.sessionViews,
+          [event.sessionId]: state.sessionViews[event.sessionId] ?? emptySessionView(),
+        },
+      },
+      event.sessionId,
+    )
+  }
+  if (event.type === "session.updated") {
+    const sessions = upsertSession(state.sessions, normalizeSession(event.session))
+    return { ...state, sessions, runningSessionIds: runningSessionIds(sessions) }
+  }
+  if (event.type === "session.deleted") {
+    const sessions = state.sessions.filter((session) => session.id !== event.sessionId)
+    const { [event.sessionId]: _deleted, ...sessionViews } = state.sessionViews
+    const next = { ...state, sessions, sessionViews, runningSessionIds: runningSessionIds(sessions) }
+    if (state.activeSessionId !== event.sessionId) return next
+    const replacement = sessions[0]?.id ?? null
+    return replacement ? activateSession(next, replacement) : { ...next, activeSessionId: null, ...emptySessionView() }
+  }
   if (event.type === "plugins.loaded") {
     const selectedAgentId = event.agents.some((agent) => agent.id === state.selectedAgentId)
       ? state.selectedAgentId
@@ -89,37 +135,61 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
   if (event.type === "model.selected") return { ...state, selectedModelId: event.modelId }
   if (event.type === "environment.selected") return { ...state, selectedEnvironmentId: event.environmentId }
   if (event.type === "theme.selected") return { ...state, selectedThemeId: event.themeId }
-  if (event.type === "slash.details") return { ...state, inspectorVisible: !state.inspectorVisible }
+  if (event.type === "slash.details") {
+    return commitActiveView(state, { ...currentView(state), inspectorVisible: !state.inspectorVisible })
+  }
   if (event.type === "conversation.append") {
+    const view = currentView(state)
     const runLog =
       event.message.role === "system"
         ? [
-            ...state.runLog,
+            ...view.runLog,
             {
-              id: `system-${state.runLog.length}`,
-              sequence: state.runLog.length,
+              id: `system-${view.runLog.length}`,
+              sequence: view.runLog.length,
               kind: "system",
               message: event.message.content,
               accent: "warning" as const,
             },
           ]
-        : state.runLog
-    return { ...state, conversation: [...state.conversation, event.message], runLog }
+        : view.runLog
+    return commitActiveView(state, { ...view, conversation: [...view.conversation, event.message], runLog })
   }
 
-  const runEvent = event.event
-  if (state.seenRunEventIds.includes(runEvent.id)) return state
+  return reduceRunEvent(state, event.event)
+}
 
-  const next: TuiState = {
+function reduceRunEvent(state: TuiState, runEvent: RunEvent): TuiState {
+  const sessionId = runEvent.sessionId
+  const view = state.sessionViews[sessionId] ?? emptySessionView()
+  if (view.seenRunEventIds.includes(runEvent.id)) return state
+
+  const nextView = reduceSessionRunEvent(view, runEvent, state)
+  const sessions = upsertSessionRunStatus(ensureSession(state.sessions, sessionId, state.projectPath, runEvent), sessionId, runEvent)
+  let next: TuiState = {
     ...state,
-    selectedEvent: runEvent,
-    seenRunEventIds: [...state.seenRunEventIds, runEvent.id],
-    timeline: [...state.timeline, toTimelineItem(runEvent)],
-    runLog: appendRunLog(state.runLog, runEvent),
+    sessions,
+    runningSessionIds: runningSessionIds(sessions),
+    sessionViews: {
+      ...state.sessionViews,
+      [sessionId]: nextView,
+    },
   }
 
-  if (runEvent.type === "session.created") {
-    return { ...next, activeSessionId: runEvent.sessionId }
+  if (!state.activeSessionId) {
+    next = { ...next, activeSessionId: sessionId }
+  }
+  if (next.activeSessionId === sessionId) return withView(next, nextView)
+  return next
+}
+
+function reduceSessionRunEvent(view: SessionViewState, runEvent: RunEvent, state: TuiState): SessionViewState {
+  const next: SessionViewState = {
+    ...view,
+    selectedEvent: runEvent,
+    seenRunEventIds: [...view.seenRunEventIds, runEvent.id],
+    timeline: [...view.timeline, toTimelineItem(runEvent)],
+    runLog: appendRunLog(view.runLog, runEvent),
   }
 
   if (runEvent.type === "run.started") {
@@ -127,19 +197,19 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
   }
 
   if (runEvent.type === "model.called") {
-    return { ...next, modelActivity: readModelActivity(runEvent.payload, state, "running") }
+    return { ...next, modelActivity: readModelActivity(runEvent.payload, state, view, "running") }
   }
 
   if (runEvent.type === "model.completed") {
-    return { ...next, modelActivity: readModelActivity(runEvent.payload, state, "idle") }
+    return { ...next, modelActivity: readModelActivity(runEvent.payload, state, view, "idle") }
   }
 
   if (runEvent.type === "observation.captured") {
-    return { ...next, browser: readObservation(runEvent.payload.observation, state.browser) }
+    return { ...next, browser: readObservation(runEvent.payload.observation, view.browser) }
   }
 
   if (runEvent.type === "plan.created" || runEvent.type === "plan.updated") {
-    return { ...next, plan: readPlanItems(runEvent.payload.items, state.plan) }
+    return { ...next, plan: readPlanItems(runEvent.payload.items, view.plan) }
   }
 
   if (runEvent.type === "run.completed") {
@@ -148,7 +218,7 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
       ...next,
       runStatus: "completed",
       modelActivity: { ...next.modelActivity, status: "idle" },
-      conversation: finalAnswer.length > 0 ? [...state.conversation, { role: "assistant", content: finalAnswer }] : state.conversation,
+      conversation: finalAnswer.length > 0 ? [...view.conversation, { role: "assistant", content: finalAnswer }] : view.conversation,
     }
   }
 
@@ -156,6 +226,146 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
   if (runEvent.type === "run.cancelled") return { ...next, runStatus: "cancelled", modelActivity: { ...next.modelActivity, status: "idle" } }
 
   return next
+}
+
+function activateSession(state: TuiState, sessionId: string): TuiState {
+  return withView({ ...state, activeSessionId: sessionId }, state.sessionViews[sessionId] ?? emptySessionView())
+}
+
+function commitActiveView(state: TuiState, view: SessionViewState): TuiState {
+  if (!state.activeSessionId) return withView(state, view)
+  return withView(
+    {
+      ...state,
+      sessionViews: {
+        ...state.sessionViews,
+        [state.activeSessionId]: view,
+      },
+    },
+    view,
+  )
+}
+
+function currentView(state: TuiState): SessionViewState {
+  return {
+    activeRunId: state.activeRunId,
+    runStatus: state.runStatus,
+    modelActivity: state.modelActivity,
+    inspectorVisible: state.inspectorVisible,
+    selectedEvent: state.selectedEvent,
+    seenRunEventIds: state.seenRunEventIds,
+    conversation: state.conversation,
+    timeline: state.timeline,
+    runLog: state.runLog,
+    plan: state.plan,
+    browser: state.browser,
+  }
+}
+
+function withView(state: TuiState, view: SessionViewState): TuiState {
+  return {
+    ...state,
+    activeRunId: view.activeRunId,
+    runStatus: view.runStatus,
+    modelActivity: view.modelActivity,
+    inspectorVisible: view.inspectorVisible,
+    selectedEvent: view.selectedEvent,
+    seenRunEventIds: view.seenRunEventIds,
+    conversation: view.conversation,
+    timeline: view.timeline,
+    runLog: view.runLog,
+    plan: view.plan,
+    browser: view.browser,
+  }
+}
+
+function emptySessionView(): SessionViewState {
+  return {
+    activeRunId: null,
+    runStatus: "idle",
+    modelActivity: idleModelActivity(),
+    inspectorVisible: true,
+    selectedEvent: null,
+    seenRunEventIds: [],
+    conversation: [],
+    timeline: [],
+    runLog: [],
+    plan: [],
+    browser: EMPTY_OBSERVATION,
+  }
+}
+
+function normalizeSession(session: SessionSummary): SessionSummary {
+  return {
+    ...session,
+    title: session.title ?? null,
+    pinned: session.pinned ?? false,
+    deletedAt: session.deletedAt ?? null,
+    runStatus: session.runStatus ?? "idle",
+  }
+}
+
+function fallbackSession(sessionId: string, projectPath: string): SessionSummary {
+  return {
+    id: sessionId,
+    projectPath,
+    projectHash: "",
+    title: null,
+    pinned: false,
+    deletedAt: null,
+    createdAt: new Date(0).toISOString(),
+    runStatus: "idle",
+  }
+}
+
+function ensureSession(sessions: SessionSummary[], sessionId: string, projectPath: string, event: RunEvent): SessionSummary[] {
+  const payloadSession = isRecord(event.payload.session) ? event.payload.session : null
+  const session =
+    payloadSession && typeof payloadSession.id === "string"
+      ? normalizeSession({
+          id: payloadSession.id,
+          projectPath: readString(payloadSession.projectPath) ?? projectPath,
+          projectHash: readString(payloadSession.projectHash) ?? "",
+          title: readNullableString(payloadSession.title),
+          pinned: payloadSession.pinned === true,
+          deletedAt: readNullableString(payloadSession.deletedAt),
+          createdAt: readString(payloadSession.createdAt) ?? new Date(0).toISOString(),
+          runStatus: "idle",
+        })
+      : fallbackSession(sessionId, projectPath)
+
+  return sessions.some((current) => current.id === sessionId) ? sessions : upsertSession(sessions, session)
+}
+
+function upsertSession(sessions: SessionSummary[], session: SessionSummary): SessionSummary[] {
+  const next = sessions.filter((current) => current.id !== session.id)
+  if (!session.deletedAt) next.push(session)
+  return sortSessions(next)
+}
+
+function upsertSessionRunStatus(sessions: SessionSummary[], sessionId: string, event: RunEvent): SessionSummary[] {
+  const runStatus = runStatusFromEvent(event)
+  if (!runStatus) return sessions
+  return sortSessions(sessions.map((session) => (session.id === sessionId ? { ...session, runStatus } : session)))
+}
+
+function runStatusFromEvent(event: RunEvent): RunStatus | null {
+  if (event.type === "run.started") return "running"
+  if (event.type === "run.completed") return "completed"
+  if (event.type === "run.failed") return "failed"
+  if (event.type === "run.cancelled") return "cancelled"
+  return null
+}
+
+function sortSessions(sessions: SessionSummary[]): SessionSummary[] {
+  return [...sessions].sort((left, right) => {
+    if (left.pinned !== right.pinned) return left.pinned ? -1 : 1
+    return right.createdAt.localeCompare(left.createdAt)
+  })
+}
+
+function runningSessionIds(sessions: SessionSummary[]): string[] {
+  return sessions.filter((session) => session.runStatus === "running").map((session) => session.id)
 }
 
 function toTimelineItem(event: RunEvent): TimelineItem {
@@ -216,21 +426,24 @@ function idleModelActivity() {
   }
 }
 
-function readModelActivity(payload: Record<string, unknown>, state: TuiState, status: TuiState["modelActivity"]["status"]) {
+function readModelActivity(
+  payload: Record<string, unknown>,
+  state: TuiState,
+  view: SessionViewState,
+  status: TuiState["modelActivity"]["status"],
+) {
   const response = isRecord(payload.response) ? payload.response : null
-  const usage = response ? readModelUsage(response.usage) : state.modelActivity.usage
+  const usage = response ? readModelUsage(response.usage) : view.modelActivity.usage
   const modelId = readString(payload.modelId) ?? state.selectedModelId
   const summary = modelId ? state.availableModels.find((model) => model.id === modelId) : undefined
 
   return {
     status,
     modelId,
-    modelName: readString(payload.modelName) ?? summary?.modelName ?? summary?.name ?? state.modelActivity.modelName,
-    provider: readString(payload.provider) ?? summary?.provider ?? state.modelActivity.provider,
-    reasoningEffort:
-      readString(payload.reasoningEffort) ?? summary?.reasoningEffort ?? state.modelActivity.reasoningEffort ?? "medium",
-    contextWindowTokens:
-      readPositiveInteger(payload.contextWindowTokens) ?? summary?.contextWindowTokens ?? state.modelActivity.contextWindowTokens,
+    modelName: readString(payload.modelName) ?? summary?.modelName ?? summary?.name ?? view.modelActivity.modelName,
+    provider: readString(payload.provider) ?? summary?.provider ?? view.modelActivity.provider,
+    reasoningEffort: readString(payload.reasoningEffort) ?? summary?.reasoningEffort ?? view.modelActivity.reasoningEffort ?? "medium",
+    contextWindowTokens: readPositiveInteger(payload.contextWindowTokens) ?? summary?.contextWindowTokens ?? view.modelActivity.contextWindowTokens,
     usage,
   }
 }
@@ -246,6 +459,10 @@ function readModelUsage(value: unknown): TuiState["modelActivity"]["usage"] {
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null
+}
+
+function readNullableString(value: unknown): string | null {
+  return value === null || value === undefined ? null : readString(value)
 }
 
 function readPositiveInteger(value: unknown): number | null {
