@@ -1,8 +1,8 @@
 /** @jsxImportSource @opentui/solid */
-import { createSignal, For, onCleanup } from "solid-js"
+import { createEffect, createSignal, For, onCleanup } from "solid-js"
 import type { TextareaRenderable } from "@opentui/core"
 import type { KeyEvent } from "@opentui/core"
-import { completeSlashCommand, listSlashCommandSuggestions } from "../commands/slash-commands"
+import { listSlashCommandSuggestions, type SlashCommandSuggestion } from "../commands/slash-commands"
 import type { AgentSummary, ModelActivity, ModelSummary, TuiState } from "../state/types"
 import type { TuiTheme } from "../theme/themes"
 import { formatContextUsage, promptHint, promptMeta } from "./session-shell-format"
@@ -17,11 +17,14 @@ export interface PromptInputProps {
   focused?: boolean
   onChange(value: string): void
   onSubmit(): void
+  onFocusRequest?(): void
 }
 
 export function PromptInput(props: PromptInputProps) {
   let textarea: (TextareaRenderable & { plainText?: string }) | undefined
   const [barPhase, setBarPhase] = createSignal(0)
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = createSignal(0)
+  const [draftValue, setDraftValue] = createSignal(props.value)
   const interval = setInterval(() => setBarPhase((phase) => (phase + 1) % 14), 120)
   const keyBindings = [
     { name: "return", action: "submit" as const },
@@ -32,30 +35,59 @@ export function PromptInput(props: PromptInputProps) {
     { name: "linefeed", shift: true, action: "newline" as const },
   ]
 
-  const currentValue = () => textarea?.plainText ?? props.value
-  const commandSuggestions = () => listSlashCommandSuggestions(props.value)
+  const currentValue = () => textarea?.plainText ?? draftValue()
+  const commandSuggestions = () => listSlashCommandSuggestions(draftValue())
+  createEffect(() => {
+    const count = commandSuggestions().length
+    setSelectedSuggestionIndex((index) => (count === 0 ? 0 : Math.min(index, count - 1)))
+  })
   const handleContentChange = (_event: unknown) => {
-    props.onChange(currentValue())
+    const value = currentValue()
+    setDraftValue(value)
+    props.onChange(value)
   }
   const handleSubmit = () => {
-    props.onChange(currentValue())
+    const value = currentValue()
+    setDraftValue(value)
+    props.onChange(value)
     textarea?.clear()
+    setDraftValue("")
     props.onSubmit()
   }
   const handleSlashCompletion = () => {
-    const completion = completeSlashCommand(currentValue())
+    const suggestion = commandSuggestions()[selectedSuggestionIndex()]
+    const completion = suggestion ? formatSuggestionCompletion(suggestion) : null
     if (!completion) return false
 
     if (!textarea) {
+      setDraftValue(completion)
       props.onChange(completion)
       return true
     }
 
     textarea.setText(completion)
     textarea.cursorOffset = completion.length
+    setDraftValue(completion)
+    return true
+  }
+  const moveSlashSelection = (delta: -1 | 1) => {
+    const count = commandSuggestions().length
+    if (count === 0) return false
+
+    setSelectedSuggestionIndex((index) => (index + delta + count) % count)
     return true
   }
   const handleKeyDown = (event: KeyEvent) => {
+    if (event.name === "up" && moveSlashSelection(-1)) {
+      event.preventDefault()
+      return
+    }
+
+    if (event.name === "down" && moveSlashSelection(1)) {
+      event.preventDefault()
+      return
+    }
+
     if (event.name === "tab" && !event.shift && handleSlashCompletion()) {
       event.preventDefault()
       return
@@ -70,7 +102,7 @@ export function PromptInput(props: PromptInputProps) {
   onCleanup(() => clearInterval(interval))
 
   return (
-    <box flexDirection="column" flexShrink={0} backgroundColor={props.theme.surface}>
+    <box flexDirection="column" flexShrink={0} backgroundColor={props.theme.surface} onMouseDown={props.onFocusRequest}>
       <box border={["left"]} borderColor={props.theme.task} backgroundColor={props.theme.panelAlt} paddingX={2} paddingY={1}>
         <textarea
           id="prompt-input-textarea"
@@ -105,13 +137,24 @@ export function PromptInput(props: PromptInputProps) {
       >
         <For each={commandSuggestions()}>
           {(command, index) => {
-            const selected = () => index() === 0
+            const selected = () => index() === selectedSuggestionIndex()
+            const selectSuggestion = () => {
+              props.onFocusRequest?.()
+              setSelectedSuggestionIndex(index())
+            }
             return (
               <box
+                id={`slash-suggestion-${index()}`}
                 flexDirection="row"
                 gap={2}
                 backgroundColor={selected() ? props.theme.task : props.theme.panelAlt}
                 paddingX={selected() ? 1 : 0}
+                onMouseMove={selectSuggestion}
+                onMouseOver={selectSuggestion}
+                onMouseDown={() => {
+                  selectSuggestion()
+                  void handleSlashCompletion()
+                }}
               >
                 <text fg={selected() ? props.theme.surface : props.theme.text} wrapMode="none">
                   {command.name}
@@ -142,6 +185,10 @@ export function PromptInput(props: PromptInputProps) {
       </box>
     </box>
   )
+}
+
+function formatSuggestionCompletion(suggestion: SlashCommandSuggestion): string {
+  return suggestion.argumentHint ? `${suggestion.name} ` : suggestion.name
 }
 
 function inferenceLoadingBar(phase: number): string {

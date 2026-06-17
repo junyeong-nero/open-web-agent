@@ -1,6 +1,7 @@
+/** @jsxImportSource @opentui/solid */
+import { sessionMeta, sessionTitle } from "./session-shell-format"
 import type { TuiState } from "../state/types"
 import type { TuiTheme } from "../theme/themes"
-import { sessionMeta, sessionTitle } from "./session-shell-format"
 
 export interface SessionHeaderProps {
   state: TuiState

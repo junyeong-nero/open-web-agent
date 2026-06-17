@@ -1,0 +1,6 @@
+id: plan-act
+name: External Plan-Act Agent
+description: Creates a visible plan and uses the selected runtime model for browser decisions.
+language: python
+entry: main.py
+protocol: jsonl

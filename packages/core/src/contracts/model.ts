@@ -1,8 +1,10 @@
 import { z } from "zod"
 
+export const ModelContentPartSchema = z.object({ type: z.string() }).passthrough()
+
 export const ModelMessageSchema = z.object({
   role: z.enum(["system", "user", "assistant", "tool"]),
-  content: z.string(),
+  content: z.union([z.string(), z.array(ModelContentPartSchema).min(1)]),
 })
 
 export const ModelRequestSchema = z.object({
@@ -34,6 +36,7 @@ export const ModelResponseSchema = z.object({
 })
 
 export type ModelMessage = z.infer<typeof ModelMessageSchema>
+export type ModelContentPart = z.infer<typeof ModelContentPartSchema>
 export type ModelRequest = z.infer<typeof ModelRequestSchema>
 export type ModelUsage = z.infer<typeof ModelUsageSchema>
 export type ModelResponse = z.infer<typeof ModelResponseSchema>

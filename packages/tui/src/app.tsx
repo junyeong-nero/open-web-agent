@@ -1,14 +1,16 @@
+/** @jsxImportSource @opentui/solid */
 import { createSignal, onCleanup, onMount } from "solid-js"
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useSelectionHandler } from "@opentui/solid"
 import { PromptInput } from "./components/prompt-input"
+import { ModelSelector } from "./components/model-selector"
 import { SessionHeader } from "./components/session-header"
 import { filterSessions, SessionPalette, sessionDisplayName, type SessionPaletteMode } from "./components/session-palette"
 import { TranscriptPanel } from "./components/transcript-panel"
 import { createEventStream } from "./client/event-source"
 import { createServerClient } from "./client/server-client"
 import { copySelectionToClipboard, pasteSystemClipboardText } from "./clipboard/system-clipboard"
-import { formatSlashCommandHelp, parseSlashCommand } from "./commands/slash-commands"
+import { formatSlashCommandHelp, listSlashCommandSuggestions, parseSlashCommand } from "./commands/slash-commands"
 import { mapKeyEvent } from "./keymap/keybindings"
 import { createInitialState, reduceTuiEvent } from "./state/reducer"
 import type { AgentSummary, EnvironmentSummary, ModelSummary, SessionSummary } from "./state/types"
@@ -34,6 +36,8 @@ export function App(props: AppProps) {
   const [sessionPaletteMode, setSessionPaletteMode] = createSignal<SessionPaletteMode>("search")
   const [sessionRenameValue, setSessionRenameValue] = createSignal("")
   const [sessionLoadingPhase, setSessionLoadingPhase] = createSignal(0)
+  const [modelSelectorOpen, setModelSelectorOpen] = createSignal(false)
+  const [activePane, setActivePane] = createSignal<"prompt" | "transcript">("prompt")
   let transcriptScroll: ScrollBoxRenderable | undefined
   const currentTheme = (): TuiTheme => getTheme(state().selectedThemeId)
   const sessionSpinner = setInterval(() => setSessionLoadingPhase((phase) => (phase + 1) % 4), 140)
@@ -117,6 +121,22 @@ export function App(props: AppProps) {
     if (action === "paste") {
       key.preventDefault()
       void pasteSystemClipboardText(renderer)
+    }
+    if (action === "focus-next" || action === "focus-previous") {
+      if (action === "focus-next" && activePane() === "prompt" && listSlashCommandSuggestions(prompt()).length > 0) return
+      key.preventDefault()
+      setActivePane((pane) => (pane === "prompt" ? "transcript" : "prompt"))
+      return
+    }
+    if (action === "scroll-line-up" && activePane() === "transcript") {
+      key.preventDefault()
+      transcriptScroll?.scrollBy(-1, "content")
+      return
+    }
+    if (action === "scroll-line-down" && activePane() === "transcript") {
+      key.preventDefault()
+      transcriptScroll?.scrollBy(1, "content")
+      return
     }
     if (action === "cancel-or-quit") void cancelOrExit()
     if (action === "scroll-page-up") transcriptScroll?.scrollBy(-0.5, "viewport")
@@ -406,12 +426,7 @@ export function App(props: AppProps) {
     if (command.kind === "model") {
       setPrompt("")
       if (!command.modelId) {
-        setState((current) =>
-          reduceTuiEvent(current, {
-            type: "conversation.append",
-            message: { role: "system", content: formatModelStatus(current.selectedModelId, current.availableModels) },
-          }),
-        )
+        setModelSelectorOpen(true)
         return
       }
 
@@ -536,6 +551,19 @@ export function App(props: AppProps) {
     })
   }
 
+  function selectModelFromSelector(modelId: string) {
+    setModelSelectorOpen(false)
+    setState((current) =>
+      reduceTuiEvent(
+        reduceTuiEvent(current, { type: "model.selected", modelId }),
+        {
+          type: "conversation.append",
+          message: { role: "system", content: `Model set to ${modelId}` },
+        },
+      ),
+    )
+  }
+
   return (
     <box flexDirection="column" width="100%" height="100%" paddingX={2} paddingY={1} rowGap={1} backgroundColor={currentTheme().surface}>
       <SessionHeader state={state()} theme={currentTheme()} />
@@ -557,6 +585,8 @@ export function App(props: AppProps) {
         scrollRef={(node) => {
           transcriptScroll = node
         }}
+        focused={!sessionPaletteOpen() && !modelSelectorOpen() && activePane() === "transcript"}
+        onFocusRequest={() => setActivePane("transcript")}
       />
       <PromptInput
         value={prompt()}
@@ -565,10 +595,20 @@ export function App(props: AppProps) {
         modelActivity={state().modelActivity}
         runStatus={state().runStatus}
         theme={currentTheme()}
-        focused={!sessionPaletteOpen()}
+        focused={!sessionPaletteOpen() && !modelSelectorOpen() && activePane() === "prompt"}
         onChange={setPrompt}
         onSubmit={submitPrompt}
+        onFocusRequest={() => setActivePane("prompt")}
       />
+      {modelSelectorOpen() ? (
+        <ModelSelector
+          models={state().availableModels}
+          selectedModelId={state().selectedModelId}
+          theme={currentTheme()}
+          onSelect={selectModelFromSelector}
+          onCancel={() => setModelSelectorOpen(false)}
+        />
+      ) : null}
     </box>
   )
 }
@@ -580,10 +620,6 @@ function formatAgentStatus(selectedAgentId: string, agents: AgentSummary[]): str
 function formatAvailableAgents(agents: AgentSummary[]): string {
   if (agents.length === 0) return "Available agents: not loaded"
   return `Available agents: ${agents.map((agent) => agent.id).join(", ")}`
-}
-
-function formatModelStatus(selectedModelId: string | null, models: ModelSummary[]): string {
-  return `Current model: ${selectedModelId ?? "none"}. ${formatAvailableModels(models)}`
 }
 
 function formatAvailableModels(models: ModelSummary[]): string {

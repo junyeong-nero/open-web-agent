@@ -83,7 +83,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   registry.registerAgent(new SimpleReActAgent(modelBackedAgentOptions))
   registry.registerAgent(new SeeActAgent(modelBackedAgentOptions))
   registry.registerAgent(new PlanActAgent(modelBackedAgentOptions))
-  for (const agent of await loadPythonAgentManifests(options.agentsDir ?? join(home, "agents"))) {
+  for (const agent of await loadPythonAgentManifests(options.agentsDir ?? join(home, "agents"), { model: selectedModel })) {
     registry.registerAgent(agent)
   }
 

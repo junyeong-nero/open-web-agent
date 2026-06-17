@@ -45,4 +45,31 @@ describe("TranscriptPanel", () => {
       setup.renderer.destroy()
     }
   })
+
+  it("can be focused by keyboard state and mouse cursor", async () => {
+    let focusRequests = 0
+    const state = createInitialState("/tmp/project")
+    const setup = await testRender(
+      () => <TranscriptPanel state={state} theme={getTheme("opencode")} focused onFocusRequest={() => focusRequests++} />,
+      {
+        width: 40,
+        height: 8,
+      },
+    )
+
+    try {
+      await setup.flush()
+      const scrollbox = setup.renderer.root.findDescendantById("transcript-scroll")
+
+      expect(scrollbox).toBeInstanceOf(ScrollBoxRenderable)
+      expect((scrollbox as ScrollBoxRenderable).focusable).toBe(true)
+      expect((scrollbox as ScrollBoxRenderable).focused).toBe(true)
+
+      await setup.mockMouse.click((scrollbox as ScrollBoxRenderable).screenX + 1, (scrollbox as ScrollBoxRenderable).screenY + 1)
+
+      expect(focusRequests).toBe(1)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
 })

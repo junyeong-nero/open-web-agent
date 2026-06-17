@@ -3,9 +3,11 @@ import { dirname, join } from "node:path"
 import { z } from "zod"
 import { parse } from "yaml"
 import { PythonAgentAdapter } from "./python-agent-adapter"
+import type { ModelPlugin } from "@open-web-agent/core"
 
 export interface LoadPythonAgentManifestOptions {
   pythonCommand?: string
+  model?: ModelPlugin
 }
 
 const PythonAgentManifestSchema = z.object({
@@ -17,6 +19,7 @@ const PythonAgentManifestSchema = z.object({
   command: z.array(z.string().min(1)).min(1).optional(),
   env: z.record(z.string(), z.string()).optional(),
   timeoutMs: z.number().int().positive().optional(),
+  protocol: z.enum(["oneshot", "jsonl"]).default("oneshot"),
 })
 
 export async function loadPythonAgentManifests(
@@ -68,6 +71,8 @@ export async function loadPythonAgentManifest(
     cwd: agentDir,
     env: manifest.env,
     timeoutMs: manifest.timeoutMs,
+    protocol: manifest.protocol,
+    model: options.model,
   })
 }
 

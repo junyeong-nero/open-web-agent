@@ -83,4 +83,36 @@ describe("OpenAICompatibleClient", () => {
       reasoning_effort: "low",
     })
   })
+
+  it("forwards multimodal message content parts unchanged", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const client = new OpenAICompatibleClient({
+      baseUrl: "https://provider.test/v1",
+      apiKey: "key_123",
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init: init ?? {} })
+        return Response.json({
+          id: "chatcmpl_3",
+          choices: [{ message: { content: "screenshot answer" } }],
+        })
+      },
+    })
+    const content = [
+      { type: "text", text: "Use the screenshot." },
+      { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+    ]
+
+    await client.complete({
+      model: "test-model",
+      messages: [{ role: "user", content }],
+      temperature: 0,
+      responseFormat: "text",
+    })
+
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      model: "test-model",
+      messages: [{ role: "user", content }],
+      temperature: 0,
+    })
+  })
 })
