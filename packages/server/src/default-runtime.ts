@@ -16,7 +16,7 @@ import {
   type RuntimeContext,
   type SessionState,
 } from "@open-web-agent/core"
-import { OpenAIModel, OpenRouterModel, readModelConfig } from "@open-web-agent/models"
+import { OpenAIModel, OpenRouterModel, readModelConfig, resolveProviderDefaultModel } from "@open-web-agent/models"
 import { SQLiteStore } from "@open-web-agent/storage"
 import { join } from "node:path"
 import { createApp } from "./app"
@@ -50,22 +50,22 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   const modelCallTimeoutMs = readModelCallTimeoutMs(options.env ?? process.env)
 
   registry.registerAgent(new MockAgent())
-  if (modelConfig.openaiApiKey) {
+  if (modelConfig.openrouterApiKey) {
     registry.registerModel(
-      new OpenAIModel({
-        apiKey: modelConfig.openaiApiKey,
-        defaultModel: modelConfig.defaultModel,
+      new OpenRouterModel({
+        apiKey: modelConfig.openrouterApiKey,
+        defaultModel: resolveProviderDefaultModel("openrouter", modelConfig.defaultModel),
         defaultParameters: modelConfig.parameters,
         reasoningEffort: modelConfig.reasoningEffort,
         contextWindowTokens: modelConfig.contextWindowTokens,
       }),
     )
   }
-  if (modelConfig.openrouterApiKey) {
+  if (modelConfig.openaiApiKey) {
     registry.registerModel(
-      new OpenRouterModel({
-        apiKey: modelConfig.openrouterApiKey,
-        defaultModel: modelConfig.defaultModel,
+      new OpenAIModel({
+        apiKey: modelConfig.openaiApiKey,
+        defaultModel: resolveProviderDefaultModel("openai", modelConfig.defaultModel),
         defaultParameters: modelConfig.parameters,
         reasoningEffort: modelConfig.reasoningEffort,
         contextWindowTokens: modelConfig.contextWindowTokens,
@@ -74,10 +74,11 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   }
 
   const defaultModelId = registry.listModels()[0]?.id
+  const defaultRuntimeModel = defaultModelId ? registry.getModel(defaultModelId) : undefined
   const selectedModel = new RuntimeSelectedModel(registry, defaultModelId)
   const modelBackedAgentOptions = {
     model: selectedModel,
-    modelName: modelConfig.defaultModel,
+    modelName: defaultRuntimeModel?.modelName ?? modelConfig.defaultModel,
     timeoutMs: modelCallTimeoutMs,
   }
   registry.registerAgent(new SimpleReActAgent(modelBackedAgentOptions))
