@@ -3,32 +3,39 @@ import { OpenAICompatibleClient, type FetchLike } from "./openai-compatible-clie
 import { readModelConfig, resolveProviderDefaultModel, type ModelParameters } from "./model-config"
 
 export interface OpenRouterModelOptions {
+  id?: string
+  name?: string
   apiKey?: string | null
   defaultModel?: string
   defaultParameters?: ModelParameters
   reasoningEffort?: string
   contextWindowTokens?: number
+  forceDefaultModel?: boolean
   fetch?: FetchLike
 }
 
 export class OpenRouterModel implements ModelPlugin {
-  id = "openrouter"
-  name = "OpenRouter"
+  readonly id: string
+  readonly name: string
   provider = "openrouter"
   readonly modelName: string
   readonly reasoningEffort: string
   readonly contextWindowTokens: number
   private readonly defaultModel: string
   private readonly defaultParameters: ModelParameters
+  private readonly forceDefaultModel: boolean
   private readonly client: OpenAICompatibleClient
 
   constructor(options: OpenRouterModelOptions = {}) {
     const config = readModelConfig()
+    this.id = options.id ?? "openrouter"
+    this.name = options.name ?? "OpenRouter"
     this.defaultModel = options.defaultModel ?? resolveProviderDefaultModel("openrouter", config.defaultModel)
     this.defaultParameters = options.defaultParameters ?? config.parameters
     this.modelName = this.defaultModel
     this.reasoningEffort = options.reasoningEffort ?? config.reasoningEffort
     this.contextWindowTokens = options.contextWindowTokens ?? config.contextWindowTokens
+    this.forceDefaultModel = options.forceDefaultModel ?? false
     this.client = new OpenAICompatibleClient({
       baseUrl: "https://openrouter.ai/api/v1",
       apiKey: options.apiKey ?? config.openrouterApiKey,
@@ -41,6 +48,7 @@ export class OpenRouterModel implements ModelPlugin {
   }
 
   async complete(request: ModelRequest, _ctx: RuntimeContext): Promise<ModelResponse> {
-    return this.client.complete({ ...request, ...this.defaultParameters, model: request.model || this.defaultModel })
+    const model = this.forceDefaultModel ? this.defaultModel : request.model || this.defaultModel
+    return this.client.complete({ ...request, ...this.defaultParameters, model })
   }
 }
