@@ -1,0 +1,13 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/browser" },
+    { "path": "./packages/agents" },
+    { "path": "./packages/models" },
+    { "path": "./packages/storage" },
+    { "path": "./packages/server" },
+    { "path": "./packages/tui" },
+    { "path": "./packages/cli" }
+  ]
+}
