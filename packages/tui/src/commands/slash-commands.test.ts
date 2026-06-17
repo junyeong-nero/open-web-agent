@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { formatSlashCommandHelp, listSlashCommandSuggestions, parseSlashCommand } from "./slash-commands"
+import { completeSlashCommand, formatSlashCommandHelp, listSlashCommandSuggestions, parseSlashCommand } from "./slash-commands"
 
 describe("parseSlashCommand", () => {
   it("recognizes details command", () => {
@@ -73,6 +73,19 @@ describe("listSlashCommandSuggestions", () => {
     expect(listSlashCommandSuggestions("open example.com")).toEqual([])
     expect(listSlashCommandSuggestions("/theme ")).toEqual([])
     expect(listSlashCommandSuggestions("/theme opencode")).toEqual([])
+  })
+})
+
+describe("completeSlashCommand", () => {
+  it("completes the current slash token to the first displayed command", () => {
+    expect(completeSlashCommand("/cl")).toBe("/clear")
+    expect(completeSlashCommand("/ag")).toBe("/agent ")
+  })
+
+  it("returns null when no slash command suggestion is displayed", () => {
+    expect(completeSlashCommand("open example.com")).toBeNull()
+    expect(completeSlashCommand("/theme opencode")).toBeNull()
+    expect(completeSlashCommand("/missing")).toBeNull()
   })
 })
 

@@ -6,8 +6,10 @@ describe("mapKeyEvent", () => {
     expect(mapKeyEvent({ name: "q", ctrl: true, sequence: "\u0018q" })).toBe("quit")
   })
 
-  it("maps linefeed to submit", () => {
-    expect(mapKeyEvent({ name: "linefeed", sequence: "\n" })).toBe("submit")
+  it("leaves Enter submission to the focused prompt input", () => {
+    expect(mapKeyEvent({ name: "return", sequence: "\r" })).toBeNull()
+    expect(mapKeyEvent({ name: "enter", sequence: "\r" })).toBeNull()
+    expect(mapKeyEvent({ name: "linefeed", sequence: "\n" })).toBeNull()
   })
 
   it("maps transcript scrolling keys", () => {
