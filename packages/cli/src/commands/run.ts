@@ -1,11 +1,13 @@
 import { startDefaultRuntime } from "@open-web-agent/server"
 import { resolveOwaHome, type BrowserToolCall, type RunEvent } from "@open-web-agent/core"
+import { join } from "node:path"
 
 export interface RunCommandInput {
   prompt: string
   projectPath: string
   continueLast?: boolean
   sessionId?: string
+  agentId?: string
 }
 
 export interface RunCommandOptions {
@@ -15,7 +17,7 @@ export interface RunCommandOptions {
 
 export async function runCommand(input: RunCommandInput, options: RunCommandOptions = {}): Promise<void> {
   const stdout = options.stdout ?? ((line: string) => console.log(line))
-  const runtime = await startDefaultRuntime({ home: resolveOwaHome(options.env) })
+  const runtime = await startDefaultRuntime({ home: resolveOwaHome(options.env), agentsDir: join(input.projectPath, "agents") })
   let resolveTerminalEvent: (event: RunEvent) => void = () => {}
   const terminalEvent = new Promise<RunEvent>((resolve) => {
     resolveTerminalEvent = resolve
@@ -32,7 +34,7 @@ export async function runCommand(input: RunCommandInput, options: RunCommandOpti
     const session = await resolveSession(runtime.url, input)
     const run = await requestJson<{ runId: string }>(`${runtime.url}/runs`, {
       method: "POST",
-      body: JSON.stringify({ sessionId: session.sessionId, prompt: input.prompt }),
+      body: JSON.stringify({ sessionId: session.sessionId, prompt: input.prompt, agentId: input.agentId }),
     })
 
     await terminalEvent

@@ -1,4 +1,6 @@
 export * from "./mock-agent"
 export * from "./plan-act-agent"
+export * from "./python-agent-adapter"
+export * from "./python-agent-manifest"
 export * from "./see-act-agent"
 export * from "./simple-react-agent"
