@@ -78,7 +78,15 @@ function parseEvalArgs(argv: string[]): CliArgs {
 }
 
 function parseCombination(value: string): { agentId: string; modelId: string; environmentId: string } {
-  const [agentId, modelId, environmentId] = value.split("/")
+  const firstSeparator = value.indexOf("/")
+  const lastSeparator = value.lastIndexOf("/")
+  if (firstSeparator <= 0 || lastSeparator <= firstSeparator + 1 || lastSeparator === value.length - 1) {
+    throw new Error("--combo must use agent/model/environment")
+  }
+
+  const agentId = value.slice(0, firstSeparator)
+  const modelId = value.slice(firstSeparator + 1, lastSeparator)
+  const environmentId = value.slice(lastSeparator + 1)
   if (!agentId || !modelId || !environmentId) {
     throw new Error("--combo must use agent/model/environment")
   }

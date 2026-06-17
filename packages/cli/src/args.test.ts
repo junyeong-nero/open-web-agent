@@ -46,6 +46,25 @@ describe("parseArgs", () => {
     })
   })
 
+  it("recognizes eval combos with slash-containing model ids", () => {
+    expect(
+      parseArgs(
+        ["eval", "--task", "example-domain-title", "--combo", "simple-react-agent/openrouter:~openai/gpt-latest/mock-browser"],
+        "/tmp/project",
+      ),
+    ).toEqual({
+      mode: "eval",
+      taskIds: ["example-domain-title"],
+      combinations: [
+        {
+          agentId: "simple-react-agent",
+          modelId: "openrouter:~openai/gpt-latest",
+          environmentId: "mock-browser",
+        },
+      ],
+    })
+  })
+
   it("recognizes connect mode", () => {
     expect(parseArgs(["--connect", "http://127.0.0.1:4096"], "/tmp/project")).toEqual({
       mode: "connect",

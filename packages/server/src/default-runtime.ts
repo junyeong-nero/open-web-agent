@@ -22,6 +22,7 @@ import {
   OpenAIModel,
   OpenRouterModel,
   readModelConfig,
+  resolveProviderDefaultModel,
 } from "@open-web-agent/models"
 import { SQLiteStore } from "@open-web-agent/storage"
 import { join } from "node:path"
@@ -56,29 +57,11 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   const modelCallTimeoutMs = readModelCallTimeoutMs(options.env ?? process.env)
 
   registry.registerAgent(new MockAgent())
-  if (modelConfig.openaiApiKey) {
-    registry.registerModel(
-      new OpenAIModel({
-        apiKey: modelConfig.openaiApiKey,
-        defaultModel: modelConfig.defaultModel,
-        defaultParameters: modelConfig.parameters,
-        reasoningEffort: modelConfig.reasoningEffort,
-        contextWindowTokens: modelConfig.contextWindowTokens,
-      }),
-    )
-    for (const model of createOpenAIModelPool({
-      apiKey: modelConfig.openaiApiKey,
-      defaultParameters: modelConfig.parameters,
-      reasoningEffort: modelConfig.reasoningEffort,
-    })) {
-      registry.registerModel(model)
-    }
-  }
   if (modelConfig.openrouterApiKey) {
     registry.registerModel(
       new OpenRouterModel({
         apiKey: modelConfig.openrouterApiKey,
-        defaultModel: modelConfig.defaultModel,
+        defaultModel: resolveProviderDefaultModel("openrouter", modelConfig.defaultModel),
         defaultParameters: modelConfig.parameters,
         reasoningEffort: modelConfig.reasoningEffort,
         contextWindowTokens: modelConfig.contextWindowTokens,
@@ -92,12 +75,31 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
       registry.registerModel(model)
     }
   }
+  if (modelConfig.openaiApiKey) {
+    registry.registerModel(
+      new OpenAIModel({
+        apiKey: modelConfig.openaiApiKey,
+        defaultModel: resolveProviderDefaultModel("openai", modelConfig.defaultModel),
+        defaultParameters: modelConfig.parameters,
+        reasoningEffort: modelConfig.reasoningEffort,
+        contextWindowTokens: modelConfig.contextWindowTokens,
+      }),
+    )
+    for (const model of createOpenAIModelPool({
+      apiKey: modelConfig.openaiApiKey,
+      defaultParameters: modelConfig.parameters,
+      reasoningEffort: modelConfig.reasoningEffort,
+    })) {
+      registry.registerModel(model)
+    }
+  }
 
   const defaultModelId = registry.listModels()[0]?.id
+  const defaultRuntimeModel = defaultModelId ? registry.getModel(defaultModelId) : undefined
   const selectedModel = new RuntimeSelectedModel(registry, defaultModelId)
   const modelBackedAgentOptions = {
     model: selectedModel,
-    modelName: modelConfig.defaultModel,
+    modelName: defaultRuntimeModel?.modelName ?? modelConfig.defaultModel,
     timeoutMs: modelCallTimeoutMs,
   }
   registry.registerAgent(new SimpleReActAgent(modelBackedAgentOptions))

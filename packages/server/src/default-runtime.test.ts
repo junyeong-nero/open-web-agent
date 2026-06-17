@@ -39,16 +39,18 @@ describe("startDefaultRuntime", () => {
     try {
       const plugins = await fetchPlugins(runtime.url)
 
-      expect(plugins.models.map((model) => model.id)).toEqual(
+      const modelIds = plugins.models.map((model) => model.id)
+      expect(modelIds).toEqual(
         expect.arrayContaining([
-          "openai",
-          "openai:gpt-5.5",
-          "openai:gpt-5.3-codex-spark",
           "openrouter",
           "openrouter:~anthropic/claude-sonnet-latest",
           "openrouter:~google/gemini-pro-latest",
+          "openai",
+          "openai:gpt-5.5",
+          "openai:gpt-5.3-codex-spark",
         ]),
       )
+      expect(modelIds.indexOf("openrouter")).toBeLessThan(modelIds.indexOf("openai"))
       expect(plugins.models.find((model) => model.id === "openai:gpt-5.5")).toMatchObject({
         name: "OpenAI",
         provider: "openai",
@@ -60,6 +62,35 @@ describe("startDefaultRuntime", () => {
         provider: "openrouter",
         modelName: "~google/gemini-pro-latest",
         contextWindowTokens: 1_048_576,
+      })
+    } finally {
+      await runtime.stop()
+    }
+  })
+
+  it("uses OpenRouter Nemotron as the default provider model when both providers are configured", async () => {
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const runtime = await startDefaultRuntime({
+      home,
+      configPath: join(home, "missing-config.yaml"),
+      env: {
+        OPENAI_API_KEY: "test-openai-key",
+        OPENROUTER_API_KEY: "test-openrouter-key",
+      },
+    })
+
+    try {
+      const plugins = await fetchPlugins(runtime.url)
+
+      expect(plugins.models[0]).toMatchObject({
+        id: "openrouter",
+        provider: "openrouter",
+        modelName: "nvidia/nemotron-3-super-120b-a12b:free",
+      })
+      expect(plugins.models.find((model) => model.id === "openai")).toMatchObject({
+        id: "openai",
+        provider: "openai",
+        modelName: "gpt-4.1-mini",
       })
     } finally {
       await runtime.stop()
@@ -131,12 +162,12 @@ describe("startDefaultRuntime", () => {
       const plugins = await fetchPlugins(runtime.url)
 
       expect(plugins.models.map((model) => model.id)).toEqual(
-        expect.arrayContaining(["openai", "openrouter", "openai:gpt-5.5", "openrouter:~openai/gpt-latest"]),
+        expect.arrayContaining(["openrouter", "openrouter:~openai/gpt-latest", "openai", "openai:gpt-5.5"]),
       )
       expect(plugins.models[0]).toMatchObject({
-        id: "openai",
-        name: "OpenAI",
-        provider: "openai",
+        id: "openrouter",
+        name: "OpenRouter",
+        provider: "openrouter",
         modelName: "config-model",
         reasoningEffort: "medium",
         contextWindowTokens: 128000,

@@ -9,6 +9,12 @@ describe("readModelConfig", () => {
     expect(resolveModelConfigPath()).toBe(join(homedir(), ".openwebagents", "config.yaml"))
   })
 
+  it("uses OpenRouter Nemotron as the built-in default model", () => {
+    expect(readModelConfig({}, { configPath: "/tmp/missing-open-web-agent-config.yaml" })).toMatchObject({
+      defaultModel: "nvidia/nemotron-3-super-120b-a12b:free",
+    })
+  })
+
   it("reads provider keys and default model from env", async () => {
     const dir = await mkdtemp(join(tmpdir(), "owa-model-config-"))
     expect(
