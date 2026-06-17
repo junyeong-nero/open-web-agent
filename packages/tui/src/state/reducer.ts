@@ -39,6 +39,7 @@ export function createInitialState(projectPath: string): TuiState {
     runStatus: "idle",
     inspectorVisible: true,
     selectedEvent: null,
+    seenRunEventIds: [],
     conversation: [],
     timeline: [],
     runLog: [],
@@ -105,9 +106,12 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
   }
 
   const runEvent = event.event
+  if (state.seenRunEventIds.includes(runEvent.id)) return state
+
   const next: TuiState = {
     ...state,
     selectedEvent: runEvent,
+    seenRunEventIds: [...state.seenRunEventIds, runEvent.id],
     timeline: [...state.timeline, toTimelineItem(runEvent)],
     runLog: appendRunLog(state.runLog, runEvent),
   }
