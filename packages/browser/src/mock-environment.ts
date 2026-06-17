@@ -34,8 +34,16 @@ export class MockEnvironment implements BrowserEnvironment {
 
   constructor(readonly delayMs = 25) {}
 
+  async openSession(ctx: RuntimeContext): Promise<void> {
+    this.ensureObservation(ctx)
+  }
+
+  async attachSession(ctx: RuntimeContext): Promise<void> {
+    this.ensureObservation(ctx)
+  }
+
   async reset(ctx: RuntimeContext): Promise<void> {
-    this.observations.set(ctx.runId, { ...BLANK_OBSERVATION })
+    this.ensureObservation(ctx)
   }
 
   async observe(ctx: RuntimeContext): Promise<Observation> {
@@ -43,15 +51,24 @@ export class MockEnvironment implements BrowserEnvironment {
   }
 
   currentObservation(ctx: RuntimeContext): Observation {
-    return this.observations.get(ctx.runId) ?? { ...BLANK_OBSERVATION }
+    return this.observations.get(this.keyFor(ctx)) ?? { ...BLANK_OBSERVATION }
   }
 
   updateObservation(ctx: RuntimeContext, observation: Observation): void {
-    this.observations.set(ctx.runId, observation)
+    this.observations.set(this.keyFor(ctx), observation)
   }
 
   async close(ctx: RuntimeContext): Promise<void> {
-    this.observations.delete(ctx.runId)
+    this.observations.delete(this.keyFor(ctx))
+  }
+
+  private ensureObservation(ctx: RuntimeContext): void {
+    const key = this.keyFor(ctx)
+    this.observations.set(key, this.observations.get(key) ?? { ...BLANK_OBSERVATION })
+  }
+
+  private keyFor(ctx: RuntimeContext): string {
+    return ctx.session.id
   }
 }
 

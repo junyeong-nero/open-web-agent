@@ -1,3 +1,5 @@
+import type { Observation } from "@open-web-agent/core"
+
 export interface PluginSummary {
   id: string
   name: string
@@ -29,6 +31,8 @@ export interface SessionSummary {
   deletedAt: string | null
   createdAt: string
   runStatus: "idle" | "running" | "completed" | "failed" | "cancelled"
+  environmentId?: string | null
+  browser?: Observation | null
 }
 
 export function createServerClient(baseUrl: string) {
@@ -36,8 +40,8 @@ export function createServerClient(baseUrl: string) {
     async health(): Promise<{ ok: true }> {
       return request(`${baseUrl}/health`)
     },
-    async createSession(projectPath: string): Promise<{ sessionId: string; session: SessionSummary }> {
-      return request(`${baseUrl}/sessions`, { method: "POST", body: JSON.stringify({ projectPath }) })
+    async createSession(projectPath: string, environmentId?: string): Promise<{ sessionId: string; session: SessionSummary }> {
+      return request(`${baseUrl}/sessions`, { method: "POST", body: JSON.stringify({ projectPath, environmentId }) })
     },
     async listSessions(): Promise<{ sessions: SessionSummary[] }> {
       return request(`${baseUrl}/sessions`)

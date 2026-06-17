@@ -29,6 +29,7 @@ import {
 import { SQLiteStore } from "@open-web-agent/storage"
 import { join } from "node:path"
 import { createApp } from "./app"
+import { BrowserSessionManager } from "./browser-session-manager"
 import { startServer, type StartedServer } from "./start-server"
 
 export interface StartDefaultRuntimeOptions {
@@ -141,6 +142,11 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   registry.registerToolAdapter(new PlaywrightBrowserToolAdapter(playwrightEnvironment))
 
   const sessions = new Map<string, SessionState>()
+  const browserSessions = new BrowserSessionManager({
+    eventBus,
+    registry,
+    defaultEnvironmentId: "mock-browser",
+  })
   const orchestrator = new RunOrchestrator({
     home,
     eventBus,
@@ -152,7 +158,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   })
   const storage = new SQLiteStore(join(home, "metadata.sqlite"))
   storage.migrate()
-  const app = createApp({ eventBus, orchestrator, registry, sessions, storage })
+  const app = createApp({ eventBus, orchestrator, registry, sessions, storage, browserSessions })
   const server = await startServer({
     app,
     hostname: options.hostname,
@@ -168,6 +174,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     server,
     stop: async () => {
       await server.stop()
+      await browserSessions.closeAll()
       storage.close()
     },
   }

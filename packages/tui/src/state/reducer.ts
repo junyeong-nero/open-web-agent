@@ -76,12 +76,13 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
   }
   if (event.type === "session.created") {
     const session = event.session ?? fallbackSession(event.sessionId, state.projectPath)
+    const sessionView = applySessionBrowser(state.sessionViews[event.sessionId] ?? emptySessionView(), session)
     const next = {
       ...state,
       sessions: upsertSession(state.sessions, normalizeSession(session)),
       sessionViews: {
         ...state.sessionViews,
-        [event.sessionId]: state.sessionViews[event.sessionId] ?? emptySessionView(),
+        [event.sessionId]: sessionView,
       },
     }
     return activateSession({ ...next, runningSessionIds: runningSessionIds(next.sessions) }, event.sessionId)
@@ -100,7 +101,17 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
   }
   if (event.type === "session.updated") {
     const sessions = upsertSession(state.sessions, normalizeSession(event.session))
-    return { ...state, sessions, runningSessionIds: runningSessionIds(sessions) }
+    const view = applySessionBrowser(state.sessionViews[event.session.id] ?? emptySessionView(), event.session)
+    return {
+      ...state,
+      sessions,
+      runningSessionIds: runningSessionIds(sessions),
+      sessionViews: {
+        ...state.sessionViews,
+        [event.session.id]: view,
+      },
+      ...(state.activeSessionId === event.session.id ? view : {}),
+    }
   }
   if (event.type === "session.deleted") {
     const sessions = state.sessions.filter((session) => session.id !== event.sessionId)
@@ -298,6 +309,8 @@ function emptySessionView(): SessionViewState {
 function normalizeSession(session: SessionSummary): SessionSummary {
   return {
     ...session,
+    environmentId: session.environmentId ?? null,
+    browser: session.browser ?? null,
     title: session.title ?? null,
     pinned: session.pinned ?? false,
     deletedAt: session.deletedAt ?? null,
@@ -315,6 +328,8 @@ function fallbackSession(sessionId: string, projectPath: string): SessionSummary
     deletedAt: null,
     createdAt: new Date(0).toISOString(),
     runStatus: "idle",
+    environmentId: null,
+    browser: null,
   }
 }
 
@@ -331,6 +346,8 @@ function ensureSession(sessions: SessionSummary[], sessionId: string, projectPat
           deletedAt: readNullableString(payloadSession.deletedAt),
           createdAt: readString(payloadSession.createdAt) ?? new Date(0).toISOString(),
           runStatus: "idle",
+          environmentId: readNullableString(payloadSession.environmentId),
+          browser: readObservation(payloadSession.browser, EMPTY_OBSERVATION),
         })
       : fallbackSession(sessionId, projectPath)
 
@@ -341,6 +358,10 @@ function upsertSession(sessions: SessionSummary[], session: SessionSummary): Ses
   const next = sessions.filter((current) => current.id !== session.id)
   if (!session.deletedAt) next.push(session)
   return sortSessions(next)
+}
+
+function applySessionBrowser(view: SessionViewState, session: SessionSummary): SessionViewState {
+  return session.browser ? { ...view, browser: session.browser } : view
 }
 
 function upsertSessionRunStatus(sessions: SessionSummary[], sessionId: string, event: RunEvent): SessionSummary[] {

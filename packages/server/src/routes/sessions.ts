@@ -1,13 +1,16 @@
 import { resolve } from "node:path"
 import type { Hono } from "hono"
-import { hashProjectPath, makeSessionId, type SessionState } from "@open-web-agent/core"
+import { hashProjectPath, makeSessionId, type Observation, type PluginRegistry, type SessionState } from "@open-web-agent/core"
 import type { SQLiteStore, StoredSession } from "@open-web-agent/storage"
 import type { RunRecord } from "./runs"
 import { CreateSessionRequestSchema, UpdateSessionRequestSchema } from "../schemas/api"
+import type { BrowserSessionManager } from "../browser-session-manager"
 
 export interface SessionRouteDeps {
   sessions: Map<string, SessionState>
   runs?: Map<string, RunRecord>
+  registry: PluginRegistry
+  browserSessions: BrowserSessionManager
   storage?: SQLiteStore
   now?: () => Date
 }
@@ -23,30 +26,39 @@ export function registerSessionRoutes(app: Hono, deps: SessionRouteDeps): void {
   app.post("/sessions", async (c) => {
     const parsed = CreateSessionRequestSchema.safeParse(await readJson(c.req))
     if (!parsed.success) return c.json({ error: "Invalid session request" }, 400)
+    const environmentId = parsed.data.environmentId ?? deps.browserSessions.defaultEnvironmentId
+    if (!deps.registry.listEnvironments().some((environment) => environment.id === environmentId)) {
+      return c.json({ error: "Unknown browser" }, 400)
+    }
 
     const projectPath = resolve(parsed.data.projectPath)
     const session: SessionState = {
       id: makeSessionId(),
       projectPath,
       projectHash: hashProjectPath(projectPath),
+      environmentId,
       title: parsed.data.title ?? null,
       pinned: false,
       deletedAt: null,
       createdAt: (deps.now ?? (() => new Date()))().toISOString(),
     }
+    const browser = await deps.browserSessions.open(session, environmentId)
     deps.sessions.set(session.id, session)
     deps.storage?.upsertSession(toStoredSession(session))
 
-    return c.json({ sessionId: session.id, session: serializeSession(session, deps.runs) })
+    return c.json({ sessionId: session.id, session: serializeSession(session, deps.runs, browser) })
   })
 
-  app.get("/sessions/:sessionId", (c) => {
+  app.get("/sessions/:sessionId", async (c) => {
     const sessionId = c.req.param("sessionId")
     const session = deps.sessions.get(sessionId) ?? deps.storage?.getSession(sessionId)
     if (!session || session.deletedAt) return c.json({ error: "Unknown session" }, 404)
 
-    deps.sessions.set(session.id, session)
-    return c.json(serializeSession(session, deps.runs))
+    const environmentId = session.environmentId ?? deps.browserSessions.defaultEnvironmentId
+    const attachedSession = session.environmentId === environmentId ? session : { ...session, environmentId }
+    const browser = await deps.browserSessions.attach(attachedSession, environmentId)
+    deps.sessions.set(attachedSession.id, attachedSession)
+    return c.json(serializeSession(attachedSession, deps.runs, browser))
   })
 
   app.patch("/sessions/:sessionId", async (c) => {
@@ -66,16 +78,17 @@ export function registerSessionRoutes(app: Hono, deps: SessionRouteDeps): void {
     const stored = deps.storage?.updateSession(sessionId, { title: next.title ?? null, pinned: next.pinned ?? false }) ?? next
     deps.sessions.set(sessionId, stored)
 
-    return c.json(serializeSession(stored, deps.runs))
+    return c.json(serializeSession(stored, deps.runs, deps.browserSessions.getLastObservation(stored.id)))
   })
 
-  app.delete("/sessions/:sessionId", (c) => {
+  app.delete("/sessions/:sessionId", async (c) => {
     const sessionId = c.req.param("sessionId")
     const session = deps.sessions.get(sessionId) ?? deps.storage?.getSession(sessionId)
     if (!session || session.deletedAt) return c.json({ error: "Unknown session" }, 404)
     if (isSessionRunning(sessionId, deps.runs)) return c.json({ error: "Session has a running run" }, 409)
 
     const deletedAt = (deps.now ?? (() => new Date()))().toISOString()
+    await deps.browserSessions.close(session)
     deps.sessions.delete(sessionId)
     deps.storage?.deleteSession(sessionId, deletedAt)
 
@@ -83,16 +96,18 @@ export function registerSessionRoutes(app: Hono, deps: SessionRouteDeps): void {
   })
 }
 
-function serializeSession(session: SessionState, runs?: Map<string, RunRecord>) {
+function serializeSession(session: SessionState, runs?: Map<string, RunRecord>, browser?: Observation | null) {
   return {
     id: session.id,
     projectPath: session.projectPath,
     projectHash: session.projectHash,
+    environmentId: session.environmentId ?? null,
     title: session.title ?? null,
     pinned: session.pinned ?? false,
     deletedAt: session.deletedAt ?? null,
     createdAt: session.createdAt,
     runStatus: readSessionRunStatus(session.id, runs),
+    browser: browser ?? null,
   }
 }
 
@@ -101,6 +116,7 @@ function toStoredSession(session: SessionState): StoredSession {
     id: session.id,
     projectPath: session.projectPath,
     projectHash: session.projectHash,
+    environmentId: session.environmentId ?? null,
     title: session.title ?? null,
     pinned: session.pinned ?? false,
     deletedAt: session.deletedAt ?? null,

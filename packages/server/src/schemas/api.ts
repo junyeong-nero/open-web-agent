@@ -2,6 +2,7 @@ import { z } from "zod"
 
 export const CreateSessionRequestSchema = z.object({
   projectPath: z.string().min(1),
+  environmentId: z.string().min(1).optional(),
   title: z.string().trim().min(1).nullable().optional(),
 })
 

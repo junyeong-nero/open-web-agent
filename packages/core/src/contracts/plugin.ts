@@ -25,6 +25,8 @@ export interface ModelPlugin {
 export interface BrowserEnvironment {
   id: string
   name: string
+  openSession?(ctx: RuntimeContext): Promise<void>
+  attachSession?(ctx: RuntimeContext): Promise<void>
   reset(ctx: RuntimeContext): Promise<void>
   observe(ctx: RuntimeContext): Promise<Observation>
   close(ctx: RuntimeContext): Promise<void>
