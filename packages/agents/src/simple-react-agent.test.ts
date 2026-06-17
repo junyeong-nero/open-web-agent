@@ -141,6 +141,19 @@ describe("SimpleReActAgent", () => {
     expect(model.requests[0]?.responseFormat).toBe("json")
   })
 
+  it("describes concrete click and type target shapes in the model prompt", async () => {
+    const model = new FakeModel([JSON.stringify({ type: "final_answer", thought: null, finalAnswer: "done", confidence: 1 })])
+
+    await new SimpleReActAgent({ model, modelName: "fake" }).step(state(), ctx())
+
+    const systemPrompt = model.requests[0]?.messages.find((message) => message.role === "system")?.content ?? ""
+    expect(systemPrompt).toContain('"type":"type"')
+    expect(systemPrompt).toContain('"target":{"selector":"input[name=\\"query\\"]"}')
+    expect(systemPrompt).toContain('"value":"tomorrow weather"')
+    expect(systemPrompt).toContain('"type":"click"')
+    expect(systemPrompt).toContain('"target":{"selector":"button[type=\\"submit\\"]"}')
+  })
+
   it("normalizes OpenAI-style tool call arguments in model decisions", async () => {
     const model = new FakeModel([
       JSON.stringify({
@@ -376,6 +389,57 @@ describe("SimpleReActAgent", () => {
     })
   })
 
+  it("normalizes selector shorthand in browser tool calls", async () => {
+    const model = new FakeModel([
+      JSON.stringify({
+        type: "browser_actions",
+        thought: "네이버에 접속하여 내일 날씨를 검색하겠습니다.",
+        actions: [
+          {
+            id: "1",
+            kind: "navigate",
+            reason: "네이버 메인 페이지 접속",
+            requiresApproval: false,
+            toolCalls: [{ type: "navigate", url: "https://www.naver.com" }],
+          },
+          {
+            id: "2",
+            kind: "type",
+            reason: "네이버 검색창에 내일 날씨 입력",
+            requiresApproval: false,
+            toolCalls: [{ type: "type", selector: "input[name='query']", text: "내일 날씨" }],
+          },
+          {
+            id: "3",
+            kind: "click",
+            reason: "검색 버튼 클릭",
+            requiresApproval: false,
+            toolCalls: [{ type: "click", selector: "button.spm" }],
+          },
+        ],
+      }),
+    ])
+
+    const decision = await new SimpleReActAgent({ model, modelName: "fake", maxParseRetries: 0 }).step(state(), ctx())
+
+    expect(decision).toMatchObject({
+      type: "browser_actions",
+      actions: [
+        {
+          toolCalls: [{ id: "1_tool_1", type: "navigate", url: "https://www.naver.com" }],
+        },
+        {
+          toolCalls: [
+            { id: "2_tool_1", type: "type", target: { selector: "input[name='query']" }, value: "내일 날씨" },
+          ],
+        },
+        {
+          toolCalls: [{ id: "3_tool_1", type: "click", target: { selector: "button.spm" } }],
+        },
+      ],
+    })
+  })
+
   it("repairs empty search targets from the current observation", async () => {
     const model = new FakeModel([
       JSON.stringify({
@@ -453,6 +517,28 @@ describe("SimpleReActAgent", () => {
     await expect(new SimpleReActAgent({ model, modelName: "fake" }).step(state(), ctx())).rejects.toThrow(
       "Invalid model decision",
     )
+  })
+
+  it("includes validation errors when model decisions remain invalid", async () => {
+    const model = new FakeModel([
+      JSON.stringify({
+        type: "browser_actions",
+        thought: "Click continue.",
+        actions: [
+          {
+            id: "action_1",
+            kind: "continue",
+            reason: null,
+            requiresApproval: false,
+            toolCalls: [{ id: "tool_1", type: "click" }],
+          },
+        ],
+      }),
+    ])
+
+    await expect(
+      new SimpleReActAgent({ model, modelName: "fake", maxParseRetries: 0 }).step(state(), ctx()),
+    ).rejects.toThrow("Last error:")
   })
 
   it("times out slow model calls", async () => {
