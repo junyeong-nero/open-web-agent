@@ -1,0 +1,56 @@
+import { describe, expect, it } from "bun:test"
+import { mkdtemp, readFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import type { RuntimeContext } from "@open-web-agent/core"
+import { EventBus } from "@open-web-agent/core"
+import { MockEnvironment, sleep } from "./mock-environment"
+
+async function context(signal = new AbortController().signal): Promise<RuntimeContext> {
+  return {
+    session: {
+      id: "ses_1",
+      projectPath: "/tmp/project",
+      projectHash: "hash",
+      createdAt: "2026-06-17T00:00:00.000Z",
+    },
+    runId: "run_1",
+    runDir: await mkdtemp(join(tmpdir(), "owa-mock-env-")),
+    eventBus: new EventBus(),
+    abortSignal: signal,
+    now: () => new Date("2026-06-17T00:00:00.000Z"),
+    async emit() {
+      throw new Error("not used")
+    },
+  }
+}
+
+describe("MockEnvironment", () => {
+  it("executes navigate, screenshot, and extract_text against the Example Domain fixture", async () => {
+    const env = new MockEnvironment(0)
+    const ctx = await context()
+
+    await env.reset(ctx)
+    const navigate = await env.execute({ id: "tool_1", type: "navigate", url: "https://example.com" }, ctx)
+    const screenshot = await env.execute({ id: "tool_2", type: "screenshot" }, ctx)
+    const text = await env.execute({ id: "tool_3", type: "extract_text" }, ctx)
+
+    expect(navigate.observation?.title).toBe("Example Domain")
+    expect(screenshot.observation?.screenshotPath).toEndWith("screenshots/step-0001.txt")
+    expect(await readFile(screenshot.observation?.screenshotPath ?? "", "utf8")).toBe(
+      "mock screenshot for Example Domain\n",
+    )
+    expect(text.metadata).toEqual({
+      text: "Example Domain\nThis domain is for use in illustrative examples in documents.",
+    })
+  })
+
+  it("rejects sleep when the abort signal is cancelled", async () => {
+    const controller = new AbortController()
+    const delayed = sleep(50, controller.signal)
+
+    controller.abort()
+
+    await expect(delayed).rejects.toThrow("Run cancelled")
+  })
+})
