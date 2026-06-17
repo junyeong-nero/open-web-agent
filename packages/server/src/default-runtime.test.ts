@@ -39,7 +39,28 @@ describe("startDefaultRuntime", () => {
     try {
       const plugins = await fetchPlugins(runtime.url)
 
-      expect(plugins.models.map((model) => model.id)).toEqual(["openai", "openrouter"])
+      expect(plugins.models.map((model) => model.id)).toEqual(
+        expect.arrayContaining([
+          "openai",
+          "openai:gpt-5.5",
+          "openai:gpt-5.3-codex-spark",
+          "openrouter",
+          "openrouter:~anthropic/claude-sonnet-latest",
+          "openrouter:~google/gemini-pro-latest",
+        ]),
+      )
+      expect(plugins.models.find((model) => model.id === "openai:gpt-5.5")).toMatchObject({
+        name: "OpenAI",
+        provider: "openai",
+        modelName: "gpt-5.5",
+        contextWindowTokens: 1_000_000,
+      })
+      expect(plugins.models.find((model) => model.id === "openrouter:~google/gemini-pro-latest")).toMatchObject({
+        name: "OpenRouter",
+        provider: "openrouter",
+        modelName: "~google/gemini-pro-latest",
+        contextWindowTokens: 1_048_576,
+      })
     } finally {
       await runtime.stop()
     }
@@ -109,7 +130,9 @@ describe("startDefaultRuntime", () => {
     try {
       const plugins = await fetchPlugins(runtime.url)
 
-      expect(plugins.models.map((model) => model.id)).toEqual(["openai", "openrouter"])
+      expect(plugins.models.map((model) => model.id)).toEqual(
+        expect.arrayContaining(["openai", "openrouter", "openai:gpt-5.5", "openrouter:~openai/gpt-latest"]),
+      )
       expect(plugins.models[0]).toMatchObject({
         id: "openai",
         name: "OpenAI",
@@ -210,7 +233,7 @@ describe("startDefaultRuntime", () => {
           sessionId: session.sessionId,
           prompt: "delegate through runtime",
           agentId: "runtime-model-agent",
-          modelId: "openai",
+          modelId: "openai:gpt-5.5",
           environmentId: "mock-browser",
         }),
       })
@@ -223,6 +246,7 @@ describe("startDefaultRuntime", () => {
         payload: { finalAnswer: "delegated runtime model answer" },
       })
       expect(modelEvents).toEqual(["model.called", "model.completed"])
+      expect((providerRequests[0] as { model?: string }).model).toBe("gpt-5.5")
       expect((providerRequests[0] as { messages: Array<{ content: string }> }).messages[0]?.content).toBe(
         "delegate through runtime",
       )

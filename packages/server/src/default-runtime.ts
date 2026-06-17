@@ -16,7 +16,13 @@ import {
   type RuntimeContext,
   type SessionState,
 } from "@open-web-agent/core"
-import { OpenAIModel, OpenRouterModel, readModelConfig } from "@open-web-agent/models"
+import {
+  createOpenAIModelPool,
+  createOpenRouterModelPool,
+  OpenAIModel,
+  OpenRouterModel,
+  readModelConfig,
+} from "@open-web-agent/models"
 import { SQLiteStore } from "@open-web-agent/storage"
 import { join } from "node:path"
 import { createApp } from "./app"
@@ -60,6 +66,13 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
         contextWindowTokens: modelConfig.contextWindowTokens,
       }),
     )
+    for (const model of createOpenAIModelPool({
+      apiKey: modelConfig.openaiApiKey,
+      defaultParameters: modelConfig.parameters,
+      reasoningEffort: modelConfig.reasoningEffort,
+    })) {
+      registry.registerModel(model)
+    }
   }
   if (modelConfig.openrouterApiKey) {
     registry.registerModel(
@@ -71,6 +84,13 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
         contextWindowTokens: modelConfig.contextWindowTokens,
       }),
     )
+    for (const model of createOpenRouterModelPool({
+      apiKey: modelConfig.openrouterApiKey,
+      defaultParameters: modelConfig.parameters,
+      reasoningEffort: modelConfig.reasoningEffort,
+    })) {
+      registry.registerModel(model)
+    }
   }
 
   const defaultModelId = registry.listModels()[0]?.id
