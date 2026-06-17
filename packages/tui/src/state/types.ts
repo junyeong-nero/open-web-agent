@@ -12,6 +12,12 @@ export interface TimelineItem {
   label: string
 }
 
+export interface PlanItem {
+  id: string
+  title: string
+  status: "pending" | "active" | "completed"
+}
+
 export interface TuiState {
   projectPath: string
   activeSessionId: string | null
@@ -21,6 +27,7 @@ export interface TuiState {
   selectedEvent: RunEvent | null
   conversation: ConversationMessage[]
   timeline: TimelineItem[]
+  plan: PlanItem[]
   browser: Observation
 }
 

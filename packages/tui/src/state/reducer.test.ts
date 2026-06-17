@@ -52,4 +52,27 @@ describe("reduceTuiEvent", () => {
       content: '페이지 제목은 "Example Domain"입니다.',
     })
   })
+
+  it("stores plan items on plan.created", () => {
+    const state = reduceTuiEvent(createInitialState("/tmp/project"), {
+      type: "run.event",
+      event: event("plan.created", { items: [{ id: "plan_1", title: "Open page", status: "pending" }] }),
+    })
+
+    expect(state.plan).toEqual([{ id: "plan_1", title: "Open page", status: "pending" }])
+  })
+
+  it("replaces plan items on plan.updated", () => {
+    const withPlan = reduceTuiEvent(createInitialState("/tmp/project"), {
+      type: "run.event",
+      event: event("plan.created", { items: [{ id: "plan_1", title: "Open page", status: "pending" }] }),
+    })
+
+    const state = reduceTuiEvent(withPlan, {
+      type: "run.event",
+      event: event("plan.updated", { items: [{ id: "plan_2", title: "Retry click", status: "active" }] }),
+    })
+
+    expect(state.plan).toEqual([{ id: "plan_2", title: "Retry click", status: "active" }])
+  })
 })

@@ -7,6 +7,8 @@ export const RunEventTypeSchema = z.enum([
   "run.cancelled",
   "run.failed",
   "run.completed",
+  "plan.created",
+  "plan.updated",
   "observation.captured",
   "agent.step.started",
   "agent.step.completed",

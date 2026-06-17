@@ -1,5 +1,5 @@
 import { ObservationSchema, type Observation, type RunEvent } from "@open-web-agent/core"
-import { EMPTY_OBSERVATION, type ConversationMessage, type TimelineItem, type TuiState } from "./types"
+import { EMPTY_OBSERVATION, type ConversationMessage, type PlanItem, type TimelineItem, type TuiState } from "./types"
 
 export type TuiEvent =
   | { type: "session.created"; sessionId: string }
@@ -18,6 +18,7 @@ export function createInitialState(projectPath: string): TuiState {
     selectedEvent: null,
     conversation: [],
     timeline: [],
+    plan: [],
     browser: EMPTY_OBSERVATION,
   }
 }
@@ -47,6 +48,10 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
 
   if (runEvent.type === "observation.captured") {
     return { ...next, browser: readObservation(runEvent.payload.observation, state.browser) }
+  }
+
+  if (runEvent.type === "plan.created" || runEvent.type === "plan.updated") {
+    return { ...next, plan: readPlanItems(runEvent.payload.items, state.plan) }
   }
 
   if (runEvent.type === "run.completed") {
@@ -94,6 +99,20 @@ function eventLabel(event: RunEvent): string {
 function readObservation(value: unknown, fallback: Observation): Observation {
   const parsed = ObservationSchema.safeParse(value)
   return parsed.success ? parsed.data : fallback
+}
+
+function readPlanItems(value: unknown, fallback: PlanItem[]): PlanItem[] {
+  if (!Array.isArray(value)) return fallback
+
+  const items = value.flatMap((item): PlanItem[] => {
+    if (!isRecord(item)) return []
+    if (typeof item.id !== "string") return []
+    if (typeof item.title !== "string") return []
+    if (item.status !== "pending" && item.status !== "active" && item.status !== "completed") return []
+    return [{ id: item.id, title: item.title, status: item.status }]
+  })
+
+  return items.length > 0 ? items : fallback
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
