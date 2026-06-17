@@ -46,7 +46,7 @@ export function promptMeta(agentId: string, modelId: string | null): string {
 
 export function promptHint(runStatus: TuiState["runStatus"]): string {
   const escapeAction = runStatus === "running" ? "interrupt" : "exit"
-  return `esc ${escapeAction}  /theme themes  /agent agents  /help commands`
+  return `esc ${escapeAction}`
 }
 
 function viewItem(item: RunLogItem, block: TranscriptBlock, prefix: string, text: string): TranscriptViewItem {

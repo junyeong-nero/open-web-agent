@@ -5,7 +5,7 @@ import { SessionHeader } from "./components/session-header"
 import { TranscriptPanel } from "./components/transcript-panel"
 import { createEventStream } from "./client/event-source"
 import { createServerClient } from "./client/server-client"
-import { parseSlashCommand } from "./commands/slash-commands"
+import { formatSlashCommandHelp, parseSlashCommand } from "./commands/slash-commands"
 import { mapKeyEvent } from "./keymap/keybindings"
 import { createInitialState, reduceTuiEvent } from "./state/reducer"
 import type { AgentSummary, EnvironmentSummary, ModelSummary } from "./state/types"
@@ -134,7 +134,7 @@ export function App(props: AppProps) {
       setState((current) =>
         reduceTuiEvent(current, {
           type: "conversation.append",
-          message: { role: "system", content: "/help /clear /details /agent [id] /model [id] /browser [id] /theme [id] /new /stop /quit" },
+          message: { role: "system", content: formatSlashCommandHelp() },
         }),
       )
       setPrompt("")

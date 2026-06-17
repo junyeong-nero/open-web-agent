@@ -73,7 +73,7 @@ describe("session shell formatting", () => {
   it("formats prompt metadata and hints", () => {
     expect(promptMeta("mock-agent", null)).toBe("Build mock-agent no-model open-web-agent")
     expect(promptMeta("plan-act-agent", "openrouter")).toBe("Build plan-act-agent openrouter open-web-agent")
-    expect(promptHint("running")).toBe("esc interrupt  /theme themes  /agent agents  /help commands")
-    expect(promptHint("idle")).toBe("esc exit  /theme themes  /agent agents  /help commands")
+    expect(promptHint("running")).toBe("esc interrupt")
+    expect(promptHint("idle")).toBe("esc exit")
   })
 })
