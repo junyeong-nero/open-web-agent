@@ -73,6 +73,12 @@ export function createServerClient(baseUrl: string) {
     async listPlugins(): Promise<PluginList> {
       return request(`${baseUrl}/plugins`)
     },
+    async selectModel(modelId: string): Promise<{ modelId: string; modelName: string | null }> {
+      return request(`${baseUrl}/config/model`, {
+        method: "PATCH",
+        body: JSON.stringify({ modelId }),
+      })
+    },
   }
 }
 

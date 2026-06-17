@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { mkdtemp } from "node:fs/promises"
+import { readFile, mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { MockAgent } from "@open-web-agent/agents"
@@ -19,10 +19,17 @@ import {
   type RunEvent,
   type RuntimeContext,
 } from "@open-web-agent/core"
+import { readModelConfig } from "@open-web-agent/models"
 import { SQLiteStore } from "@open-web-agent/storage"
 import { createApp } from "./app"
 
-async function setup(delayMs = 0, storage?: SQLiteStore, includeAlternateAgent = false, includeRuntimePlugins = false) {
+async function setup(
+  delayMs = 0,
+  storage?: SQLiteStore,
+  includeAlternateAgent = false,
+  includeRuntimePlugins = false,
+  modelConfigPath?: string,
+) {
   const eventBus = new EventBus()
   const registry = new PluginRegistry()
   registry.registerAgent(new MockAgent())
@@ -47,7 +54,7 @@ async function setup(delayMs = 0, storage?: SQLiteStore, includeAlternateAgent =
   })
 
   const sessions = new Map()
-  const app = createApp({ eventBus, orchestrator, registry, sessions, storage })
+  const app = createApp({ eventBus, orchestrator, registry, sessions, storage, modelConfigPath })
 
   return {
     app,
@@ -105,6 +112,7 @@ class TestModel implements ModelPlugin {
   id = "test-model"
   name = "Test Model"
   provider = "test"
+  modelName = "test-runtime-model"
 
   async complete(_request: ModelRequest, _ctx: RuntimeContext): Promise<ModelResponse> {
     return { id: "model_response_1", text: "{}", raw: {}, usage: null, latencyMs: 0 }
@@ -341,6 +349,38 @@ describe("createApp", () => {
     expect(body.agents).toEqual([{ id: "mock-agent", name: "Mock Agent", description: "Deterministic Sprint 1 agent for Example Domain." }])
     expect(body.environments).toEqual([{ id: "mock-browser", name: "Mock Browser" }])
     expect(body.models).toEqual([])
+  })
+
+  it("PATCH /config/model persists a selected model provider for future sessions", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-server-config-"))
+    const configPath = join(dir, ".config.yaml")
+    const { request } = await setup(0, undefined, false, true, configPath)
+
+    const response = await request("/config/model", {
+      method: "PATCH",
+      body: JSON.stringify({ modelId: "test-model" }),
+    })
+    const body = await json<{ modelId: string; modelName: string | null }>(response)
+
+    expect(body).toEqual({ modelId: "test-model", modelName: "test-runtime-model" })
+    await readFile(configPath, "utf8")
+    expect(readModelConfig({}, { configPath })).toMatchObject({
+      defaultModel: "test-runtime-model",
+      defaultModelProvider: "test-model",
+    })
+  })
+
+  it("PATCH /config/model rejects an unknown model provider", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-server-config-"))
+    const { request } = await setup(0, undefined, false, true, join(dir, ".config.yaml"))
+
+    const response = await request("/config/model", {
+      method: "PATCH",
+      body: JSON.stringify({ modelId: "missing-model" }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: "Unknown model" })
   })
 
   it("POST /runs/:runId/cancel returns cancelled false for an unknown run", async () => {

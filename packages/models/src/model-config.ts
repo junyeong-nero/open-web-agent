@@ -1,14 +1,18 @@
 import { readFileSync } from "node:fs"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
-import { join } from "node:path"
-import { parse } from "yaml"
+import { dirname, join } from "node:path"
+import { parse, stringify } from "yaml"
+import { resolveCodexAuthPath } from "./codex-auth"
 
 export interface ModelConfig {
   defaultModel: string
+  defaultModelProvider: string | null
   reasoningEffort: string
   contextWindowTokens: number
   openaiApiKey: string | null
   openrouterApiKey: string | null
+  codexAuthPath: string
   parameters: ModelParameters
 }
 
@@ -25,6 +29,16 @@ export interface ModelParameters {
 
 export interface ReadModelConfigOptions {
   configPath?: string
+  legacyConfigPath?: string
+}
+
+export interface WriteModelSelectionConfigOptions {
+  configPath?: string
+}
+
+export interface ModelSelectionConfig {
+  modelId: string
+  modelName?: string | null
 }
 
 const defaultModel = "gpt-4.1-mini"
@@ -32,26 +46,80 @@ const defaultReasoningEffort = "medium"
 const defaultContextWindowTokens = 128000
 
 export function resolveModelConfigPath(): string {
+  return join(homedir(), ".open-web-agent", ".config.yaml")
+}
+
+export function resolveLegacyModelConfigPath(): string {
   return join(homedir(), ".openwebagents", "config.yaml")
 }
 
 export function readModelConfig(env: NodeJS.ProcessEnv = process.env, options: ReadModelConfigOptions = {}): ModelConfig {
-  const fileConfig = readConfigFile(options.configPath ?? resolveModelConfigPath())
+  const configPath = options.configPath ?? resolveModelConfigPath()
+  const legacyConfigPath = options.legacyConfigPath ?? (options.configPath ? undefined : resolveLegacyModelConfigPath())
+  const fileConfigResult = readConfigFile(configPath)
+  const fileConfig =
+    fileConfigResult.found || !legacyConfigPath ? fileConfigResult.config : readConfigFile(legacyConfigPath).config
 
   return {
     defaultModel: env.OPEN_WEB_AGENT_MODEL || fileConfig.defaultModel || defaultModel,
+    defaultModelProvider: env.OPEN_WEB_AGENT_MODEL_PROVIDER || fileConfig.defaultModelProvider || null,
     reasoningEffort: env.OPEN_WEB_AGENT_REASONING_EFFORT || fileConfig.reasoningEffort || defaultReasoningEffort,
     contextWindowTokens: readContextWindowTokens(env.OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS) ?? fileConfig.contextWindowTokens ?? defaultContextWindowTokens,
     openaiApiKey: env.OPENAI_API_KEY || fileConfig.openaiApiKey || null,
     openrouterApiKey: env.OPENROUTER_API_KEY || fileConfig.openrouterApiKey || null,
+    codexAuthPath: expandHomePath(env.OPEN_WEB_AGENT_CODEX_AUTH_PATH || fileConfig.codexAuthPath || resolveCodexAuthPath(env.CODEX_HOME)),
     parameters: fileConfig.parameters ?? {},
   }
 }
 
-function readConfigFile(configPath: string): Partial<ModelConfig> {
+export async function writeModelSelectionConfig(
+  selection: ModelSelectionConfig,
+  options: WriteModelSelectionConfigOptions = {},
+): Promise<void> {
+  const configPath = options.configPath ?? resolveModelConfigPath()
+  const parsed = await readRawConfigMapping(configPath)
+  const next = {
+    ...parsed,
+    model_provider: selection.modelId,
+    ...(selection.modelName && selection.modelName.length > 0 ? { model: selection.modelName } : {}),
+  }
+
+  await mkdir(dirname(configPath), { recursive: true })
+  await writeFile(configPath, stringify(next), "utf8")
+}
+
+function readConfigFile(configPath: string): { config: Partial<ModelConfig>; found: boolean } {
   let raw: string
   try {
     raw = readFileSync(configPath, "utf8")
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return { config: {}, found: false }
+    throw error
+  }
+
+  const parsed = parse(raw)
+  if (parsed == null) return { config: {}, found: true }
+  if (!isRecord(parsed)) throw new Error(`Invalid Open Web Agent config at ${configPath}: expected a YAML mapping`)
+
+  return {
+    config: {
+      defaultModel: readOptionalString(parsed, configPath, "default_model", "defaultModel", "model"),
+      defaultModelProvider: readOptionalString(parsed, configPath, "model_provider", "modelProvider"),
+      reasoningEffort: readOptionalString(parsed, configPath, "reasoning_effort", "reasoningEffort"),
+      contextWindowTokens: readOptionalPositiveInteger(parsed, configPath, "context_window_tokens", "contextWindowTokens"),
+      openaiApiKey: readOptionalString(parsed, configPath, "openai_api_key", "openaiApiKey"),
+      openrouterApiKey: readOptionalString(parsed, configPath, "openrouter_api_key", "openrouterApiKey"),
+      codexAuthPath: readOptionalString(parsed, configPath, "codex_auth_path", "codexAuthPath"),
+      parameters: readParameters(parsed, configPath),
+    },
+    found: true,
+  }
+}
+
+async function readRawConfigMapping(configPath: string): Promise<Record<string, unknown>> {
+  let raw: string
+  try {
+    raw = await readFile(configPath, "utf8")
   } catch (error) {
     if (isNodeError(error) && error.code === "ENOENT") return {}
     throw error
@@ -60,15 +128,7 @@ function readConfigFile(configPath: string): Partial<ModelConfig> {
   const parsed = parse(raw)
   if (parsed == null) return {}
   if (!isRecord(parsed)) throw new Error(`Invalid Open Web Agent config at ${configPath}: expected a YAML mapping`)
-
-  return {
-    defaultModel: readOptionalString(parsed, configPath, "default_model", "defaultModel", "model"),
-    reasoningEffort: readOptionalString(parsed, configPath, "reasoning_effort", "reasoningEffort"),
-    contextWindowTokens: readOptionalPositiveInteger(parsed, configPath, "context_window_tokens", "contextWindowTokens"),
-    openaiApiKey: readOptionalString(parsed, configPath, "openai_api_key", "openaiApiKey"),
-    openrouterApiKey: readOptionalString(parsed, configPath, "openrouter_api_key", "openrouterApiKey"),
-    parameters: readParameters(parsed, configPath),
-  }
+  return parsed
 }
 
 function readParameters(record: Record<string, unknown>, configPath: string): ModelParameters | undefined {
@@ -177,6 +237,12 @@ function readContextWindowTokens(value: string | undefined): number | undefined 
     throw new Error("Invalid OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS: must be a positive integer")
   }
   return parsed
+}
+
+function expandHomePath(value: string): string {
+  if (value === "~") return homedir()
+  if (value.startsWith("~/")) return join(homedir(), value.slice(2))
+  return value
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

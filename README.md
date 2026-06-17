@@ -54,14 +54,18 @@ bun run packages/cli/src/index.ts serve --port 4096 --hostname 127.0.0.1
 
 ## Configuration
 
-Open Web Agent reads user-level model settings from `~/.openwebagents/config.yaml`.
+Open Web Agent reads user-level model settings from `~/.open-web-agent/.config.yaml`.
+For compatibility, it still reads the old `~/.openwebagents/config.yaml` path
+when the new file does not exist.
 
 ```yaml
 model: "gpt-4.1-mini"
+model_provider: "openai"
 reasoning_effort: "medium"
 context_window_tokens: 128000
 openai_api_key: "sk-..."
 openrouter_api_key: "sk-or-..."
+codex_auth_path: "~/.codex/auth.json"
 
 parameters:
   temperature: 0
@@ -79,8 +83,15 @@ parameters:
 Set one or both provider keys. Environment variables still take precedence when present:
 `OPEN_WEB_AGENT_MODEL`, `OPEN_WEB_AGENT_REASONING_EFFORT`,
 `OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS`, `OPEN_WEB_AGENT_MODEL_TIMEOUT_MS`,
+`OPEN_WEB_AGENT_MODEL_PROVIDER`, `OPEN_WEB_AGENT_CODEX_AUTH_PATH`,
 `OPENAI_API_KEY`, and
 `OPENROUTER_API_KEY`.
+
+If Codex file-backed ChatGPT auth is available at `codex_auth_path`, or if
+`CODEX_ACCESS_TOKEN` is set, the runtime also registers the `codex-oauth`
+provider. Changing models from the TUI with `/model <id>` writes the selected
+provider and provider model name back to `~/.open-web-agent/.config.yaml`, so
+the next TUI session starts with the same provider.
 
 ## Development Commands
 

@@ -16,7 +16,14 @@ import {
   type RuntimeContext,
   type SessionState,
 } from "@open-web-agent/core"
-import { OpenAIModel, OpenRouterModel, readModelConfig } from "@open-web-agent/models"
+import {
+  CodexOAuthModel,
+  OpenAIModel,
+  OpenRouterModel,
+  readCodexOAuthToken,
+  readModelConfig,
+  resolveModelConfigPath,
+} from "@open-web-agent/models"
 import { SQLiteStore } from "@open-web-agent/storage"
 import { join } from "node:path"
 import { createApp } from "./app"
@@ -46,12 +53,15 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   const home = options.home ?? resolveOwaHome()
   const eventBus = new EventBus()
   const registry = new PluginRegistry()
-  const modelConfig = readModelConfig(options.env ?? process.env, { configPath: options.configPath })
-  const modelCallTimeoutMs = readModelCallTimeoutMs(options.env ?? process.env)
+  const env = options.env ?? process.env
+  const modelConfigPath = options.configPath ?? resolveModelConfigPath()
+  const modelConfig = readModelConfig(env, options.configPath ? { configPath: modelConfigPath } : {})
+  const modelCallTimeoutMs = readModelCallTimeoutMs(env)
 
   registry.registerAgent(new MockAgent())
+  const models: ModelPlugin[] = []
   if (modelConfig.openaiApiKey) {
-    registry.registerModel(
+    models.push(
       new OpenAIModel({
         apiKey: modelConfig.openaiApiKey,
         defaultModel: modelConfig.defaultModel,
@@ -62,7 +72,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     )
   }
   if (modelConfig.openrouterApiKey) {
-    registry.registerModel(
+    models.push(
       new OpenRouterModel({
         apiKey: modelConfig.openrouterApiKey,
         defaultModel: modelConfig.defaultModel,
@@ -71,6 +81,22 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
         contextWindowTokens: modelConfig.contextWindowTokens,
       }),
     )
+  }
+  const codexOAuthToken = readCodexOAuthToken(env, { authPath: modelConfig.codexAuthPath })
+  if (codexOAuthToken) {
+    models.push(
+      new CodexOAuthModel({
+        accessToken: codexOAuthToken,
+        defaultModel: modelConfig.defaultModel,
+        defaultParameters: modelConfig.parameters,
+        reasoningEffort: modelConfig.reasoningEffort,
+        contextWindowTokens: modelConfig.contextWindowTokens,
+      }),
+    )
+  }
+
+  for (const model of orderModels(models, modelConfig.defaultModelProvider)) {
+    registry.registerModel(model)
   }
 
   const defaultModelId = registry.listModels()[0]?.id
@@ -106,7 +132,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   })
   const storage = new SQLiteStore(join(home, "metadata.sqlite"))
   storage.migrate()
-  const app = createApp({ eventBus, orchestrator, registry, sessions, storage })
+  const app = createApp({ eventBus, orchestrator, registry, sessions, storage, modelConfigPath })
   const server = await startServer({
     app,
     hostname: options.hostname,
@@ -125,6 +151,13 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
       storage.close()
     },
   }
+}
+
+function orderModels(models: ModelPlugin[], defaultModelProvider: string | null): ModelPlugin[] {
+  if (!defaultModelProvider) return models
+  const selected = models.find((model) => model.id === defaultModelProvider)
+  if (!selected) return models
+  return [selected, ...models.filter((model) => model.id !== defaultModelProvider)]
 }
 
 function readModelCallTimeoutMs(env: NodeJS.ProcessEnv): number | undefined {

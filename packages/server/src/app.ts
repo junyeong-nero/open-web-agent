@@ -6,6 +6,7 @@ import { registerHealthRoutes } from "./routes/health"
 import { registerPluginRoutes } from "./routes/plugins"
 import { registerRunRoutes, type RunRecord } from "./routes/runs"
 import { registerSessionRoutes } from "./routes/sessions"
+import { registerConfigRoutes } from "./routes/config"
 
 export interface CreateAppDeps {
   eventBus: EventBus
@@ -13,6 +14,7 @@ export interface CreateAppDeps {
   registry: PluginRegistry
   sessions: Map<string, SessionState>
   storage?: SQLiteStore
+  modelConfigPath?: string
 }
 
 export function createApp(deps: CreateAppDeps): Hono {
@@ -29,6 +31,7 @@ export function createApp(deps: CreateAppDeps): Hono {
     runs,
     storage: deps.storage,
   })
+  registerConfigRoutes(app, { registry: deps.registry, modelConfigPath: deps.modelConfigPath })
   registerPluginRoutes(app, { registry: deps.registry })
 
   return app

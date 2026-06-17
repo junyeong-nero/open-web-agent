@@ -10,7 +10,7 @@ describe("startDefaultRuntime", () => {
     const runtime = await startDefaultRuntime({
       home,
       configPath: join(home, "missing-config.yaml"),
-      env: {},
+      env: isolatedEnv(home),
     })
 
     try {
@@ -29,17 +29,83 @@ describe("startDefaultRuntime", () => {
     const runtime = await startDefaultRuntime({
       home,
       configPath: join(home, "missing-config.yaml"),
-      env: {
+      env: isolatedEnv(home, {
         OPENAI_API_KEY: "test-openai-key",
         OPENROUTER_API_KEY: "test-openrouter-key",
         OPEN_WEB_AGENT_MODEL: "test-model",
-      },
+      }),
     })
 
     try {
       const plugins = await fetchPlugins(runtime.url)
 
       expect(plugins.models.map((model) => model.id)).toEqual(["openai", "openrouter"])
+    } finally {
+      await runtime.stop()
+    }
+  })
+
+  it("registers Codex OAuth as a selectable model provider when Codex auth is available", async () => {
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const codexAuthPath = join(home, "codex-auth.json")
+    const configPath = join(home, ".config.yaml")
+    await writeFile(
+      codexAuthPath,
+      JSON.stringify({
+        auth_mode: "chatgpt",
+        OPENAI_API_KEY: null,
+        tokens: { access_token: "codex-oauth-token" },
+      }),
+    )
+    await writeFile(
+      configPath,
+      ['model: "gpt-codex-test"', 'model_provider: "codex-oauth"', `codex_auth_path: "${codexAuthPath}"`, ""].join("\n"),
+    )
+
+    const runtime = await startDefaultRuntime({
+      home,
+      configPath,
+      env: {},
+    })
+
+    try {
+      const plugins = await fetchPlugins(runtime.url)
+
+      expect(plugins.models[0]).toMatchObject({
+        id: "codex-oauth",
+        name: "Codex OAuth",
+        provider: "codex-oauth",
+        modelName: "gpt-codex-test",
+      })
+    } finally {
+      await runtime.stop()
+    }
+  })
+
+  it("orders persisted default model provider first for the TUI", async () => {
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const configPath = join(home, ".config.yaml")
+    await writeFile(
+      configPath,
+      [
+        'model: "persisted-model"',
+        'model_provider: "openrouter"',
+        'openai_api_key: "config-openai-key"',
+        'openrouter_api_key: "config-openrouter-key"',
+        "",
+      ].join("\n"),
+    )
+
+    const runtime = await startDefaultRuntime({
+      home,
+      configPath,
+      env: isolatedEnv(home),
+    })
+
+    try {
+      const plugins = await fetchPlugins(runtime.url)
+
+      expect(plugins.models.map((model) => model.id)).toEqual(["openrouter", "openai"])
     } finally {
       await runtime.stop()
     }
@@ -75,7 +141,7 @@ describe("startDefaultRuntime", () => {
       home,
       agentsDir,
       configPath: join(home, "missing-config.yaml"),
-      env: {},
+      env: isolatedEnv(home),
     })
 
     try {
@@ -103,7 +169,7 @@ describe("startDefaultRuntime", () => {
     const runtime = await startDefaultRuntime({
       home,
       configPath,
-      env: {},
+      env: isolatedEnv(home),
     })
 
     try {
@@ -178,10 +244,10 @@ describe("startDefaultRuntime", () => {
       home,
       agentsDir,
       configPath: join(home, "missing-config.yaml"),
-      env: {
+      env: isolatedEnv(home, {
         OPENAI_API_KEY: "test-openai-key",
         OPEN_WEB_AGENT_MODEL: "gpt-test",
-      },
+      }),
     })
 
     try {
@@ -265,10 +331,10 @@ describe("startDefaultRuntime", () => {
       home,
       agentsDir: resolve(import.meta.dir, "../../../agents"),
       configPath: join(home, "missing-config.yaml"),
-      env: {
+      env: isolatedEnv(home, {
         OPENAI_API_KEY: "test-openai-key",
         OPEN_WEB_AGENT_MODEL: "gpt-test",
-      },
+      }),
     })
 
     try {
@@ -340,10 +406,10 @@ describe("startDefaultRuntime", () => {
       home,
       agentsDir: resolve(import.meta.dir, "../../../agents"),
       configPath: join(home, "missing-config.yaml"),
-      env: {
+      env: isolatedEnv(home, {
         OPENAI_API_KEY: "test-openai-key",
         OPEN_WEB_AGENT_MODEL: "gpt-test",
-      },
+      }),
     })
 
     try {
@@ -425,12 +491,12 @@ describe("startDefaultRuntime", () => {
     const runtime = await startDefaultRuntime({
       home,
       configPath: join(home, "missing-config.yaml"),
-      env: {
+      env: isolatedEnv(home, {
         OPENAI_API_KEY: "test-openai-key",
         OPEN_WEB_AGENT_MODEL: "gpt-test",
         OPEN_WEB_AGENT_REASONING_EFFORT: "high",
         OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS: "400000",
-      },
+      }),
     })
 
     try {
@@ -503,11 +569,11 @@ describe("startDefaultRuntime", () => {
     const runtime = await startDefaultRuntime({
       home,
       configPath: join(home, "missing-config.yaml"),
-      env: {
+      env: isolatedEnv(home, {
         OPENAI_API_KEY: "test-openai-key",
         OPEN_WEB_AGENT_MODEL: "gpt-test",
         OPEN_WEB_AGENT_MODEL_TIMEOUT_MS: "5",
-      },
+      }),
     })
     let runId: string | null = null
     let waitForSettled: Promise<void> = Promise.resolve()
@@ -585,4 +651,11 @@ async function fetchPlugins(url: string): Promise<{
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function isolatedEnv(home: string, env: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    OPEN_WEB_AGENT_CODEX_AUTH_PATH: join(home, "missing-codex-auth.json"),
+    ...env,
+  }
 }
