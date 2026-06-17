@@ -1,7 +1,8 @@
-import { createSignal, onCleanup, onMount } from "solid-js"
+import { createSignal, onCleanup, onMount, Show } from "solid-js"
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useSelectionHandler } from "@opentui/solid"
 import { PromptInput } from "./components/prompt-input"
+import { ModelSelector } from "./components/model-selector"
 import { SessionHeader } from "./components/session-header"
 import { TranscriptPanel } from "./components/transcript-panel"
 import { createEventStream } from "./client/event-source"
@@ -27,6 +28,7 @@ export function App(props: AppProps) {
   const client = createServerClient(props.serverUrl)
   const [state, setState] = createSignal(createInitialState(props.projectPath))
   const [prompt, setPrompt] = createSignal("")
+  const [modelSelectorOpen, setModelSelectorOpen] = createSignal(false)
   let transcriptScroll: ScrollBoxRenderable | undefined
   const currentTheme = (): TuiTheme => getTheme(state().selectedThemeId)
 
@@ -205,12 +207,7 @@ export function App(props: AppProps) {
     if (command.kind === "model") {
       setPrompt("")
       if (!command.modelId) {
-        setState((current) =>
-          reduceTuiEvent(current, {
-            type: "conversation.append",
-            message: { role: "system", content: formatModelStatus(current.selectedModelId, current.availableModels) },
-          }),
-        )
+        setModelSelectorOpen(true)
         return
       }
 
@@ -335,6 +332,19 @@ export function App(props: AppProps) {
     })
   }
 
+  function selectModelFromSelector(modelId: string) {
+    setModelSelectorOpen(false)
+    setState((current) =>
+      reduceTuiEvent(
+        reduceTuiEvent(current, { type: "model.selected", modelId }),
+        {
+          type: "conversation.append",
+          message: { role: "system", content: `Model set to ${modelId}` },
+        },
+      ),
+    )
+  }
+
   return (
     <box flexDirection="column" width="100%" height="100%" paddingX={2} paddingY={1} rowGap={1} backgroundColor={currentTheme().surface}>
       <SessionHeader state={state()} theme={currentTheme()} />
@@ -355,6 +365,15 @@ export function App(props: AppProps) {
         onChange={setPrompt}
         onSubmit={submitPrompt}
       />
+      <Show when={modelSelectorOpen()}>
+        <ModelSelector
+          models={state().availableModels}
+          selectedModelId={state().selectedModelId}
+          theme={currentTheme()}
+          onSelect={selectModelFromSelector}
+          onCancel={() => setModelSelectorOpen(false)}
+        />
+      </Show>
     </box>
   )
 }
@@ -366,10 +385,6 @@ function formatAgentStatus(selectedAgentId: string, agents: AgentSummary[]): str
 function formatAvailableAgents(agents: AgentSummary[]): string {
   if (agents.length === 0) return "Available agents: not loaded"
   return `Available agents: ${agents.map((agent) => agent.id).join(", ")}`
-}
-
-function formatModelStatus(selectedModelId: string | null, models: ModelSummary[]): string {
-  return `Current model: ${selectedModelId ?? "none"}. ${formatAvailableModels(models)}`
 }
 
 function formatAvailableModels(models: ModelSummary[]): string {
