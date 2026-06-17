@@ -27,6 +27,12 @@ export interface BrowserEnvironment {
   name: string
   reset(ctx: RuntimeContext): Promise<void>
   observe(ctx: RuntimeContext): Promise<Observation>
-  execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult>
   close(ctx: RuntimeContext): Promise<void>
+}
+
+export interface ToolAdapter {
+  id: string
+  name: string
+  environmentId: string
+  execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult>
 }

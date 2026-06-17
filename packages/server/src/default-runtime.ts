@@ -1,5 +1,10 @@
 import { MockAgent, PlanActAgent, SeeActAgent, SimpleReActAgent } from "@open-web-agent/agents"
-import { MockEnvironment, PlaywrightEnvironment } from "@open-web-agent/browser"
+import {
+  MockBrowserToolAdapter,
+  MockEnvironment,
+  PlaywrightBrowserToolAdapter,
+  PlaywrightEnvironment,
+} from "@open-web-agent/browser"
 import {
   EventBus,
   PluginRegistry,
@@ -72,8 +77,12 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   registry.registerAgent(new SeeActAgent({ model: selectedModel, modelName: modelConfig.defaultModel }))
   registry.registerAgent(new PlanActAgent({ model: selectedModel, modelName: modelConfig.defaultModel }))
 
-  registry.registerEnvironment(new MockEnvironment(options.environmentDelayMs))
-  registry.registerEnvironment(new PlaywrightEnvironment())
+  const mockEnvironment = new MockEnvironment(options.environmentDelayMs)
+  const playwrightEnvironment = new PlaywrightEnvironment()
+  registry.registerEnvironment(mockEnvironment)
+  registry.registerToolAdapter(new MockBrowserToolAdapter(mockEnvironment))
+  registry.registerEnvironment(playwrightEnvironment)
+  registry.registerToolAdapter(new PlaywrightBrowserToolAdapter(playwrightEnvironment))
 
   const sessions = new Map<string, SessionState>()
   const orchestrator = new RunOrchestrator({
