@@ -24,6 +24,7 @@ export function PromptInput(props: PromptInputProps) {
   let textarea: (TextareaRenderable & { plainText?: string }) | undefined
   const [barPhase, setBarPhase] = createSignal(0)
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = createSignal(0)
+  const [draftValue, setDraftValue] = createSignal(props.value)
   const interval = setInterval(() => setBarPhase((phase) => (phase + 1) % 14), 120)
   const keyBindings = [
     { name: "return", action: "submit" as const },
@@ -34,18 +35,23 @@ export function PromptInput(props: PromptInputProps) {
     { name: "linefeed", shift: true, action: "newline" as const },
   ]
 
-  const currentValue = () => textarea?.plainText ?? props.value
-  const commandSuggestions = () => listSlashCommandSuggestions(props.value)
+  const currentValue = () => textarea?.plainText ?? draftValue()
+  const commandSuggestions = () => listSlashCommandSuggestions(draftValue())
   createEffect(() => {
     const count = commandSuggestions().length
     setSelectedSuggestionIndex((index) => (count === 0 ? 0 : Math.min(index, count - 1)))
   })
   const handleContentChange = (_event: unknown) => {
-    props.onChange(currentValue())
+    const value = currentValue()
+    setDraftValue(value)
+    props.onChange(value)
   }
   const handleSubmit = () => {
-    props.onChange(currentValue())
+    const value = currentValue()
+    setDraftValue(value)
+    props.onChange(value)
     textarea?.clear()
+    setDraftValue("")
     props.onSubmit()
   }
   const handleSlashCompletion = () => {
@@ -54,12 +60,14 @@ export function PromptInput(props: PromptInputProps) {
     if (!completion) return false
 
     if (!textarea) {
+      setDraftValue(completion)
       props.onChange(completion)
       return true
     }
 
     textarea.setText(completion)
     textarea.cursorOffset = completion.length
+    setDraftValue(completion)
     return true
   }
   const moveSlashSelection = (delta: -1 | 1) => {

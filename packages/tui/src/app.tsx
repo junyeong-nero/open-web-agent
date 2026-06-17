@@ -1,3 +1,4 @@
+/** @jsxImportSource @opentui/solid */
 import { createSignal, onCleanup, onMount } from "solid-js"
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useSelectionHandler } from "@opentui/solid"
@@ -7,7 +8,7 @@ import { TranscriptPanel } from "./components/transcript-panel"
 import { createEventStream } from "./client/event-source"
 import { createServerClient } from "./client/server-client"
 import { copySelectionToClipboard, pasteSystemClipboardText } from "./clipboard/system-clipboard"
-import { formatSlashCommandHelp, parseSlashCommand } from "./commands/slash-commands"
+import { formatSlashCommandHelp, listSlashCommandSuggestions, parseSlashCommand } from "./commands/slash-commands"
 import { mapKeyEvent } from "./keymap/keybindings"
 import { createInitialState, reduceTuiEvent } from "./state/reducer"
 import type { AgentSummary, EnvironmentSummary, ModelSummary } from "./state/types"
@@ -100,6 +101,7 @@ export function App(props: AppProps) {
       void pasteSystemClipboardText(renderer)
     }
     if (action === "focus-next" || action === "focus-previous") {
+      if (action === "focus-next" && activePane() === "prompt" && listSlashCommandSuggestions(prompt()).length > 0) return
       key.preventDefault()
       setActivePane((pane) => (pane === "prompt" ? "transcript" : "prompt"))
       return

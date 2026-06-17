@@ -17,6 +17,72 @@ const idleModelActivity: ModelActivity = {
 }
 
 describe("PromptInput", () => {
+  it("reports ordinary text edits", async () => {
+    const changes: string[] = []
+    const setup = await testRender(
+      () => (
+        <PromptInput
+          value=""
+          agent={null}
+          model={null}
+          modelActivity={idleModelActivity}
+          runStatus="idle"
+          theme={getTheme("opencode")}
+          onChange={(value) => changes.push(value)}
+          onSubmit={() => {}}
+        />
+      ),
+      { width: 80, height: 12 },
+    )
+
+    try {
+      await setup.flush()
+      await setup.mockInput.typeText("/ag")
+      await setup.flush()
+
+      expect(changes.at(-1)).toBe("/ag")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  it("autocompletes slash commands typed after render", async () => {
+    const changes: string[] = []
+    const setup = await testRender(
+      () => (
+        <PromptInput
+          value=""
+          agent={null}
+          model={null}
+          modelActivity={idleModelActivity}
+          runStatus="idle"
+          theme={getTheme("opencode")}
+          onChange={(value) => changes.push(value)}
+          onSubmit={() => {}}
+        />
+      ),
+      { width: 80, height: 12 },
+    )
+
+    try {
+      await setup.flush()
+      const textarea = setup.renderer.root.findDescendantById("prompt-input-textarea")
+
+      expect(textarea).toBeInstanceOf(TextareaRenderable)
+
+      await setup.mockInput.typeText("/ag")
+      await setup.flush()
+      changes.length = 0
+      setup.mockInput.pressTab()
+      await setup.flush()
+
+      expect((textarea as TextareaRenderable).plainText).toBe("/agent ")
+      expect(changes).toEqual(["/agent "])
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
   it("autocompletes the displayed slash command suggestion on tab", async () => {
     const changes: string[] = []
     const setup = await testRender(
