@@ -8,6 +8,7 @@ import { createServerClient } from "./client/server-client"
 import { parseSlashCommand } from "./commands/slash-commands"
 import { mapKeyEvent } from "./keymap/keybindings"
 import { createInitialState, reduceTuiEvent } from "./state/reducer"
+import type { AgentSummary, EnvironmentSummary, ModelSummary } from "./state/types"
 import { getTheme, listThemes, type TuiTheme } from "./theme/themes"
 
 export interface AppProps {
@@ -28,6 +29,7 @@ export function App(props: AppProps) {
   onMount(async () => {
     const sessionId = await resolveStartupSession()
     setState((current) => reduceTuiEvent(current, { type: "session.created", sessionId }))
+    await loadPlugins()
 
     const stream = createEventStream(props.serverUrl, (event) => {
       setState((current) => reduceTuiEvent(current, { type: "run.event", event }))
@@ -49,6 +51,27 @@ export function App(props: AppProps) {
 
     const session = await client.createSession(props.projectPath)
     return session.sessionId
+  }
+
+  async function loadPlugins() {
+    try {
+      const plugins = await client.listPlugins()
+      setState((current) =>
+        reduceTuiEvent(current, {
+          type: "plugins.loaded",
+          agents: plugins.agents,
+          models: plugins.models,
+          environments: plugins.environments,
+        }),
+      )
+    } catch (error) {
+      setState((current) =>
+        reduceTuiEvent(current, {
+          type: "conversation.append",
+          message: { role: "system", content: `Failed to load plugins: ${error instanceof Error ? error.message : String(error)}` },
+        }),
+      )
+    }
   }
 
   useKeyboard((key) => {
@@ -111,7 +134,7 @@ export function App(props: AppProps) {
       setState((current) =>
         reduceTuiEvent(current, {
           type: "conversation.append",
-          message: { role: "system", content: "/help /clear /details /theme [id] /new /stop /quit" },
+          message: { role: "system", content: "/help /clear /details /agent [id] /model [id] /browser [id] /theme [id] /new /stop /quit" },
         }),
       )
       setPrompt("")
@@ -130,7 +153,8 @@ export function App(props: AppProps) {
       }
 
       const themeId = command.themeId
-      if (!listThemes().some((theme) => theme.id === themeId)) {
+      const themes = listThemes()
+      if (!themes.some((theme) => theme.id === themeId)) {
         setState((current) =>
           reduceTuiEvent(current, {
             type: "conversation.append",
@@ -146,6 +170,111 @@ export function App(props: AppProps) {
           {
             type: "conversation.append",
             message: { role: "system", content: `Theme set to ${themeId}` },
+          },
+        ),
+      )
+      return
+    }
+    if (command.kind === "model") {
+      setPrompt("")
+      if (!command.modelId) {
+        setState((current) =>
+          reduceTuiEvent(current, {
+            type: "conversation.append",
+            message: { role: "system", content: formatModelStatus(current.selectedModelId, current.availableModels) },
+          }),
+        )
+        return
+      }
+
+      const modelId = command.modelId
+      const models = state().availableModels
+      if (models.length > 0 && !models.some((model) => model.id === modelId)) {
+        setState((current) =>
+          reduceTuiEvent(current, {
+            type: "conversation.append",
+            message: { role: "system", content: `Unknown model: ${modelId}. ${formatAvailableModels(models)}` },
+          }),
+        )
+        return
+      }
+
+      setState((current) =>
+        reduceTuiEvent(
+          reduceTuiEvent(current, { type: "model.selected", modelId }),
+          {
+            type: "conversation.append",
+            message: { role: "system", content: `Model set to ${modelId}` },
+          },
+        ),
+      )
+      return
+    }
+    if (command.kind === "browser") {
+      setPrompt("")
+      if (!command.environmentId) {
+        setState((current) =>
+          reduceTuiEvent(current, {
+            type: "conversation.append",
+            message: { role: "system", content: formatBrowserStatus(current.selectedEnvironmentId, current.availableEnvironments) },
+          }),
+        )
+        return
+      }
+
+      const environmentId = command.environmentId
+      const environments = state().availableEnvironments
+      if (environments.length > 0 && !environments.some((environment) => environment.id === environmentId)) {
+        setState((current) =>
+          reduceTuiEvent(current, {
+            type: "conversation.append",
+            message: { role: "system", content: `Unknown browser: ${environmentId}. ${formatAvailableBrowsers(environments)}` },
+          }),
+        )
+        return
+      }
+
+      setState((current) =>
+        reduceTuiEvent(
+          reduceTuiEvent(current, { type: "environment.selected", environmentId }),
+          {
+            type: "conversation.append",
+            message: { role: "system", content: `Browser set to ${environmentId}` },
+          },
+        ),
+      )
+      return
+    }
+    if (command.kind === "agent") {
+      setPrompt("")
+      if (!command.agentId) {
+        setState((current) =>
+          reduceTuiEvent(current, {
+            type: "conversation.append",
+            message: { role: "system", content: formatAgentStatus(current.selectedAgentId, current.availableAgents) },
+          }),
+        )
+        return
+      }
+
+      const agentId = command.agentId
+      const agents = state().availableAgents
+      if (agents.length > 0 && !agents.some((agent) => agent.id === agentId)) {
+        setState((current) =>
+          reduceTuiEvent(current, {
+            type: "conversation.append",
+            message: { role: "system", content: `Unknown agent: ${agentId}. ${formatAvailableAgents(agents)}` },
+          }),
+        )
+        return
+      }
+
+      setState((current) =>
+        reduceTuiEvent(
+          reduceTuiEvent(current, { type: "agent.selected", agentId }),
+          {
+            type: "conversation.append",
+            message: { role: "system", content: `Agent set to ${agentId}` },
           },
         ),
       )
@@ -172,7 +301,11 @@ export function App(props: AppProps) {
       }),
     )
     setPrompt("")
-    await client.submitRun(activeSessionId, command.value)
+    await client.submitRun(activeSessionId, command.value, {
+      agentId: state().selectedAgentId,
+      modelId: state().selectedModelId,
+      environmentId: state().selectedEnvironmentId,
+    })
   }
 
   return (
@@ -191,6 +324,33 @@ export function App(props: AppProps) {
       />
     </box>
   )
+}
+
+function formatAgentStatus(selectedAgentId: string, agents: AgentSummary[]): string {
+  return `Current agent: ${selectedAgentId}. ${formatAvailableAgents(agents)}`
+}
+
+function formatAvailableAgents(agents: AgentSummary[]): string {
+  if (agents.length === 0) return "Available agents: not loaded"
+  return `Available agents: ${agents.map((agent) => agent.id).join(", ")}`
+}
+
+function formatModelStatus(selectedModelId: string | null, models: ModelSummary[]): string {
+  return `Current model: ${selectedModelId ?? "none"}. ${formatAvailableModels(models)}`
+}
+
+function formatAvailableModels(models: ModelSummary[]): string {
+  if (models.length === 0) return "Available models: none configured"
+  return `Available models: ${models.map((model) => model.id).join(", ")}`
+}
+
+function formatBrowserStatus(selectedEnvironmentId: string, environments: EnvironmentSummary[]): string {
+  return `Current browser: ${selectedEnvironmentId}. ${formatAvailableBrowsers(environments)}`
+}
+
+function formatAvailableBrowsers(environments: EnvironmentSummary[]): string {
+  if (environments.length === 0) return "Available browsers: not loaded"
+  return `Available browsers: ${environments.map((environment) => environment.id).join(", ")}`
 }
 
 function formatThemeStatus(selectedThemeId: string): string {

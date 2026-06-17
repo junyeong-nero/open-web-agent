@@ -4,14 +4,36 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { MockAgent } from "@open-web-agent/agents"
 import { MockEnvironment } from "@open-web-agent/browser"
-import { EventBus, PluginRegistry, RunOrchestrator, type RunEvent } from "@open-web-agent/core"
+import {
+  EventBus,
+  PluginRegistry,
+  RunOrchestrator,
+  type ActionResult,
+  type AgentDecision,
+  type AgentPlugin,
+  type AgentState,
+  type BrowserEnvironment,
+  type BrowserToolCall,
+  type ModelPlugin,
+  type ModelRequest,
+  type ModelResponse,
+  type Observation,
+  type RunEvent,
+  type RuntimeContext,
+} from "@open-web-agent/core"
 import { SQLiteStore } from "@open-web-agent/storage"
 import { createApp } from "./app"
 
-async function setup(delayMs = 0, storage?: SQLiteStore) {
+async function setup(delayMs = 0, storage?: SQLiteStore, includeAlternateAgent = false, includeRuntimePlugins = false) {
   const eventBus = new EventBus()
   const registry = new PluginRegistry()
   registry.registerAgent(new MockAgent())
+  if (includeAlternateAgent) registry.registerAgent(new AlternateAgent())
+  if (includeRuntimePlugins) {
+    registry.registerAgent(new ContextAgent())
+    registry.registerModel(new TestModel())
+    registry.registerEnvironment(new AlternateEnvironment())
+  }
   registry.registerEnvironment(new MockEnvironment(delayMs))
 
   const orchestrator = new RunOrchestrator({
@@ -40,6 +62,70 @@ async function setup(delayMs = 0, storage?: SQLiteStore) {
       )
     },
   }
+}
+
+class AlternateAgent implements AgentPlugin {
+  id = "alternate-agent"
+  name = "Alternate Agent"
+  description = "Returns a distinct final answer for agent selection tests."
+
+  async initialize(): Promise<void> {}
+
+  async step(_state: AgentState): Promise<AgentDecision> {
+    return { type: "final_answer", thought: null, finalAnswer: "alternate answer", confidence: 1 }
+  }
+
+  async finalize(state: AgentState): Promise<string> {
+    return state.finalAnswer ?? "alternate answer"
+  }
+}
+
+class ContextAgent implements AgentPlugin {
+  id = "context-agent"
+  name = "Context Agent"
+  description = "Reports selected runtime plugin ids."
+
+  async initialize(): Promise<void> {}
+
+  async step(_state: AgentState, ctx: RuntimeContext): Promise<AgentDecision> {
+    return {
+      type: "final_answer",
+      thought: null,
+      finalAnswer: `agent=${this.id} model=${ctx.modelId} browser=${ctx.environmentId}`,
+      confidence: 1,
+    }
+  }
+
+  async finalize(state: AgentState): Promise<string> {
+    return state.finalAnswer ?? ""
+  }
+}
+
+class TestModel implements ModelPlugin {
+  id = "test-model"
+  name = "Test Model"
+  provider = "test"
+
+  async complete(_request: ModelRequest, _ctx: RuntimeContext): Promise<ModelResponse> {
+    return { id: "model_response_1", text: "{}", raw: {}, usage: null, latencyMs: 0 }
+  }
+}
+
+class AlternateEnvironment implements BrowserEnvironment {
+  id = "alternate-browser"
+  name = "Alternate Browser"
+
+  async reset(_ctx: RuntimeContext): Promise<void> {}
+
+  async observe(_ctx: RuntimeContext): Promise<Observation> {
+    return { url: "about:alternate", title: "Alternate", text: null, screenshotPath: null, interactiveElements: [], metadata: {} }
+  }
+
+  async execute(_call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
+    return { ok: true, message: `environment=${ctx.environmentId}`, observation: await this.observe(ctx), metadata: {} }
+  }
+
+  async close(_ctx: RuntimeContext): Promise<void> {}
 }
 
 async function json<T>(response: Response): Promise<T> {
@@ -115,6 +201,72 @@ describe("createApp", () => {
 
     expect(body.runId).toStartWith("run_")
     expect(event.payload.finalAnswer).toBe('페이지 제목은 "Example Domain"입니다.')
+  })
+
+  it("POST /runs can select a registered agent", async () => {
+    const { request, eventBus } = await setup(0, undefined, true)
+    const sessionId = await createSession(request)
+    const completed = waitForEvent(eventBus, "run.completed")
+
+    const response = await request("/runs", {
+      method: "POST",
+      body: JSON.stringify({ sessionId, prompt: "answer directly", agentId: "alternate-agent" }),
+    })
+    await json<{ runId: string }>(response)
+
+    expect((await completed).payload.finalAnswer).toBe("alternate answer")
+  })
+
+  it("POST /runs rejects an unknown agent", async () => {
+    const { request } = await setup(0, undefined, true)
+    const sessionId = await createSession(request)
+
+    const response = await request("/runs", {
+      method: "POST",
+      body: JSON.stringify({ sessionId, prompt: "answer directly", agentId: "missing-agent" }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: "Unknown agent" })
+  })
+
+  it("POST /runs can select model and browser for a run", async () => {
+    const { request, eventBus } = await setup(0, undefined, false, true)
+    const sessionId = await createSession(request)
+    const completed = waitForEvent(eventBus, "run.completed")
+
+    const response = await request("/runs", {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId,
+        prompt: "report context",
+        agentId: "context-agent",
+        modelId: "test-model",
+        environmentId: "alternate-browser",
+      }),
+    })
+    await json<{ runId: string }>(response)
+
+    expect((await completed).payload.finalAnswer).toBe("agent=context-agent model=test-model browser=alternate-browser")
+  })
+
+  it("POST /runs rejects unknown model and browser ids", async () => {
+    const { request } = await setup(0, undefined, false, true)
+    const sessionId = await createSession(request)
+
+    const missingModel = await request("/runs", {
+      method: "POST",
+      body: JSON.stringify({ sessionId, prompt: "report context", agentId: "context-agent", modelId: "missing-model" }),
+    })
+    const missingBrowser = await request("/runs", {
+      method: "POST",
+      body: JSON.stringify({ sessionId, prompt: "report context", agentId: "context-agent", environmentId: "missing-browser" }),
+    })
+
+    expect(missingModel.status).toBe(400)
+    expect(await missingModel.json()).toEqual({ error: "Unknown model" })
+    expect(missingBrowser.status).toBe(400)
+    expect(await missingBrowser.json()).toEqual({ error: "Unknown browser" })
   })
 
   it("GET /events streams live RunEvent SSE messages", async () => {

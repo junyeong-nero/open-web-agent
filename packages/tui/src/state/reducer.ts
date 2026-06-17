@@ -1,9 +1,22 @@
 import { ObservationSchema, type Observation, type RunEvent } from "@open-web-agent/core"
-import { EMPTY_OBSERVATION, type ConversationMessage, type PlanItem, type TimelineItem, type TuiState } from "./types"
+import {
+  EMPTY_OBSERVATION,
+  type AgentSummary,
+  type ConversationMessage,
+  type EnvironmentSummary,
+  type ModelSummary,
+  type PlanItem,
+  type TimelineItem,
+  type TuiState,
+} from "./types"
 import { toRunLogItem } from "../log/run-log"
 
 export type TuiEvent =
   | { type: "session.created"; sessionId: string }
+  | { type: "plugins.loaded"; agents: AgentSummary[]; models: ModelSummary[]; environments: EnvironmentSummary[] }
+  | { type: "agent.selected"; agentId: string }
+  | { type: "model.selected"; modelId: string }
+  | { type: "environment.selected"; environmentId: string }
   | { type: "theme.selected"; themeId: string }
   | { type: "run.event"; event: RunEvent }
   | { type: "slash.details" }
@@ -20,6 +33,9 @@ export function createInitialState(projectPath: string): TuiState {
     selectedModelId: null,
     selectedEnvironmentId: "mock-browser",
     selectedThemeId: "opencode",
+    availableAgents: [],
+    availableModels: [],
+    availableEnvironments: [],
     runStatus: "idle",
     inspectorVisible: true,
     selectedEvent: null,
@@ -45,6 +61,30 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
     }
   }
   if (event.type === "session.created") return { ...state, activeSessionId: event.sessionId, runStatus: "idle" }
+  if (event.type === "plugins.loaded") {
+    const selectedAgentId = event.agents.some((agent) => agent.id === state.selectedAgentId)
+      ? state.selectedAgentId
+      : event.agents[0]?.id ?? state.selectedAgentId
+    const selectedModelId =
+      state.selectedModelId && event.models.some((model) => model.id === state.selectedModelId)
+        ? state.selectedModelId
+        : event.models[0]?.id ?? null
+    const selectedEnvironmentId = event.environments.some((environment) => environment.id === state.selectedEnvironmentId)
+      ? state.selectedEnvironmentId
+      : event.environments[0]?.id ?? state.selectedEnvironmentId
+    return {
+      ...state,
+      availableAgents: event.agents,
+      availableModels: event.models,
+      availableEnvironments: event.environments,
+      selectedAgentId,
+      selectedModelId,
+      selectedEnvironmentId,
+    }
+  }
+  if (event.type === "agent.selected") return { ...state, selectedAgentId: event.agentId }
+  if (event.type === "model.selected") return { ...state, selectedModelId: event.modelId }
+  if (event.type === "environment.selected") return { ...state, selectedEnvironmentId: event.environmentId }
   if (event.type === "theme.selected") return { ...state, selectedThemeId: event.themeId }
   if (event.type === "slash.details") return { ...state, inspectorVisible: !state.inspectorVisible }
   if (event.type === "conversation.append") {

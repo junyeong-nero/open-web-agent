@@ -22,19 +22,19 @@ describe("reduceTuiEvent", () => {
       selectedModelId: null,
       selectedEnvironmentId: "mock-browser",
       selectedThemeId: "opencode",
+      availableAgents: [],
+      availableModels: [],
+      availableEnvironments: [],
     })
   })
 
   it("adds timeline item for browser action events", () => {
-    const state = reduceTuiEvent(
-      createInitialState("/tmp/project"),
-      {
-        type: "run.event",
-        event: event("browser.action.started", {
-          action: { id: "action_1", kind: "inspect_page_title" },
-        }),
-      },
-    )
+    const state = reduceTuiEvent(createInitialState("/tmp/project"), {
+      type: "run.event",
+      event: event("browser.action.started", {
+        action: { id: "action_1", kind: "inspect_page_title" },
+      }),
+    })
 
     expect(state.timeline).toEqual([
       {
@@ -47,13 +47,10 @@ describe("reduceTuiEvent", () => {
   })
 
   it("appends final answer on run.completed", () => {
-    const state = reduceTuiEvent(
-      createInitialState("/tmp/project"),
-      {
-        type: "run.event",
-        event: event("run.completed", { finalAnswer: '페이지 제목은 "Example Domain"입니다.' }),
-      },
-    )
+    const state = reduceTuiEvent(createInitialState("/tmp/project"), {
+      type: "run.event",
+      event: event("run.completed", { finalAnswer: '페이지 제목은 "Example Domain"입니다.' }),
+    })
 
     expect(state.runStatus).toBe("completed")
     expect(state.conversation).toContainEqual({
@@ -122,7 +119,44 @@ describe("reduceTuiEvent", () => {
     expect(state.browser.url).toBe("about:blank")
   })
 
-  it("stores system command responses in the run log", () => {
+  it("stores available and selected runtime plugins", () => {
+    const loaded = reduceTuiEvent(createInitialState("/tmp/project"), {
+      type: "plugins.loaded",
+      agents: [
+        { id: "mock-agent", name: "Mock Agent", description: "Deterministic" },
+        { id: "plan-act-agent", name: "PlanAct Agent", description: "Plans first" },
+      ],
+      models: [
+        { id: "openai", name: "OpenAI", provider: "openai" },
+        { id: "openrouter", name: "OpenRouter", provider: "openrouter" },
+      ],
+      environments: [
+        { id: "mock-browser", name: "Mock Browser" },
+        { id: "playwright-browser", name: "Playwright Browser" },
+      ],
+    })
+    const selectedAgent = reduceTuiEvent(loaded, { type: "agent.selected", agentId: "plan-act-agent" })
+    const selectedModel = reduceTuiEvent(selectedAgent, { type: "model.selected", modelId: "openrouter" })
+    const selectedBrowser = reduceTuiEvent(selectedModel, { type: "environment.selected", environmentId: "playwright-browser" })
+
+    expect(loaded.selectedAgentId).toBe("mock-agent")
+    expect(loaded.selectedModelId).toBe("openai")
+    expect(loaded.selectedEnvironmentId).toBe("mock-browser")
+    expect(selectedBrowser.selectedAgentId).toBe("plan-act-agent")
+    expect(selectedBrowser.selectedModelId).toBe("openrouter")
+    expect(selectedBrowser.selectedEnvironmentId).toBe("playwright-browser")
+    expect(selectedBrowser.availableAgents.map((agent) => agent.id)).toEqual(["mock-agent", "plan-act-agent"])
+    expect(selectedBrowser.availableModels.map((model) => model.id)).toEqual(["openai", "openrouter"])
+    expect(selectedBrowser.availableEnvironments.map((environment) => environment.id)).toEqual(["mock-browser", "playwright-browser"])
+  })
+
+  it("stores selected theme", () => {
+    const state = reduceTuiEvent(createInitialState("/tmp/project"), { type: "theme.selected", themeId: "aurora-violet" })
+
+    expect(state.selectedThemeId).toBe("aurora-violet")
+  })
+
+  it("stores system command responses in the linear run log", () => {
     const state = reduceTuiEvent(createInitialState("/tmp/project"), {
       type: "conversation.append",
       message: { role: "system", content: "Theme set to opencode" },

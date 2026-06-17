@@ -1,5 +1,5 @@
 import type { Hono } from "hono"
-import type { RunOrchestrator, RunResult, SessionState } from "@open-web-agent/core"
+import type { PluginRegistry, RunOrchestrator, RunResult, SessionState } from "@open-web-agent/core"
 import { randomUUID } from "node:crypto"
 import type { SQLiteStore } from "@open-web-agent/storage"
 import { CreateRunRequestSchema } from "../schemas/api"
@@ -12,6 +12,7 @@ export interface RunRecord {
 
 export interface RunRouteDeps {
   orchestrator: RunOrchestrator
+  registry: PluginRegistry
   sessions: Map<string, SessionState>
   runs: Map<string, RunRecord>
   storage?: SQLiteStore
@@ -25,7 +26,26 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
     const session = deps.sessions.get(parsed.data.sessionId)
     if (!session) return c.json({ error: "Unknown session" }, 404)
 
-    const started = deps.orchestrator.startRun({ session, prompt: parsed.data.prompt })
+    if (parsed.data.agentId && !deps.registry.listAgents().some((agent) => agent.id === parsed.data.agentId)) {
+      return c.json({ error: "Unknown agent" }, 400)
+    }
+    if (parsed.data.modelId && !deps.registry.listModels().some((model) => model.id === parsed.data.modelId)) {
+      return c.json({ error: "Unknown model" }, 400)
+    }
+    if (
+      parsed.data.environmentId &&
+      !deps.registry.listEnvironments().some((environment) => environment.id === parsed.data.environmentId)
+    ) {
+      return c.json({ error: "Unknown browser" }, 400)
+    }
+
+    const started = deps.orchestrator.startRun({
+      session,
+      prompt: parsed.data.prompt,
+      agentId: parsed.data.agentId,
+      modelId: parsed.data.modelId,
+      environmentId: parsed.data.environmentId,
+    })
     deps.runs.set(started.runId, { runId: started.runId, status: "running", finalAnswer: null })
     const createdAt = new Date().toISOString()
     deps.storage?.upsertRun({

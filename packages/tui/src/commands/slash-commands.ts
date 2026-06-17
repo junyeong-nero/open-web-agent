@@ -3,6 +3,9 @@ export type SlashCommand =
   | { kind: "help" }
   | { kind: "clear" }
   | { kind: "details" }
+  | { kind: "agent"; agentId: string | null }
+  | { kind: "model"; modelId: string | null }
+  | { kind: "browser"; environmentId: string | null }
   | { kind: "theme"; themeId: string | null }
   | { kind: "new" }
   | { kind: "stop" }
@@ -13,6 +16,9 @@ const commands = new Map<string, SlashCommand["kind"]>([
   ["/help", "help"],
   ["/clear", "clear"],
   ["/details", "details"],
+  ["/agent", "agent"],
+  ["/model", "model"],
+  ["/browser", "browser"],
   ["/theme", "theme"],
   ["/new", "new"],
   ["/stop", "stop"],
@@ -26,6 +32,18 @@ export function parseSlashCommand(input: string): SlashCommand {
   const command = value.split(/\s+/, 1)[0] ?? value
   const kind = commands.get(command)
   if (!kind) return { kind: "unknown", command }
+  if (kind === "agent") {
+    const agentId = value.slice(command.length).trim()
+    return { kind: "agent", agentId: agentId.length > 0 ? agentId : null }
+  }
+  if (kind === "model") {
+    const modelId = value.slice(command.length).trim()
+    return { kind: "model", modelId: modelId.length > 0 ? modelId : null }
+  }
+  if (kind === "browser") {
+    const environmentId = value.slice(command.length).trim()
+    return { kind: "browser", environmentId: environmentId.length > 0 ? environmentId : null }
+  }
   if (kind === "theme") {
     const themeId = value.slice(command.length).trim()
     return { kind: "theme", themeId: themeId.length > 0 ? themeId : null }

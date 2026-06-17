@@ -13,6 +13,7 @@ export interface RunOrchestratorOptions {
   eventBus: EventBus
   registry: PluginRegistry
   agentId: string
+  modelId?: string
   environmentId: string
   maxSteps: number
   now?: () => Date
@@ -21,6 +22,9 @@ export interface RunOrchestratorOptions {
 export interface StartRunInput {
   session: SessionState
   prompt: string
+  agentId?: string
+  modelId?: string
+  environmentId?: string
 }
 
 export interface StartedRun {
@@ -61,8 +65,11 @@ export class RunOrchestrator {
     input: StartRunInput,
     abortController: AbortController,
   ): Promise<RunResult> {
-    const agent = this.options.registry.getAgent(this.options.agentId)
-    const environment = this.options.registry.getEnvironment(this.options.environmentId)
+    const agentId = input.agentId ?? this.options.agentId
+    const modelId = input.modelId ?? this.options.modelId
+    const environmentId = input.environmentId ?? this.options.environmentId
+    const agent = this.options.registry.getAgent(agentId)
+    const environment = this.options.registry.getEnvironment(environmentId)
     const runDir = runPath(this.options.home, input.session.projectHash, input.session.id, runId)
     const eventStore = new JsonlEventStore(eventsPath(this.options.home, input.session.projectHash, input.session.id, runId))
     let sequence = 0
@@ -92,6 +99,9 @@ export class RunOrchestrator {
       session: input.session,
       runId,
       runDir,
+      agentId,
+      modelId,
+      environmentId,
       eventBus: this.options.eventBus,
       abortSignal: abortController.signal,
       now: this.now,
@@ -113,7 +123,7 @@ export class RunOrchestrator {
       await agent.initialize(ctx)
 
       await emit("session.created", { session: input.session })
-      await emit("run.started", { prompt: input.prompt })
+      await emit("run.started", { prompt: input.prompt, agentId, modelId: modelId ?? null, environmentId })
 
       state.lastObservation = await environment.observe(ctx)
       await emit("observation.captured", { observation: state.lastObservation })
@@ -169,7 +179,7 @@ export class RunOrchestrator {
     actionResults: ActionResult[],
     ctx: RuntimeContext,
   ): Promise<void> {
-    const environment = this.options.registry.getEnvironment(this.options.environmentId)
+    const environment = this.options.registry.getEnvironment(ctx.environmentId ?? this.options.environmentId)
 
     for (const action of decision.actions) {
       await ctx.emit("browser.action.started", { action }, stepId)

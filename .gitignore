@@ -15,3 +15,6 @@ node_modules/
 # TypeScript build output
 packages/*/dist/
 *.tsbuildinfo
+
+# Local agent work artifacts
+.superpowers/

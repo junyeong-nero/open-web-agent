@@ -19,6 +19,23 @@ export interface PlanItem {
   status: "pending" | "active" | "completed"
 }
 
+export interface AgentSummary {
+  id: string
+  name: string
+  description: string
+}
+
+export interface ModelSummary {
+  id: string
+  name: string
+  provider: string
+}
+
+export interface EnvironmentSummary {
+  id: string
+  name: string
+}
+
 export interface TuiState {
   projectPath: string
   activeSessionId: string | null
@@ -27,6 +44,9 @@ export interface TuiState {
   selectedModelId: string | null
   selectedEnvironmentId: string
   selectedThemeId: string
+  availableAgents: AgentSummary[]
+  availableModels: ModelSummary[]
+  availableEnvironments: EnvironmentSummary[]
   runStatus: "idle" | "running" | "completed" | "failed" | "cancelled"
   inspectorVisible: boolean
   selectedEvent: RunEvent | null

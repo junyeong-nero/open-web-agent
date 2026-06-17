@@ -1,6 +1,17 @@
-import { MockAgent } from "@open-web-agent/agents"
-import { MockEnvironment } from "@open-web-agent/browser"
-import { EventBus, PluginRegistry, resolveOwaHome, RunOrchestrator, type SessionState } from "@open-web-agent/core"
+import { MockAgent, PlanActAgent, SimpleReActAgent } from "@open-web-agent/agents"
+import { MockEnvironment, PlaywrightEnvironment } from "@open-web-agent/browser"
+import {
+  EventBus,
+  PluginRegistry,
+  resolveOwaHome,
+  RunOrchestrator,
+  type ModelPlugin,
+  type ModelRequest,
+  type ModelResponse,
+  type RuntimeContext,
+  type SessionState,
+} from "@open-web-agent/core"
+import { OpenAIModel, OpenRouterModel, readModelConfig } from "@open-web-agent/models"
 import { SQLiteStore } from "@open-web-agent/storage"
 import { join } from "node:path"
 import { createApp } from "./app"
@@ -11,6 +22,7 @@ export interface StartDefaultRuntimeOptions {
   hostname?: string
   port?: number
   environmentDelayMs?: number
+  env?: NodeJS.ProcessEnv
 }
 
 export interface StartedDefaultRuntime {
@@ -27,8 +39,25 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   const home = options.home ?? resolveOwaHome()
   const eventBus = new EventBus()
   const registry = new PluginRegistry()
+  const modelConfig = readModelConfig(options.env ?? process.env)
+
   registry.registerAgent(new MockAgent())
+  if (modelConfig.openaiApiKey) {
+    registry.registerModel(new OpenAIModel({ apiKey: modelConfig.openaiApiKey, defaultModel: modelConfig.defaultModel }))
+  }
+  if (modelConfig.openrouterApiKey) {
+    registry.registerModel(
+      new OpenRouterModel({ apiKey: modelConfig.openrouterApiKey, defaultModel: modelConfig.defaultModel }),
+    )
+  }
+
+  const defaultModelId = registry.listModels()[0]?.id
+  const selectedModel = new RuntimeSelectedModel(registry, defaultModelId)
+  registry.registerAgent(new SimpleReActAgent({ model: selectedModel, modelName: modelConfig.defaultModel }))
+  registry.registerAgent(new PlanActAgent({ model: selectedModel, modelName: modelConfig.defaultModel }))
+
   registry.registerEnvironment(new MockEnvironment(options.environmentDelayMs))
+  registry.registerEnvironment(new PlaywrightEnvironment())
 
   const sessions = new Map<string, SessionState>()
   const orchestrator = new RunOrchestrator({
@@ -36,6 +65,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     eventBus,
     registry,
     agentId: "mock-agent",
+    modelId: defaultModelId,
     environmentId: "mock-browser",
     maxSteps: 4,
   })
@@ -59,5 +89,25 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
       await server.stop()
       storage.close()
     },
+  }
+}
+
+class RuntimeSelectedModel implements ModelPlugin {
+  id = "runtime-selected-model"
+  name = "Runtime Selected Model"
+  provider = "runtime"
+
+  constructor(
+    private readonly registry: PluginRegistry,
+    private readonly defaultModelId: string | undefined,
+  ) {}
+
+  async complete(request: ModelRequest, ctx: RuntimeContext): Promise<ModelResponse> {
+    const modelId = ctx.modelId ?? this.defaultModelId
+    if (!modelId) {
+      throw new Error("No model selected. Configure OPENAI_API_KEY or OPENROUTER_API_KEY, then use /model <id>.")
+    }
+
+    return this.registry.getModel(modelId).complete(request, ctx)
   }
 }

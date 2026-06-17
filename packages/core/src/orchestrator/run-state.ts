@@ -30,6 +30,9 @@ export interface RuntimeContext {
   session: SessionState
   runId: string
   runDir: string
+  agentId?: string
+  modelId?: string
+  environmentId?: string
   eventBus: EventBus
   abortSignal: AbortSignal
   now(): Date

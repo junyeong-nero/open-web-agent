@@ -24,6 +24,7 @@ export function createApp(deps: CreateAppDeps): Hono {
   registerSessionRoutes(app, { sessions: deps.sessions, storage: deps.storage })
   registerRunRoutes(app, {
     orchestrator: deps.orchestrator,
+    registry: deps.registry,
     sessions: deps.sessions,
     runs,
     storage: deps.storage,

@@ -1,3 +1,18 @@
+export interface PluginSummary {
+  id: string
+  name: string
+}
+
+export interface AgentPluginSummary extends PluginSummary {
+  description: string
+}
+
+export interface PluginList {
+  agents: AgentPluginSummary[]
+  models: Array<PluginSummary & { provider: string }>
+  environments: PluginSummary[]
+}
+
 export function createServerClient(baseUrl: string) {
   return {
     async health(): Promise<{ ok: true }> {
@@ -12,13 +27,26 @@ export function createServerClient(baseUrl: string) {
     async getSession(sessionId: string): Promise<{ id: string; projectPath: string; createdAt: string }> {
       return request(`${baseUrl}/sessions/${sessionId}`)
     },
-    async submitRun(sessionId: string, prompt: string): Promise<{ runId: string }> {
-      return request(`${baseUrl}/runs`, { method: "POST", body: JSON.stringify({ sessionId, prompt }) })
+    async submitRun(
+      sessionId: string,
+      prompt: string,
+      options: { agentId?: string; modelId?: string | null; environmentId?: string } = {},
+    ): Promise<{ runId: string }> {
+      return request(`${baseUrl}/runs`, {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId,
+          prompt,
+          agentId: options.agentId,
+          modelId: options.modelId ?? undefined,
+          environmentId: options.environmentId,
+        }),
+      })
     },
     async cancelRun(runId: string): Promise<{ cancelled: boolean }> {
       return request(`${baseUrl}/runs/${runId}/cancel`, { method: "POST" })
     },
-    async listPlugins(): Promise<unknown> {
+    async listPlugins(): Promise<PluginList> {
       return request(`${baseUrl}/plugins`)
     },
   }

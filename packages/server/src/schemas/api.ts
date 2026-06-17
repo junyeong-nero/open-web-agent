@@ -7,6 +7,9 @@ export const CreateSessionRequestSchema = z.object({
 export const CreateRunRequestSchema = z.object({
   sessionId: z.string().min(1),
   prompt: z.string().min(1),
+  agentId: z.string().min(1).optional(),
+  modelId: z.string().min(1).optional(),
+  environmentId: z.string().min(1).optional(),
 })
 
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequestSchema>
