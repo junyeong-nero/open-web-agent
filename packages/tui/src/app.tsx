@@ -1,16 +1,14 @@
 import { createSignal, onCleanup, onMount } from "solid-js"
 import { useKeyboard, useRenderer } from "@opentui/solid"
-import { BrowserStatePanel } from "./components/browser-state-panel"
-import { ConversationPanel } from "./components/conversation-panel"
-import { InspectorPanel } from "./components/inspector-panel"
 import { PromptInput } from "./components/prompt-input"
-import { TimelinePanel } from "./components/timeline-panel"
-import { TopBar } from "./components/top-bar"
+import { SessionHeader } from "./components/session-header"
+import { TranscriptPanel } from "./components/transcript-panel"
 import { createEventStream } from "./client/event-source"
 import { createServerClient } from "./client/server-client"
 import { parseSlashCommand } from "./commands/slash-commands"
 import { mapKeyEvent } from "./keymap/keybindings"
 import { createInitialState, reduceTuiEvent } from "./state/reducer"
+import { getTheme, listThemes, type TuiTheme } from "./theme/themes"
 
 export interface AppProps {
   serverUrl: string
@@ -25,6 +23,7 @@ export function App(props: AppProps) {
   const client = createServerClient(props.serverUrl)
   const [state, setState] = createSignal(createInitialState(props.projectPath))
   const [prompt, setPrompt] = createSignal("")
+  const currentTheme = (): TuiTheme => getTheme(state().selectedThemeId)
 
   onMount(async () => {
     const sessionId = await resolveStartupSession()
@@ -112,10 +111,44 @@ export function App(props: AppProps) {
       setState((current) =>
         reduceTuiEvent(current, {
           type: "conversation.append",
-          message: { role: "system", content: "/help /clear /details /new /stop /quit" },
+          message: { role: "system", content: "/help /clear /details /theme [id] /new /stop /quit" },
         }),
       )
       setPrompt("")
+      return
+    }
+    if (command.kind === "theme") {
+      setPrompt("")
+      if (!command.themeId) {
+        setState((current) =>
+          reduceTuiEvent(current, {
+            type: "conversation.append",
+            message: { role: "system", content: formatThemeStatus(current.selectedThemeId) },
+          }),
+        )
+        return
+      }
+
+      const themeId = command.themeId
+      if (!listThemes().some((theme) => theme.id === themeId)) {
+        setState((current) =>
+          reduceTuiEvent(current, {
+            type: "conversation.append",
+            message: { role: "system", content: `Unknown theme: ${themeId}. ${formatAvailableThemes()}` },
+          }),
+        )
+        return
+      }
+
+      setState((current) =>
+        reduceTuiEvent(
+          reduceTuiEvent(current, { type: "theme.selected", themeId }),
+          {
+            type: "conversation.append",
+            message: { role: "system", content: `Theme set to ${themeId}` },
+          },
+        ),
+      )
       return
     }
     if (command.kind === "unknown") {
@@ -143,15 +176,29 @@ export function App(props: AppProps) {
   }
 
   return (
-    <box flexDirection="column" width="100%" height="100%">
-      <TopBar state={state()} />
-      <box flexDirection="row" flexGrow={1}>
-        <ConversationPanel state={state()} />
-        <TimelinePanel state={state()} />
-        {state().inspectorVisible ? <InspectorPanel state={state()} /> : null}
-        <BrowserStatePanel state={state()} />
-      </box>
-      <PromptInput value={prompt()} onChange={setPrompt} onSubmit={submitPrompt} />
+    <box flexDirection="column" width="100%" height="100%" backgroundColor={currentTheme().surface}>
+      <SessionHeader state={state()} theme={currentTheme()} />
+      <TranscriptPanel state={state()} theme={currentTheme()} />
+      <PromptInput
+        value={prompt()}
+        agentId={state().selectedAgentId}
+        modelId={state().selectedModelId}
+        environmentId={state().selectedEnvironmentId}
+        runStatus={state().runStatus}
+        theme={currentTheme()}
+        onChange={setPrompt}
+        onSubmit={submitPrompt}
+      />
     </box>
   )
+}
+
+function formatThemeStatus(selectedThemeId: string): string {
+  return `Current theme: ${selectedThemeId}. ${formatAvailableThemes()}`
+}
+
+function formatAvailableThemes(): string {
+  return `Available themes: ${listThemes()
+    .map((theme) => theme.id)
+    .join(", ")}`
 }

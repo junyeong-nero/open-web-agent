@@ -10,6 +10,11 @@ describe("parseSlashCommand", () => {
     expect(parseSlashCommand("/clear")).toEqual({ kind: "clear" })
   })
 
+  it("recognizes theme command with and without an id", () => {
+    expect(parseSlashCommand("/theme")).toEqual({ kind: "theme", themeId: null })
+    expect(parseSlashCommand("/theme opencode")).toEqual({ kind: "theme", themeId: "opencode" })
+  })
+
   it("rejects unknown command", () => {
     expect(parseSlashCommand("/missing")).toEqual({ kind: "unknown", command: "/missing" })
   })

@@ -3,6 +3,7 @@ export type SlashCommand =
   | { kind: "help" }
   | { kind: "clear" }
   | { kind: "details" }
+  | { kind: "theme"; themeId: string | null }
   | { kind: "new" }
   | { kind: "stop" }
   | { kind: "quit" }
@@ -12,6 +13,7 @@ const commands = new Map<string, SlashCommand["kind"]>([
   ["/help", "help"],
   ["/clear", "clear"],
   ["/details", "details"],
+  ["/theme", "theme"],
   ["/new", "new"],
   ["/stop", "stop"],
   ["/quit", "quit"],
@@ -24,5 +26,9 @@ export function parseSlashCommand(input: string): SlashCommand {
   const command = value.split(/\s+/, 1)[0] ?? value
   const kind = commands.get(command)
   if (!kind) return { kind: "unknown", command }
+  if (kind === "theme") {
+    const themeId = value.slice(command.length).trim()
+    return { kind: "theme", themeId: themeId.length > 0 ? themeId : null }
+  }
   return { kind } as SlashCommand
 }
