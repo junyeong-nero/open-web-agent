@@ -6,8 +6,6 @@ export type KeyAction =
   | "copy"
   | "paste"
   | "focus-next"
-  | "submit"
-  | "newline"
   | "scroll-page-up"
   | "scroll-page-down"
   | "scroll-top"
@@ -35,6 +33,5 @@ export function mapKeyEvent(key: KeyLike): KeyAction | null {
   if (key.name === "pagedown") return "scroll-page-down"
   if (key.name === "home") return "scroll-top"
   if (key.name === "end") return "scroll-bottom"
-  if (key.name === "return" || key.name === "enter" || key.name === "linefeed") return key.shift ? "newline" : "submit"
   return null
 }

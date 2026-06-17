@@ -103,7 +103,6 @@ export function App(props: AppProps) {
     if (action === "scroll-page-down") transcriptScroll?.scrollBy(0.5, "viewport")
     if (action === "scroll-top") transcriptScroll?.scrollBy(-1, "content")
     if (action === "scroll-bottom") transcriptScroll?.scrollBy(1, "content")
-    if (action === "submit") void submitPrompt()
   })
 
   useSelectionHandler(() => {
