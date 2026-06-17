@@ -9,6 +9,8 @@ export interface ModelConfig {
   contextWindowTokens: number
   openaiApiKey: string | null
   openrouterApiKey: string | null
+  geminiApiKey: string | null
+  anthropicApiKey: string | null
   parameters: ModelParameters
 }
 
@@ -27,10 +29,12 @@ export interface ReadModelConfigOptions {
   configPath?: string
 }
 
-export type ModelProvider = "openai" | "openrouter"
+export type ModelProvider = "openai" | "openrouter" | "gemini" | "claude"
 
 export const defaultOpenAIModel = "gpt-4.1-mini"
 export const defaultOpenRouterModel = "nvidia/nemotron-3-super-120b-a12b:free"
+export const defaultGeminiModel = "gemini-3.5-flash"
+export const defaultClaudeModel = "claude-sonnet-4-6"
 
 const defaultModel = defaultOpenRouterModel
 const defaultReasoningEffort = "medium"
@@ -49,12 +53,16 @@ export function readModelConfig(env: NodeJS.ProcessEnv = process.env, options: R
     contextWindowTokens: readContextWindowTokens(env.OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS) ?? fileConfig.contextWindowTokens ?? defaultContextWindowTokens,
     openaiApiKey: env.OPENAI_API_KEY || fileConfig.openaiApiKey || null,
     openrouterApiKey: env.OPENROUTER_API_KEY || fileConfig.openrouterApiKey || null,
+    geminiApiKey: env.GEMINI_API_KEY || fileConfig.geminiApiKey || null,
+    anthropicApiKey: env.ANTHROPIC_API_KEY || fileConfig.anthropicApiKey || null,
     parameters: fileConfig.parameters ?? {},
   }
 }
 
 export function resolveProviderDefaultModel(provider: ModelProvider, defaultModel: string): string {
   if (provider === "openai" && defaultModel === defaultOpenRouterModel) return defaultOpenAIModel
+  if (provider === "gemini" && defaultModel === defaultOpenRouterModel) return defaultGeminiModel
+  if (provider === "claude" && defaultModel === defaultOpenRouterModel) return defaultClaudeModel
   return defaultModel
 }
 
@@ -77,6 +85,8 @@ function readConfigFile(configPath: string): Partial<ModelConfig> {
     contextWindowTokens: readOptionalPositiveInteger(parsed, configPath, "context_window_tokens", "contextWindowTokens"),
     openaiApiKey: readOptionalString(parsed, configPath, "openai_api_key", "openaiApiKey"),
     openrouterApiKey: readOptionalString(parsed, configPath, "openrouter_api_key", "openrouterApiKey"),
+    geminiApiKey: readOptionalString(parsed, configPath, "gemini_api_key", "geminiApiKey"),
+    anthropicApiKey: readOptionalString(parsed, configPath, "anthropic_api_key", "anthropicApiKey"),
     parameters: readParameters(parsed, configPath),
   }
 }

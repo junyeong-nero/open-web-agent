@@ -83,7 +83,8 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
       createdAt,
     })
     void started.result
-      .then((result) => {
+      .then(async (result) => {
+        await deps.browserSessions.capture(runSession, environmentId).catch(() => null)
         const updatedAt = new Date().toISOString()
         deps.runs.set(started.runId, {
           runId: started.runId,
@@ -109,7 +110,8 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
           })
         }
       })
-      .catch((error) => {
+      .catch(async (error) => {
+        await deps.browserSessions.capture(runSession, environmentId).catch(() => null)
         const updatedAt = new Date().toISOString()
         const message = error instanceof Error ? error.message : String(error)
         deps.runs.set(started.runId, {

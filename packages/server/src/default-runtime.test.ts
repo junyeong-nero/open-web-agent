@@ -32,6 +32,8 @@ describe("startDefaultRuntime", () => {
       env: {
         OPENAI_API_KEY: "test-openai-key",
         OPENROUTER_API_KEY: "test-openrouter-key",
+        GEMINI_API_KEY: "test-gemini-key",
+        ANTHROPIC_API_KEY: "test-anthropic-key",
         OPEN_WEB_AGENT_MODEL: "test-model",
       },
     })
@@ -48,6 +50,8 @@ describe("startDefaultRuntime", () => {
           "openai",
           "openai:gpt-5.5",
           "openai:gpt-5.3-codex-spark",
+          "gemini",
+          "claude",
         ]),
       )
       expect(modelIds.indexOf("openrouter")).toBeLessThan(modelIds.indexOf("openai"))
@@ -62,6 +66,14 @@ describe("startDefaultRuntime", () => {
         provider: "openrouter",
         modelName: "~google/gemini-pro-latest",
         contextWindowTokens: 1_048_576,
+      })
+      expect(plugins.models.find((model) => model.id === "gemini")).toMatchObject({
+        provider: "gemini",
+        modelName: "test-model",
+      })
+      expect(plugins.models.find((model) => model.id === "claude")).toMatchObject({
+        provider: "claude",
+        modelName: "test-model",
       })
     } finally {
       await runtime.stop()
@@ -92,6 +104,37 @@ describe("startDefaultRuntime", () => {
         provider: "openai",
         modelName: "gpt-4.1-mini",
       })
+    } finally {
+      await runtime.stop()
+    }
+  })
+
+  it("uses provider-specific defaults for direct Gemini and Claude providers", async () => {
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const runtime = await startDefaultRuntime({
+      home,
+      configPath: join(home, "missing-config.yaml"),
+      env: {
+        GEMINI_API_KEY: "test-gemini-key",
+        ANTHROPIC_API_KEY: "test-anthropic-key",
+      },
+    })
+
+    try {
+      const plugins = await fetchPlugins(runtime.url)
+
+      expect(plugins.models).toEqual([
+        expect.objectContaining({
+          id: "gemini",
+          provider: "gemini",
+          modelName: "gemini-3.5-flash",
+        }),
+        expect.objectContaining({
+          id: "claude",
+          provider: "claude",
+          modelName: "claude-sonnet-4-6",
+        }),
+      ])
     } finally {
       await runtime.stop()
     }
@@ -148,6 +191,8 @@ describe("startDefaultRuntime", () => {
         'default_model: "config-model"',
         'openai_api_key: "config-openai-key"',
         'openrouter_api_key: "config-openrouter-key"',
+        'gemini_api_key: "config-gemini-key"',
+        'anthropic_api_key: "config-anthropic-key"',
         "",
       ].join("\n"),
     )
@@ -162,7 +207,7 @@ describe("startDefaultRuntime", () => {
       const plugins = await fetchPlugins(runtime.url)
 
       expect(plugins.models.map((model) => model.id)).toEqual(
-        expect.arrayContaining(["openrouter", "openrouter:~openai/gpt-latest", "openai", "openai:gpt-5.5"]),
+        expect.arrayContaining(["openrouter", "openrouter:~openai/gpt-latest", "openai", "openai:gpt-5.5", "gemini", "claude"]),
       )
       expect(plugins.models[0]).toMatchObject({
         id: "openrouter",
@@ -171,6 +216,12 @@ describe("startDefaultRuntime", () => {
         modelName: "config-model",
         reasoningEffort: "medium",
         contextWindowTokens: 128000,
+      })
+      expect(plugins.models.find((model) => model.id === "gemini")).toMatchObject({
+        modelName: "config-model",
+      })
+      expect(plugins.models.find((model) => model.id === "claude")).toMatchObject({
+        modelName: "config-model",
       })
     } finally {
       await runtime.stop()

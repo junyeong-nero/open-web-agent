@@ -45,6 +45,19 @@ export class BrowserSessionManager {
     return this.prepareSession("attach", session, environmentId)
   }
 
+  async capture(session: SessionState, environmentId?: string | null): Promise<Observation | null> {
+    const resolvedEnvironmentId = environmentId ?? session.environmentId ?? this.bindings.get(session.id)?.environmentId ?? this.defaultEnvironmentId
+    const boundSession = { ...session, environmentId: resolvedEnvironmentId }
+    const environment = this.options.registry.getEnvironment(resolvedEnvironmentId)
+    const observation = await environment.observe(this.createContext(boundSession, resolvedEnvironmentId))
+    this.bindings.set(session.id, {
+      session: boundSession,
+      environmentId: resolvedEnvironmentId,
+      lastObservation: observation,
+    })
+    return observation
+  }
+
   async close(session: SessionState): Promise<void> {
     const binding = this.bindings.get(session.id)
     const environmentId = binding?.environmentId ?? session.environmentId ?? this.defaultEnvironmentId

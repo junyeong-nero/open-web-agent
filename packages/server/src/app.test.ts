@@ -105,6 +105,38 @@ class ContextAgent implements AgentPlugin {
   }
 }
 
+class BrowserActionAgent implements AgentPlugin {
+  id = "browser-action-agent"
+  name = "Browser Action Agent"
+  description = "Updates the bound session browser through a tool call."
+
+  async initialize(): Promise<void> {}
+
+  async step(state: AgentState): Promise<AgentDecision> {
+    if (state.steps.length > 0) {
+      return { type: "final_answer", thought: null, finalAnswer: "browser updated", confidence: 1 }
+    }
+
+    return {
+      type: "browser_actions",
+      thought: "Navigate the session browser.",
+      actions: [
+        {
+          id: "action_1",
+          kind: "navigate",
+          reason: "Open the after-run page",
+          requiresApproval: false,
+          toolCalls: [{ id: "tool_1", type: "navigate", url: "https://after-run.test/" }],
+        },
+      ],
+    }
+  }
+
+  async finalize(state: AgentState): Promise<string> {
+    return state.finalAnswer ?? "browser updated"
+  }
+}
+
 class TestModel implements ModelPlugin {
   id = "test-model"
   name = "Test Model"
@@ -171,8 +203,19 @@ class SessionLifecycleToolAdapter implements ToolAdapter {
   name = "Session Browser Tools"
   environmentId = "session-browser"
 
-  async execute(_call: BrowserToolCall, _ctx: RuntimeContext): Promise<ActionResult> {
-    throw new Error("session lifecycle tests do not execute browser tools")
+  constructor(private readonly environment: SessionLifecycleEnvironment) {}
+
+  async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
+    const observation: Observation = {
+      url: call.type === "navigate" ? call.url : "https://after-run.test/",
+      title: "After Run Browser",
+      text: "After Run Browser",
+      screenshotPath: null,
+      interactiveElements: [],
+      metadata: {},
+    }
+    this.environment.setObservation(ctx.session.id, observation)
+    return { ok: true, message: null, observation, metadata: {} }
   }
 }
 
@@ -192,8 +235,9 @@ async function setupSessionLifecycleApp() {
   const registry = new PluginRegistry()
   const environment = new SessionLifecycleEnvironment()
   registry.registerAgent(new AlternateAgent())
+  registry.registerAgent(new BrowserActionAgent())
   registry.registerEnvironment(environment)
-  registry.registerToolAdapter(new SessionLifecycleToolAdapter())
+  registry.registerToolAdapter(new SessionLifecycleToolAdapter(environment))
 
   const orchestrator = new RunOrchestrator({
     home: await mkdtemp(join(tmpdir(), "owa-server-session-browser-")),
@@ -414,6 +458,34 @@ describe("createApp", () => {
     await waitForRunStatus(request, runId, "completed")
 
     expect(environment.closedSessionIds).toEqual([])
+  })
+
+  it("POST /runs refreshes the cached session browser after tool actions", async () => {
+    const { request, eventBus, environment } = await setupSessionLifecycleApp()
+    const session = await request("/sessions", {
+      method: "POST",
+      body: JSON.stringify({ projectPath: "/tmp/open-web-agent-project", environmentId: environment.id }),
+    })
+    const { sessionId } = await json<{ sessionId: string }>(session)
+    const completed = waitForEvent(eventBus, "run.completed")
+
+    const { runId } = await json<{ runId: string }>(
+      await request("/runs", {
+        method: "POST",
+        body: JSON.stringify({ sessionId, prompt: "update browser", agentId: "browser-action-agent", environmentId: environment.id }),
+      }),
+    )
+    await completed
+    await waitForRunStatus(request, runId, "completed")
+
+    const renamed = await json<{ browser: Observation | null }>(
+      await request(`/sessions/${sessionId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ title: "Renamed after run" }),
+      }),
+    )
+
+    expect(renamed.browser?.title).toBe("After Run Browser")
   })
 
   it("POST /runs can select a registered agent", async () => {
