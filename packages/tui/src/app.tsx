@@ -10,6 +10,7 @@ import { mapKeyEvent } from "./keymap/keybindings"
 import { createInitialState, reduceTuiEvent } from "./state/reducer"
 import type { AgentSummary, EnvironmentSummary, ModelSummary } from "./state/types"
 import { getTheme, listThemes, type TuiTheme } from "./theme/themes"
+import { selectedModelSummary } from "./components/session-shell-format"
 
 export interface AppProps {
   serverUrl: string
@@ -309,14 +310,13 @@ export function App(props: AppProps) {
   }
 
   return (
-    <box flexDirection="column" width="100%" height="100%" backgroundColor={currentTheme().surface}>
+    <box flexDirection="column" width="100%" height="100%" paddingX={2} paddingY={1} rowGap={1} backgroundColor={currentTheme().surface}>
       <SessionHeader state={state()} theme={currentTheme()} />
       <TranscriptPanel state={state()} theme={currentTheme()} />
       <PromptInput
         value={prompt()}
-        agentId={state().selectedAgentId}
-        modelId={state().selectedModelId}
-        environmentId={state().selectedEnvironmentId}
+        model={selectedModelSummary(state())}
+        modelActivity={state().modelActivity}
         runStatus={state().runStatus}
         theme={currentTheme()}
         onChange={setPrompt}

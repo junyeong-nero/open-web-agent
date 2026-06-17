@@ -37,6 +37,7 @@ export function createInitialState(projectPath: string): TuiState {
     availableModels: [],
     availableEnvironments: [],
     runStatus: "idle",
+    modelActivity: idleModelActivity(),
     inspectorVisible: true,
     selectedEvent: null,
     seenRunEventIds: [],
@@ -59,6 +60,7 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
       runLog: [],
       plan: [],
       browser: EMPTY_OBSERVATION,
+      modelActivity: idleModelActivity(),
     }
   }
   if (event.type === "session.created") return { ...state, activeSessionId: event.sessionId, runStatus: "idle" }
@@ -124,6 +126,14 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
     return { ...next, activeRunId: runEvent.runId, runStatus: "running" }
   }
 
+  if (runEvent.type === "model.called") {
+    return { ...next, modelActivity: readModelActivity(runEvent.payload, state, "running") }
+  }
+
+  if (runEvent.type === "model.completed") {
+    return { ...next, modelActivity: readModelActivity(runEvent.payload, state, "idle") }
+  }
+
   if (runEvent.type === "observation.captured") {
     return { ...next, browser: readObservation(runEvent.payload.observation, state.browser) }
   }
@@ -137,12 +147,13 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
     return {
       ...next,
       runStatus: "completed",
+      modelActivity: { ...next.modelActivity, status: "idle" },
       conversation: finalAnswer.length > 0 ? [...state.conversation, { role: "assistant", content: finalAnswer }] : state.conversation,
     }
   }
 
-  if (runEvent.type === "run.failed") return { ...next, runStatus: "failed" }
-  if (runEvent.type === "run.cancelled") return { ...next, runStatus: "cancelled" }
+  if (runEvent.type === "run.failed") return { ...next, runStatus: "failed", modelActivity: { ...next.modelActivity, status: "idle" } }
+  if (runEvent.type === "run.cancelled") return { ...next, runStatus: "cancelled", modelActivity: { ...next.modelActivity, status: "idle" } }
 
   return next
 }
@@ -191,6 +202,58 @@ function readPlanItems(value: unknown, fallback: PlanItem[]): PlanItem[] {
   })
 
   return items.length > 0 ? items : fallback
+}
+
+function idleModelActivity() {
+  return {
+    status: "idle" as const,
+    modelId: null,
+    modelName: null,
+    provider: null,
+    reasoningEffort: null,
+    contextWindowTokens: null,
+    usage: null,
+  }
+}
+
+function readModelActivity(payload: Record<string, unknown>, state: TuiState, status: TuiState["modelActivity"]["status"]) {
+  const response = isRecord(payload.response) ? payload.response : null
+  const usage = response ? readModelUsage(response.usage) : state.modelActivity.usage
+  const modelId = readString(payload.modelId) ?? state.selectedModelId
+  const summary = modelId ? state.availableModels.find((model) => model.id === modelId) : undefined
+
+  return {
+    status,
+    modelId,
+    modelName: readString(payload.modelName) ?? summary?.modelName ?? summary?.name ?? state.modelActivity.modelName,
+    provider: readString(payload.provider) ?? summary?.provider ?? state.modelActivity.provider,
+    reasoningEffort:
+      readString(payload.reasoningEffort) ?? summary?.reasoningEffort ?? state.modelActivity.reasoningEffort ?? "medium",
+    contextWindowTokens:
+      readPositiveInteger(payload.contextWindowTokens) ?? summary?.contextWindowTokens ?? state.modelActivity.contextWindowTokens,
+    usage,
+  }
+}
+
+function readModelUsage(value: unknown): TuiState["modelActivity"]["usage"] {
+  if (!isRecord(value)) return null
+  return {
+    inputTokens: readNonnegativeIntegerOrNull(value.inputTokens),
+    outputTokens: readNonnegativeIntegerOrNull(value.outputTokens),
+    totalTokens: readNonnegativeIntegerOrNull(value.totalTokens),
+  }
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null
+}
+
+function readPositiveInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null
+}
+
+function readNonnegativeIntegerOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

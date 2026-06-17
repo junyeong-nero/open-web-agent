@@ -68,15 +68,123 @@ describe("startDefaultRuntime", () => {
       const plugins = await fetchPlugins(runtime.url)
 
       expect(plugins.models.map((model) => model.id)).toEqual(["openai", "openrouter"])
+      expect(plugins.models[0]).toMatchObject({
+        id: "openai",
+        name: "OpenAI",
+        provider: "openai",
+        modelName: "config-model",
+        reasoningEffort: "medium",
+        contextWindowTokens: 128000,
+      })
     } finally {
       await runtime.stop()
+    }
+  })
+
+  it("emits model inference lifecycle events with usage metadata", async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input)
+      if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) {
+        return originalFetch(input, init)
+      }
+
+      return Response.json({
+        id: "chatcmpl_1",
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                type: "final_answer",
+                thought: null,
+                finalAnswer: "Example Domain",
+                confidence: 1,
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 7200, completion_tokens: 40, total_tokens: 7240 },
+      })
+    }) as typeof fetch
+
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const runtime = await startDefaultRuntime({
+      home,
+      configPath: join(home, "missing-config.yaml"),
+      env: {
+        OPENAI_API_KEY: "test-openai-key",
+        OPEN_WEB_AGENT_MODEL: "gpt-test",
+        OPEN_WEB_AGENT_REASONING_EFFORT: "high",
+        OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS: "400000",
+      },
+    })
+
+    try {
+      const sessionResponse = await fetch(`${runtime.url}/sessions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectPath: "/tmp/project" }),
+      })
+      const session = (await sessionResponse.json()) as { sessionId: string }
+      const events: string[] = []
+      const completed = new Promise<void>((resolve) => {
+        const unsubscribe = runtime.eventBus.subscribe((event) => {
+          if (event.type === "run.completed" || event.type === "run.failed") {
+            unsubscribe()
+            resolve()
+          }
+        })
+      })
+      runtime.eventBus.subscribe((event) => {
+        if (event.type === "model.called" || event.type === "model.completed") {
+          events.push(JSON.stringify(event.payload))
+        }
+      })
+
+      const runResponse = await fetch(`${runtime.url}/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId: session.sessionId,
+          prompt: "introduce yourself",
+          agentId: "simple-react-agent",
+          modelId: "openai",
+          environmentId: "mock-browser",
+        }),
+      })
+      expect(runResponse.ok).toBe(true)
+      await completed
+
+      expect(events.map((payload) => JSON.parse(payload).modelId)).toEqual(["openai", "openai"])
+      expect(JSON.parse(events[0]!)).toMatchObject({
+        modelId: "openai",
+        modelName: "gpt-test",
+        provider: "openai",
+        reasoningEffort: "high",
+        contextWindowTokens: 400000,
+      })
+      expect(JSON.parse(events[1]!)).toMatchObject({
+        response: {
+          usage: { inputTokens: 7200, outputTokens: 40, totalTokens: 7240 },
+        },
+      })
+    } finally {
+      await runtime.stop()
+      globalThis.fetch = originalFetch
     }
   })
 })
 
 async function fetchPlugins(url: string): Promise<{
   agents: Array<{ id: string }>
-  models: Array<{ id: string }>
+  models: Array<{
+    id: string
+    name: string
+    provider: string
+    modelName?: string
+    reasoningEffort?: string
+    contextWindowTokens?: number
+  }>
   environments: Array<{ id: string }>
 }> {
   const response = await fetch(`${url}/plugins`)

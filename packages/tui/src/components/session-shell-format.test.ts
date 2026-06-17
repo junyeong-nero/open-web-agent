@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import type { TuiState } from "../state/types"
 import { createInitialState } from "../state/reducer"
 import {
+  formatContextUsage,
   promptHint,
   promptMeta,
   sessionMeta,
@@ -71,9 +72,27 @@ describe("session shell formatting", () => {
   })
 
   it("formats prompt metadata and hints", () => {
-    expect(promptMeta("mock-agent", null)).toBe("Build mock-agent no-model open-web-agent")
-    expect(promptMeta("plan-act-agent", "openrouter")).toBe("Build plan-act-agent openrouter open-web-agent")
-    expect(promptHint("running")).toBe("esc interrupt")
-    expect(promptHint("idle")).toBe("esc exit")
+    expect(promptMeta(null)).toBe("Build · no model · medium")
+    expect(
+      promptMeta({
+        id: "openai",
+        name: "OpenAI",
+        provider: "openai",
+        modelName: "gpt-test",
+        reasoningEffort: "high",
+      }),
+    ).toBe("Build · gpt-test OpenAI · high")
+    expect(promptHint("running", "7.2K (2%)")).toBe("7.2K (2%)  esc interrupt")
+    expect(promptHint("idle", "0 (0%)")).toBe("0 (0%)  esc exit")
+  })
+
+  it("formats context usage as token count and percentage", () => {
+    expect(
+      formatContextUsage({
+        usage: { inputTokens: 7200, outputTokens: 40, totalTokens: 7240 },
+        contextWindowTokens: 400000,
+      }),
+    ).toBe("7.2K (2%)")
+    expect(formatContextUsage({ usage: null, contextWindowTokens: 128000 })).toBe("0 (0%)")
   })
 })

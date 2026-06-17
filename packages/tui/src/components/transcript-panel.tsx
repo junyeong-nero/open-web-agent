@@ -12,7 +12,7 @@ export function TranscriptPanel(props: TranscriptPanelProps) {
   const items = () => props.state.runLog.map(toTranscriptViewItem)
 
   return (
-    <box flexGrow={1} paddingX={2} paddingY={1} backgroundColor={props.theme.surface} rowGap={1}>
+    <box flexGrow={1} paddingX={1} paddingY={1} backgroundColor={props.theme.surface} rowGap={2}>
       {items().length === 0 ? (
         <text fg={props.theme.textMuted}>Waiting for a task. Type in the prompt below.</text>
       ) : (
@@ -25,7 +25,7 @@ export function TranscriptPanel(props: TranscriptPanelProps) {
 function renderTranscriptItem(item: TranscriptViewItem, theme: TuiTheme) {
   if (item.block === "user") {
     return (
-      <box border={["left"]} borderColor={theme.task} backgroundColor={theme.panel} paddingX={1} paddingY={1}>
+      <box border={["left"]} borderColor={theme.task} backgroundColor={theme.panelAlt} paddingX={2} paddingY={1}>
         <text fg={theme.text} wrapMode="word">
           {item.text}
         </text>

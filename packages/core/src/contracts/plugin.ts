@@ -16,6 +16,9 @@ export interface ModelPlugin {
   id: string
   name: string
   provider: string
+  modelName?: string
+  reasoningEffort?: string
+  contextWindowTokens?: number | null
   complete(request: ModelRequest, ctx: RuntimeContext): Promise<ModelResponse>
 }
 
