@@ -13,6 +13,8 @@ describe("mapKeyEvent", () => {
   })
 
   it("maps transcript scrolling keys", () => {
+    expect(mapKeyEvent({ name: "up" })).toBe("scroll-line-up")
+    expect(mapKeyEvent({ name: "down" })).toBe("scroll-line-down")
     expect(mapKeyEvent({ name: "pageup" })).toBe("scroll-page-up")
     expect(mapKeyEvent({ name: "pagedown" })).toBe("scroll-page-down")
     expect(mapKeyEvent({ name: "home" })).toBe("scroll-top")
