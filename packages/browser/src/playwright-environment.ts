@@ -113,7 +113,7 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
   }
 
   private async launchBrowser(): Promise<Browser> {
-    const headless = this.options.headless ?? true
+    const headless = resolvePlaywrightHeadless(this.options)
     if (this.options.browserName === "firefox") return firefox.launch({ headless })
     if (this.options.browserName === "webkit") return webkit.launch({ headless })
     try {
@@ -191,6 +191,10 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
       metadata: {},
     }
   }
+}
+
+export function resolvePlaywrightHeadless(options: Pick<PlaywrightEnvironmentOptions, "headless">): boolean {
+  return options.headless ?? false
 }
 
 function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {

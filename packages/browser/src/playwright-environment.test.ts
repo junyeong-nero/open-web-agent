@@ -3,6 +3,7 @@ import { mkdtemp, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { EventBus, type RuntimeContext } from "@open-web-agent/core"
+import * as playwrightEnvironment from "./playwright-environment"
 import { PlaywrightEnvironment } from "./playwright-environment"
 
 async function context(): Promise<RuntimeContext> {
@@ -46,6 +47,15 @@ function fixtureUrl(): string {
 }
 
 describe("PlaywrightEnvironment", () => {
+  it("uses headed browser launches by default", () => {
+    expect("resolvePlaywrightHeadless" in playwrightEnvironment).toBe(true)
+    expect(
+      (playwrightEnvironment as typeof playwrightEnvironment & {
+        resolvePlaywrightHeadless(options: { headless?: boolean }): boolean
+      }).resolvePlaywrightHeadless({}),
+    ).toBe(false)
+  })
+
   it("navigates, interacts with a fixture page, observes text, and captures a screenshot", async () => {
     const env = new PlaywrightEnvironment({ headless: true })
     const ctx = await context()

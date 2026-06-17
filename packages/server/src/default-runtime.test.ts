@@ -16,7 +16,7 @@ describe("startDefaultRuntime", () => {
     try {
       const plugins = await fetchPlugins(runtime.url)
 
-      expect(plugins.agents.map((agent) => agent.id)).toEqual(["mock-agent", "simple-react-agent", "plan-act-agent"])
+      expect(plugins.agents.map((agent) => agent.id)).toEqual(["mock-agent", "simple-react-agent", "see-act", "plan-act-agent"])
       expect(plugins.models.map((model) => model.id)).toEqual([])
       expect(plugins.environments.map((environment) => environment.id)).toEqual(["mock-browser", "playwright-browser"])
     } finally {
