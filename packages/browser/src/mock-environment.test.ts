@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { RuntimeContext } from "@open-web-agent/core"
 import { EventBus } from "@open-web-agent/core"
-import { MockEnvironment, sleep } from "./mock-environment"
+import { MockBrowserToolAdapter, MockEnvironment, sleep } from "./mock-environment"
 
 async function context(signal = new AbortController().signal): Promise<RuntimeContext> {
   return {
@@ -28,12 +28,13 @@ async function context(signal = new AbortController().signal): Promise<RuntimeCo
 describe("MockEnvironment", () => {
   it("executes navigate, screenshot, and extract_text against the Example Domain fixture", async () => {
     const env = new MockEnvironment(0)
+    const tools = new MockBrowserToolAdapter(env)
     const ctx = await context()
 
     await env.reset(ctx)
-    const navigate = await env.execute({ id: "tool_1", type: "navigate", url: "https://example.com" }, ctx)
-    const screenshot = await env.execute({ id: "tool_2", type: "screenshot" }, ctx)
-    const text = await env.execute({ id: "tool_3", type: "extract_text" }, ctx)
+    const navigate = await tools.execute({ id: "tool_1", type: "navigate", url: "https://example.com" }, ctx)
+    const screenshot = await tools.execute({ id: "tool_2", type: "screenshot" }, ctx)
+    const text = await tools.execute({ id: "tool_3", type: "extract_text" }, ctx)
 
     expect(navigate.observation?.title).toBe("Example Domain")
     expect(screenshot.observation?.screenshotPath).toEndWith("screenshots/step-0001.txt")

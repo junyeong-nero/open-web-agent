@@ -3,7 +3,14 @@ import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { chromium, firefox, webkit, type Browser, type BrowserContext, type Page } from "playwright"
-import type { ActionResult, BrowserEnvironment, BrowserToolCall, Observation, RuntimeContext } from "@open-web-agent/core"
+import type {
+  ActionResult,
+  BrowserEnvironment,
+  BrowserToolCall,
+  Observation,
+  RuntimeContext,
+  ToolAdapter,
+} from "@open-web-agent/core"
 
 export interface PlaywrightEnvironmentOptions {
   browserName?: "chromium" | "firefox" | "webkit"
@@ -35,73 +42,17 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
     return withAbort(this.readObservation(page), ctx.abortSignal)
   }
 
-  async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
-    const page = this.requirePage()
+  pageForTools(): Page {
+    return this.requirePage()
+  }
 
-    if (call.type === "navigate") {
-      await withAbort(page.goto(call.url, { waitUntil: "domcontentloaded" }), ctx.abortSignal)
-      return { ok: true, message: "navigated", observation: await this.observe(ctx), metadata: { url: call.url } }
-    }
+  nextScreenshotPath(ctx: RuntimeContext): string {
+    this.screenshotCount += 1
+    return join(ctx.runDir, "screenshots", `step-${String(this.screenshotCount).padStart(4, "0")}.png`)
+  }
 
-    if (call.type === "click") {
-      const locator = this.locatorForTarget(page, call.target)
-      if (locator) {
-        await withAbort(locator.click(), ctx.abortSignal)
-      } else if (call.target.coordinates) {
-        await withAbort(page.mouse.click(call.target.coordinates.x, call.target.coordinates.y), ctx.abortSignal)
-      } else {
-        return { ok: false, message: "No click target provided", observation: await this.observe(ctx), metadata: {} }
-      }
-      return { ok: true, message: "clicked", observation: await this.observe(ctx), metadata: {} }
-    }
-
-    if (call.type === "type") {
-      const locator = this.locatorForTarget(page, call.target)
-      if (!locator) return { ok: false, message: "No type target provided", observation: await this.observe(ctx), metadata: {} }
-      await withAbort(locator.fill(call.value), ctx.abortSignal)
-      return { ok: true, message: "typed", observation: await this.observe(ctx), metadata: { value: call.value } }
-    }
-
-    if (call.type === "scroll") {
-      await withAbort(page.mouse.wheel(call.deltaX, call.deltaY), ctx.abortSignal)
-      return { ok: true, message: "scrolled", observation: await this.observe(ctx), metadata: { deltaX: call.deltaX, deltaY: call.deltaY } }
-    }
-
-    if (call.type === "wait") {
-      await withAbort(page.waitForTimeout(call.ms), ctx.abortSignal)
-      return { ok: true, message: "waited", observation: await this.observe(ctx), metadata: { ms: call.ms } }
-    }
-
-    if (call.type === "press_key") {
-      await withAbort(page.keyboard.press(call.key), ctx.abortSignal)
-      return { ok: true, message: "pressed key", observation: await this.observe(ctx), metadata: { key: call.key } }
-    }
-
-    if (call.type === "screenshot") {
-      this.screenshotCount += 1
-      const screenshotPath = join(ctx.runDir, "screenshots", `step-${String(this.screenshotCount).padStart(4, "0")}.png`)
-      await mkdir(join(ctx.runDir, "screenshots"), { recursive: true })
-      await withAbort(page.screenshot({ path: screenshotPath, fullPage: true }), ctx.abortSignal)
-      this.lastScreenshotPath = screenshotPath
-      return { ok: true, message: "screenshot captured", observation: await this.observe(ctx), metadata: { screenshotPath } }
-    }
-
-    if (call.type === "extract_text") {
-      const observation = await this.observe(ctx)
-      return { ok: true, message: "text extracted", observation, metadata: { text: observation.text } }
-    }
-
-    if (call.type === "go_back") {
-      await withAbort(page.goBack({ waitUntil: "domcontentloaded" }), ctx.abortSignal)
-      return { ok: true, message: "went back", observation: await this.observe(ctx), metadata: {} }
-    }
-
-    if (call.type === "go_forward") {
-      await withAbort(page.goForward({ waitUntil: "domcontentloaded" }), ctx.abortSignal)
-      return { ok: true, message: "went forward", observation: await this.observe(ctx), metadata: {} }
-    }
-
-    return { ok: false, message: `Unsupported Playwright tool: ${(call as BrowserToolCall).type}`, observation: await this.observe(ctx), metadata: {} }
+  recordScreenshotPath(screenshotPath: string): void {
+    this.lastScreenshotPath = screenshotPath
   }
 
   async close(_ctx: RuntimeContext): Promise<void> {
@@ -128,18 +79,6 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
   private requirePage(): Page {
     if (!this.page) throw new Error("PlaywrightEnvironment has not been reset")
     return this.page
-  }
-
-  private locatorForTarget(page: Page, target: {
-    selector: string | null
-    text: string | null
-    role: string | null
-    name: string | null
-  }) {
-    if (target.selector) return page.locator(target.selector).first()
-    if (target.role) return page.getByRole(target.role as Parameters<Page["getByRole"]>[0], { name: target.name ?? undefined }).first()
-    if (target.text) return page.getByText(target.text).first()
-    return null
   }
 
   private async readObservation(page: Page): Promise<Observation> {
@@ -193,8 +132,128 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
   }
 }
 
+export class PlaywrightBrowserToolAdapter implements ToolAdapter {
+  id = "playwright-browser-tools"
+  name = "Playwright Browser Tools"
+  environmentId = "playwright-browser"
+
+  constructor(private readonly environment: PlaywrightEnvironment) {}
+
+  async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
+    const page = this.environment.pageForTools()
+
+    if (call.type === "navigate") {
+      await withAbort(page.goto(call.url, { waitUntil: "domcontentloaded" }), ctx.abortSignal)
+      return { ok: true, message: "navigated", observation: await this.environment.observe(ctx), metadata: { url: call.url } }
+    }
+
+    if (call.type === "click") {
+      const locator = locatorForTarget(page, call.target)
+      if (locator) {
+        await withAbort(locator.click(), ctx.abortSignal)
+      } else if (call.target.coordinates) {
+        await withAbort(page.mouse.click(call.target.coordinates.x, call.target.coordinates.y), ctx.abortSignal)
+      } else {
+        return {
+          ok: false,
+          message: "No click target provided",
+          observation: await this.environment.observe(ctx),
+          metadata: {},
+        }
+      }
+      return { ok: true, message: "clicked", observation: await this.environment.observe(ctx), metadata: {} }
+    }
+
+    if (call.type === "type") {
+      const locator = locatorForTarget(page, call.target)
+      if (!locator) {
+        return {
+          ok: false,
+          message: "No type target provided",
+          observation: await this.environment.observe(ctx),
+          metadata: {},
+        }
+      }
+      await withAbort(locator.fill(call.value), ctx.abortSignal)
+      return { ok: true, message: "typed", observation: await this.environment.observe(ctx), metadata: { value: call.value } }
+    }
+
+    if (call.type === "scroll") {
+      await withAbort(page.mouse.wheel(call.deltaX, call.deltaY), ctx.abortSignal)
+      return {
+        ok: true,
+        message: "scrolled",
+        observation: await this.environment.observe(ctx),
+        metadata: { deltaX: call.deltaX, deltaY: call.deltaY },
+      }
+    }
+
+    if (call.type === "wait") {
+      await withAbort(page.waitForTimeout(call.ms), ctx.abortSignal)
+      return { ok: true, message: "waited", observation: await this.environment.observe(ctx), metadata: { ms: call.ms } }
+    }
+
+    if (call.type === "press_key") {
+      await withAbort(page.keyboard.press(call.key), ctx.abortSignal)
+      return {
+        ok: true,
+        message: "pressed key",
+        observation: await this.environment.observe(ctx),
+        metadata: { key: call.key },
+      }
+    }
+
+    if (call.type === "screenshot") {
+      const screenshotPath = this.environment.nextScreenshotPath(ctx)
+      await mkdir(join(ctx.runDir, "screenshots"), { recursive: true })
+      await withAbort(page.screenshot({ path: screenshotPath, fullPage: true }), ctx.abortSignal)
+      this.environment.recordScreenshotPath(screenshotPath)
+      return {
+        ok: true,
+        message: "screenshot captured",
+        observation: await this.environment.observe(ctx),
+        metadata: { screenshotPath },
+      }
+    }
+
+    if (call.type === "extract_text") {
+      const observation = await this.environment.observe(ctx)
+      return { ok: true, message: "text extracted", observation, metadata: { text: observation.text } }
+    }
+
+    if (call.type === "go_back") {
+      await withAbort(page.goBack({ waitUntil: "domcontentloaded" }), ctx.abortSignal)
+      return { ok: true, message: "went back", observation: await this.environment.observe(ctx), metadata: {} }
+    }
+
+    if (call.type === "go_forward") {
+      await withAbort(page.goForward({ waitUntil: "domcontentloaded" }), ctx.abortSignal)
+      return { ok: true, message: "went forward", observation: await this.environment.observe(ctx), metadata: {} }
+    }
+
+    return {
+      ok: false,
+      message: `Unsupported Playwright tool: ${(call as BrowserToolCall).type}`,
+      observation: await this.environment.observe(ctx),
+      metadata: {},
+    }
+  }
+}
+
 export function resolvePlaywrightHeadless(options: Pick<PlaywrightEnvironmentOptions, "headless">): boolean {
   return options.headless ?? false
+}
+
+function locatorForTarget(page: Page, target: {
+  selector: string | null
+  text: string | null
+  role: string | null
+  name: string | null
+}) {
+  if (target.selector) return page.locator(target.selector).first()
+  if (target.role) return page.getByRole(target.role as Parameters<Page["getByRole"]>[0], { name: target.name ?? undefined }).first()
+  if (target.text) return page.getByText(target.text).first()
+  return null
 }
 
 function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { EventBus, type RuntimeContext } from "@open-web-agent/core"
 import * as playwrightEnvironment from "./playwright-environment"
-import { PlaywrightEnvironment } from "./playwright-environment"
+import { PlaywrightBrowserToolAdapter, PlaywrightEnvironment } from "./playwright-environment"
 
 async function context(): Promise<RuntimeContext> {
   return {
@@ -58,12 +58,13 @@ describe("PlaywrightEnvironment", () => {
 
   it("navigates, interacts with a fixture page, observes text, and captures a screenshot", async () => {
     const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env)
     const ctx = await context()
 
     try {
       await env.reset(ctx)
-      await env.execute({ id: "tool_1", type: "navigate", url: fixtureUrl() }, ctx)
-      await env.execute(
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixtureUrl() }, ctx)
+      await tools.execute(
         {
           id: "tool_2",
           type: "click",
@@ -71,7 +72,7 @@ describe("PlaywrightEnvironment", () => {
         },
         ctx,
       )
-      await env.execute(
+      await tools.execute(
         {
           id: "tool_3",
           type: "type",
@@ -80,9 +81,9 @@ describe("PlaywrightEnvironment", () => {
         },
         ctx,
       )
-      await env.execute({ id: "tool_4", type: "wait", ms: 1 }, ctx)
-      const screenshot = await env.execute({ id: "tool_5", type: "screenshot" }, ctx)
-      const text = await env.execute({ id: "tool_6", type: "extract_text" }, ctx)
+      await tools.execute({ id: "tool_4", type: "wait", ms: 1 }, ctx)
+      const screenshot = await tools.execute({ id: "tool_5", type: "screenshot" }, ctx)
+      const text = await tools.execute({ id: "tool_6", type: "extract_text" }, ctx)
       const observation = await env.observe(ctx)
 
       expect(observation.title).toBe("Playwright Fixture")
