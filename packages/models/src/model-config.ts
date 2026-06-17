@@ -27,7 +27,12 @@ export interface ReadModelConfigOptions {
   configPath?: string
 }
 
-const defaultModel = "gpt-4.1-mini"
+export type ModelProvider = "openai" | "openrouter"
+
+export const defaultOpenAIModel = "gpt-4.1-mini"
+export const defaultOpenRouterModel = "nvidia/nemotron-3-super-120b-a12b:free"
+
+const defaultModel = defaultOpenRouterModel
 const defaultReasoningEffort = "medium"
 const defaultContextWindowTokens = 128000
 
@@ -46,6 +51,11 @@ export function readModelConfig(env: NodeJS.ProcessEnv = process.env, options: R
     openrouterApiKey: env.OPENROUTER_API_KEY || fileConfig.openrouterApiKey || null,
     parameters: fileConfig.parameters ?? {},
   }
+}
+
+export function resolveProviderDefaultModel(provider: ModelProvider, defaultModel: string): string {
+  if (provider === "openai" && defaultModel === defaultOpenRouterModel) return defaultOpenAIModel
+  return defaultModel
 }
 
 function readConfigFile(configPath: string): Partial<ModelConfig> {
