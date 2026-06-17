@@ -1,7 +1,8 @@
+/** @jsxImportSource @opentui/solid */
+import { createSignal, For, onCleanup, Show } from "solid-js"
 import type { TextareaRenderable } from "@opentui/core"
 import type { KeyEvent } from "@opentui/core"
-import { createSignal, For, onCleanup, Show } from "solid-js"
-import { listSlashCommandSuggestions } from "../commands/slash-commands"
+import { completeSlashCommand, listSlashCommandSuggestions } from "../commands/slash-commands"
 import type { ModelActivity, ModelSummary, TuiState } from "../state/types"
 import type { TuiTheme } from "../theme/themes"
 import { formatContextUsage, promptHint, promptMeta } from "./session-shell-format"
@@ -39,7 +40,25 @@ export function PromptInput(props: PromptInputProps) {
     textarea?.clear()
     props.onSubmit()
   }
+  const handleSlashCompletion = () => {
+    const completion = completeSlashCommand(currentValue())
+    if (!completion) return false
+
+    if (!textarea) {
+      props.onChange(completion)
+      return true
+    }
+
+    textarea.setText(completion)
+    textarea.cursorOffset = completion.length
+    return true
+  }
   const handleKeyDown = (event: KeyEvent) => {
+    if (event.name === "tab" && !event.shift && handleSlashCompletion()) {
+      event.preventDefault()
+      return
+    }
+
     if ((event.name === "return" || event.name === "enter" || event.name === "linefeed") && !event.shift) {
       event.preventDefault()
       handleSubmit()
@@ -52,6 +71,7 @@ export function PromptInput(props: PromptInputProps) {
     <box flexDirection="column" flexShrink={0} backgroundColor={props.theme.surface}>
       <box border={["left"]} borderColor={props.theme.task} backgroundColor={props.theme.panelAlt} paddingX={2} paddingY={1}>
         <textarea
+          id="prompt-input-textarea"
           ref={(node) => {
             textarea = node as TextareaRenderable & { plainText?: string }
           }}

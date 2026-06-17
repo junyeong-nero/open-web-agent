@@ -53,6 +53,13 @@ export function listSlashCommandSuggestions(input: string): SlashCommandSuggesti
     .map(({ name, description, argumentHint }) => ({ name, description, argumentHint }))
 }
 
+export function completeSlashCommand(input: string): string | null {
+  const suggestion = listSlashCommandSuggestions(input)[0]
+  if (!suggestion) return null
+
+  return suggestion.argumentHint ? `${suggestion.name} ` : suggestion.name
+}
+
 export function parseSlashCommand(input: string): SlashCommand {
   const value = input.trim()
   if (!value.startsWith("/")) return { kind: "prompt", value }
