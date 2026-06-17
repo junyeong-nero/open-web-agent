@@ -16,6 +16,8 @@ describe("readModelConfig", () => {
         {
           OPENAI_API_KEY: "openai-key",
           OPENROUTER_API_KEY: "openrouter-key",
+          GEMINI_API_KEY: "gemini-key",
+          ANTHROPIC_API_KEY: "anthropic-key",
           OPEN_WEB_AGENT_MODEL: "custom-model",
           OPEN_WEB_AGENT_REASONING_EFFORT: "high",
           OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS: "256000",
@@ -28,6 +30,8 @@ describe("readModelConfig", () => {
       contextWindowTokens: 256000,
       openaiApiKey: "openai-key",
       openrouterApiKey: "openrouter-key",
+      geminiApiKey: "gemini-key",
+      anthropicApiKey: "anthropic-key",
       parameters: {},
     })
   })
@@ -43,6 +47,8 @@ describe("readModelConfig", () => {
         "context_window_tokens: 64000",
         'openai_api_key: "yaml-openai-key"',
         'openrouter_api_key: "yaml-openrouter-key"',
+        'gemini_api_key: "yaml-gemini-key"',
+        'anthropic_api_key: "yaml-anthropic-key"',
         "",
       ].join("\n"),
     )
@@ -53,6 +59,8 @@ describe("readModelConfig", () => {
       contextWindowTokens: 64000,
       openaiApiKey: "yaml-openai-key",
       openrouterApiKey: "yaml-openrouter-key",
+      geminiApiKey: "yaml-gemini-key",
+      anthropicApiKey: "yaml-anthropic-key",
       parameters: {},
     })
   })
@@ -85,6 +93,8 @@ describe("readModelConfig", () => {
       contextWindowTokens: 128000,
       openaiApiKey: null,
       openrouterApiKey: null,
+      geminiApiKey: null,
+      anthropicApiKey: null,
       parameters: {
         temperature: 0.4,
         topP: 0.9,
@@ -109,6 +119,8 @@ describe("readModelConfig", () => {
         "context_window_tokens: 64000",
         'openai_api_key: "yaml-openai-key"',
         'openrouter_api_key: "yaml-openrouter-key"',
+        'gemini_api_key: "yaml-gemini-key"',
+        'anthropic_api_key: "yaml-anthropic-key"',
         "",
       ].join("\n"),
     )
@@ -117,6 +129,8 @@ describe("readModelConfig", () => {
       readModelConfig(
         {
           OPENAI_API_KEY: "env-openai-key",
+          GEMINI_API_KEY: "env-gemini-key",
+          ANTHROPIC_API_KEY: "env-anthropic-key",
           OPEN_WEB_AGENT_MODEL: "env-model",
           OPEN_WEB_AGENT_REASONING_EFFORT: "medium",
           OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS: "128000",
@@ -129,6 +143,8 @@ describe("readModelConfig", () => {
       contextWindowTokens: 128000,
       openaiApiKey: "env-openai-key",
       openrouterApiKey: "yaml-openrouter-key",
+      geminiApiKey: "env-gemini-key",
+      anthropicApiKey: "env-anthropic-key",
       parameters: {},
     })
   })

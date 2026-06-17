@@ -10,7 +10,7 @@ Open Web Agent can still run the deterministic mock browser task. The prompt `ex
 페이지 제목은 "Example Domain"입니다.
 ```
 
-Model-backed agents use the selected runtime model when `OPENAI_API_KEY` or `OPENROUTER_API_KEY` is configured. The Playwright browser environment is available from the TUI with `/browser playwright-browser`.
+Model-backed agents use the selected runtime model when `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, or `ANTHROPIC_API_KEY` is configured. The Playwright browser environment is available from the TUI with `/browser playwright-browser`.
 
 ## Install
 
@@ -62,6 +62,8 @@ reasoning_effort: "medium"
 context_window_tokens: 128000
 openai_api_key: "sk-..."
 openrouter_api_key: "sk-or-..."
+gemini_api_key: "..."
+anthropic_api_key: "sk-ant-..."
 
 parameters:
   temperature: 0
@@ -76,11 +78,11 @@ parameters:
   #   reasoning_effort: "low"
 ```
 
-Set one or both provider keys. Environment variables still take precedence when present:
+Set one or more provider keys. Environment variables still take precedence when present:
 `OPEN_WEB_AGENT_MODEL`, `OPEN_WEB_AGENT_REASONING_EFFORT`,
 `OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS`, `OPEN_WEB_AGENT_MODEL_TIMEOUT_MS`,
-`OPENAI_API_KEY`, and
-`OPENROUTER_API_KEY`.
+`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, and
+`ANTHROPIC_API_KEY`.
 
 ## Development Commands
 

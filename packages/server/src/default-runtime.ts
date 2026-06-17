@@ -16,7 +16,7 @@ import {
   type RuntimeContext,
   type SessionState,
 } from "@open-web-agent/core"
-import { OpenAIModel, OpenRouterModel, readModelConfig } from "@open-web-agent/models"
+import { ClaudeModel, GeminiModel, OpenAIModel, OpenRouterModel, readModelConfig } from "@open-web-agent/models"
 import { SQLiteStore } from "@open-web-agent/storage"
 import { join } from "node:path"
 import { createApp } from "./app"
@@ -65,6 +65,28 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     registry.registerModel(
       new OpenRouterModel({
         apiKey: modelConfig.openrouterApiKey,
+        defaultModel: modelConfig.defaultModel,
+        defaultParameters: modelConfig.parameters,
+        reasoningEffort: modelConfig.reasoningEffort,
+        contextWindowTokens: modelConfig.contextWindowTokens,
+      }),
+    )
+  }
+  if (modelConfig.geminiApiKey) {
+    registry.registerModel(
+      new GeminiModel({
+        apiKey: modelConfig.geminiApiKey,
+        defaultModel: modelConfig.defaultModel,
+        defaultParameters: modelConfig.parameters,
+        reasoningEffort: modelConfig.reasoningEffort,
+        contextWindowTokens: modelConfig.contextWindowTokens,
+      }),
+    )
+  }
+  if (modelConfig.anthropicApiKey) {
+    registry.registerModel(
+      new ClaudeModel({
+        apiKey: modelConfig.anthropicApiKey,
         defaultModel: modelConfig.defaultModel,
         defaultParameters: modelConfig.parameters,
         reasoningEffort: modelConfig.reasoningEffort,
@@ -151,7 +173,9 @@ class RuntimeSelectedModel implements ModelPlugin {
   async complete(request: ModelRequest, ctx: RuntimeContext): Promise<ModelResponse> {
     const modelId = ctx.modelId ?? this.defaultModelId
     if (!modelId) {
-      throw new Error("No model selected. Configure OPENAI_API_KEY or OPENROUTER_API_KEY, then use /model <id>.")
+      throw new Error(
+        "No model selected. Configure OPENAI_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY, then use /model <id>.",
+      )
     }
 
     const model = this.registry.getModel(modelId)

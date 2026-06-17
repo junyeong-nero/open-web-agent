@@ -9,6 +9,8 @@ export interface ModelConfig {
   contextWindowTokens: number
   openaiApiKey: string | null
   openrouterApiKey: string | null
+  geminiApiKey: string | null
+  anthropicApiKey: string | null
   parameters: ModelParameters
 }
 
@@ -44,6 +46,8 @@ export function readModelConfig(env: NodeJS.ProcessEnv = process.env, options: R
     contextWindowTokens: readContextWindowTokens(env.OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS) ?? fileConfig.contextWindowTokens ?? defaultContextWindowTokens,
     openaiApiKey: env.OPENAI_API_KEY || fileConfig.openaiApiKey || null,
     openrouterApiKey: env.OPENROUTER_API_KEY || fileConfig.openrouterApiKey || null,
+    geminiApiKey: env.GEMINI_API_KEY || fileConfig.geminiApiKey || null,
+    anthropicApiKey: env.ANTHROPIC_API_KEY || fileConfig.anthropicApiKey || null,
     parameters: fileConfig.parameters ?? {},
   }
 }
@@ -67,6 +71,8 @@ function readConfigFile(configPath: string): Partial<ModelConfig> {
     contextWindowTokens: readOptionalPositiveInteger(parsed, configPath, "context_window_tokens", "contextWindowTokens"),
     openaiApiKey: readOptionalString(parsed, configPath, "openai_api_key", "openaiApiKey"),
     openrouterApiKey: readOptionalString(parsed, configPath, "openrouter_api_key", "openrouterApiKey"),
+    geminiApiKey: readOptionalString(parsed, configPath, "gemini_api_key", "geminiApiKey"),
+    anthropicApiKey: readOptionalString(parsed, configPath, "anthropic_api_key", "anthropicApiKey"),
     parameters: readParameters(parsed, configPath),
   }
 }

@@ -32,6 +32,8 @@ describe("startDefaultRuntime", () => {
       env: {
         OPENAI_API_KEY: "test-openai-key",
         OPENROUTER_API_KEY: "test-openrouter-key",
+        GEMINI_API_KEY: "test-gemini-key",
+        ANTHROPIC_API_KEY: "test-anthropic-key",
         OPEN_WEB_AGENT_MODEL: "test-model",
       },
     })
@@ -39,7 +41,7 @@ describe("startDefaultRuntime", () => {
     try {
       const plugins = await fetchPlugins(runtime.url)
 
-      expect(plugins.models.map((model) => model.id)).toEqual(["openai", "openrouter"])
+      expect(plugins.models.map((model) => model.id)).toEqual(["openai", "openrouter", "gemini", "claude"])
     } finally {
       await runtime.stop()
     }
@@ -96,6 +98,8 @@ describe("startDefaultRuntime", () => {
         'default_model: "config-model"',
         'openai_api_key: "config-openai-key"',
         'openrouter_api_key: "config-openrouter-key"',
+        'gemini_api_key: "config-gemini-key"',
+        'anthropic_api_key: "config-anthropic-key"',
         "",
       ].join("\n"),
     )
@@ -109,7 +113,7 @@ describe("startDefaultRuntime", () => {
     try {
       const plugins = await fetchPlugins(runtime.url)
 
-      expect(plugins.models.map((model) => model.id)).toEqual(["openai", "openrouter"])
+      expect(plugins.models.map((model) => model.id)).toEqual(["openai", "openrouter", "gemini", "claude"])
       expect(plugins.models[0]).toMatchObject({
         id: "openai",
         name: "OpenAI",
