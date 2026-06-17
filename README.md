@@ -62,7 +62,8 @@ parameters:
 
 Set one or both provider keys. Environment variables still take precedence when present:
 `OPEN_WEB_AGENT_MODEL`, `OPEN_WEB_AGENT_REASONING_EFFORT`,
-`OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS`, `OPENAI_API_KEY`, and
+`OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS`, `OPEN_WEB_AGENT_MODEL_TIMEOUT_MS`,
+`OPENAI_API_KEY`, and
 `OPENROUTER_API_KEY`.
 
 ## Development Commands

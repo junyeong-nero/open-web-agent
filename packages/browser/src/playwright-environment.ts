@@ -147,14 +147,37 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
       page.title().catch(() => null),
       page.locator("body").innerText().catch(() => null),
       page.evaluate(() => {
-        const candidates = Array.from(
+        const candidates: Array<{ element: HTMLElement; rect: DOMRect }> = []
+        const elements = Array.from(
           document.querySelectorAll<HTMLElement>(
             "a,button,input,textarea,select,[role],[tabindex],[contenteditable='true']",
           ),
-        ).slice(0, 50)
+        )
 
-        return candidates.map((element, index) => {
+        for (const element of elements) {
           const rect = element.getBoundingClientRect()
+          const style = window.getComputedStyle(element)
+          const isHiddenInput = element instanceof HTMLInputElement && element.type === "hidden"
+          const isVisible =
+            !isHiddenInput &&
+            !element.hidden &&
+            element.getAttribute("aria-hidden") !== "true" &&
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            style.visibility !== "collapse" &&
+            rect.width > 0 &&
+            rect.height > 0 &&
+            rect.bottom > 0 &&
+            rect.right > 0 &&
+            rect.top < window.innerHeight &&
+            rect.left < window.innerWidth
+
+          if (!isVisible) continue
+          candidates.push({ element, rect })
+          if (candidates.length >= 50) break
+        }
+
+        return candidates.map(({ element, rect }, index) => {
           const attributes: Record<string, string> = {}
           for (const attribute of Array.from(element.attributes)) {
             attributes[attribute.name] = attribute.value

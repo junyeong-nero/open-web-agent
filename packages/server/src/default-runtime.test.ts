@@ -173,6 +173,83 @@ describe("startDefaultRuntime", () => {
       globalThis.fetch = originalFetch
     }
   })
+
+  it("lets env configure model-backed agent call timeouts", async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input)
+      if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) {
+        return originalFetch(input, init)
+      }
+
+      return new Promise<Response>(() => {})
+    }) as typeof fetch
+
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const runtime = await startDefaultRuntime({
+      home,
+      configPath: join(home, "missing-config.yaml"),
+      env: {
+        OPENAI_API_KEY: "test-openai-key",
+        OPEN_WEB_AGENT_MODEL: "gpt-test",
+        OPEN_WEB_AGENT_MODEL_TIMEOUT_MS: "5",
+      },
+    })
+    let runId: string | null = null
+    let waitForSettled: Promise<void> = Promise.resolve()
+
+    try {
+      const sessionResponse = await fetch(`${runtime.url}/sessions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectPath: "/tmp/project" }),
+      })
+      const session = (await sessionResponse.json()) as { sessionId: string }
+      waitForSettled = new Promise<void>((resolve) => {
+        const unsubscribe = runtime.eventBus.subscribe((event) => {
+          if (event.type === "run.failed" || event.type === "run.cancelled" || event.type === "run.completed") {
+            unsubscribe()
+            resolve()
+          }
+        })
+      })
+      const failed = new Promise<string>((resolve) => {
+        const unsubscribe = runtime.eventBus.subscribe((event) => {
+          if (event.type === "run.failed") {
+            unsubscribe()
+            resolve(String(event.payload.message ?? ""))
+          }
+        })
+      })
+
+      const runResponse = await fetch(`${runtime.url}/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId: session.sessionId,
+          prompt: "introduce yourself",
+          agentId: "simple-react-agent",
+          modelId: "openai",
+          environmentId: "mock-browser",
+        }),
+      })
+      expect(runResponse.ok).toBe(true)
+      runId = ((await runResponse.json()) as { runId: string }).runId
+
+      const message = await Promise.race([
+        failed,
+        new Promise<string>((resolve) => setTimeout(() => resolve("run did not settle"), 200)),
+      ])
+      expect(message).toBe("Model call timed out after 5ms")
+    } finally {
+      if (runId) {
+        await fetch(`${runtime.url}/runs/${runId}/cancel`, { method: "POST" }).catch(() => null)
+        await Promise.race([waitForSettled, new Promise((resolve) => setTimeout(resolve, 200))])
+      }
+      await runtime.stop()
+      globalThis.fetch = originalFetch
+    }
+  })
 })
 
 async function fetchPlugins(url: string): Promise<{
