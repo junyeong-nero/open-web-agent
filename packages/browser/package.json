@@ -8,6 +8,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@open-web-agent/core": "workspace:*"
+    "@open-web-agent/core": "workspace:*",
+    "playwright": "1.61.0"
   }
 }
