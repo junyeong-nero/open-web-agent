@@ -1,6 +1,7 @@
 import type { AgentDecision } from "../contracts/agent"
 import type { ActionResult, Observation } from "../contracts/browser"
 import type { RunEvent, RunEventType } from "../contracts/event"
+import type { EventBus } from "../events/event-bus"
 
 export interface SessionState {
   id: string
@@ -29,7 +30,7 @@ export interface RuntimeContext {
   session: SessionState
   runId: string
   runDir: string
-  eventBus: unknown
+  eventBus: EventBus
   abortSignal: AbortSignal
   now(): Date
   emit(type: RunEventType, payload: Record<string, unknown>, stepId?: string | null): Promise<RunEvent>
