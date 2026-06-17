@@ -9,6 +9,13 @@ export const ModelRequestSchema = z.object({
   model: z.string(),
   messages: z.array(ModelMessageSchema).min(1),
   temperature: z.number().min(0).max(2).default(0),
+  topP: z.number().min(0).max(1).optional(),
+  maxTokens: z.number().int().positive().optional(),
+  presencePenalty: z.number().min(-2).max(2).optional(),
+  frequencyPenalty: z.number().min(-2).max(2).optional(),
+  seed: z.number().int().optional(),
+  stop: z.union([z.string(), z.array(z.string()).min(1)]).optional(),
+  extraBody: z.record(z.string(), z.unknown()).optional(),
   responseFormat: z.enum(["text", "json"]).default("text"),
 })
 

@@ -44,11 +44,21 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
 
   registry.registerAgent(new MockAgent())
   if (modelConfig.openaiApiKey) {
-    registry.registerModel(new OpenAIModel({ apiKey: modelConfig.openaiApiKey, defaultModel: modelConfig.defaultModel }))
+    registry.registerModel(
+      new OpenAIModel({
+        apiKey: modelConfig.openaiApiKey,
+        defaultModel: modelConfig.defaultModel,
+        defaultParameters: modelConfig.parameters,
+      }),
+    )
   }
   if (modelConfig.openrouterApiKey) {
     registry.registerModel(
-      new OpenRouterModel({ apiKey: modelConfig.openrouterApiKey, defaultModel: modelConfig.defaultModel }),
+      new OpenRouterModel({
+        apiKey: modelConfig.openrouterApiKey,
+        defaultModel: modelConfig.defaultModel,
+        defaultParameters: modelConfig.parameters,
+      }),
     )
   }
 

@@ -7,6 +7,18 @@ export interface ModelConfig {
   defaultModel: string
   openaiApiKey: string | null
   openrouterApiKey: string | null
+  parameters: ModelParameters
+}
+
+export interface ModelParameters {
+  temperature?: number
+  topP?: number
+  maxTokens?: number
+  presencePenalty?: number
+  frequencyPenalty?: number
+  seed?: number
+  stop?: string | string[]
+  extraBody?: Record<string, unknown>
 }
 
 export interface ReadModelConfigOptions {
@@ -26,6 +38,7 @@ export function readModelConfig(env: NodeJS.ProcessEnv = process.env, options: R
     defaultModel: env.OPEN_WEB_AGENT_MODEL || fileConfig.defaultModel || defaultModel,
     openaiApiKey: env.OPENAI_API_KEY || fileConfig.openaiApiKey || null,
     openrouterApiKey: env.OPENROUTER_API_KEY || fileConfig.openrouterApiKey || null,
+    parameters: fileConfig.parameters ?? {},
   }
 }
 
@@ -46,7 +59,25 @@ function readConfigFile(configPath: string): Partial<ModelConfig> {
     defaultModel: readOptionalString(parsed, configPath, "default_model", "defaultModel", "model"),
     openaiApiKey: readOptionalString(parsed, configPath, "openai_api_key", "openaiApiKey"),
     openrouterApiKey: readOptionalString(parsed, configPath, "openrouter_api_key", "openrouterApiKey"),
+    parameters: readParameters(parsed, configPath),
   }
+}
+
+function readParameters(record: Record<string, unknown>, configPath: string): ModelParameters | undefined {
+  const value = readOptionalValue(record, "parameters", "model_parameters", "modelParameters")
+  if (value == null) return undefined
+  if (!isRecord(value)) throw new Error(`Invalid Open Web Agent config at ${configPath}: parameters must be a mapping`)
+
+  return omitUndefined({
+    temperature: readOptionalNumber(value, configPath, "temperature"),
+    topP: readOptionalNumber(value, configPath, "top_p", "topP"),
+    maxTokens: readOptionalInteger(value, configPath, "max_tokens", "maxTokens"),
+    presencePenalty: readOptionalNumber(value, configPath, "presence_penalty", "presencePenalty"),
+    frequencyPenalty: readOptionalNumber(value, configPath, "frequency_penalty", "frequencyPenalty"),
+    seed: readOptionalInteger(value, configPath, "seed"),
+    stop: readOptionalStop(value, configPath),
+    extraBody: readOptionalRecord(value, configPath, "extra_body", "extraBody"),
+  })
 }
 
 function readOptionalString(record: Record<string, unknown>, configPath: string, ...keys: string[]): string | undefined {
@@ -61,6 +92,65 @@ function readOptionalString(record: Record<string, unknown>, configPath: string,
   }
 
   return undefined
+}
+
+function readOptionalNumber(record: Record<string, unknown>, configPath: string, ...keys: string[]): number | undefined {
+  const entry = readOptionalEntry(record, keys)
+  if (!entry || entry.value == null) return undefined
+  if (typeof entry.value !== "number") {
+    throw new Error(`Invalid Open Web Agent config at ${configPath}: ${entry.key} must be a number`)
+  }
+  return entry.value
+}
+
+function readOptionalInteger(record: Record<string, unknown>, configPath: string, ...keys: string[]): number | undefined {
+  const entry = readOptionalEntry(record, keys)
+  if (!entry || entry.value == null) return undefined
+  if (typeof entry.value !== "number" || !Number.isInteger(entry.value)) {
+    throw new Error(`Invalid Open Web Agent config at ${configPath}: ${entry.key} must be an integer`)
+  }
+  return entry.value
+}
+
+function readOptionalRecord(
+  record: Record<string, unknown>,
+  configPath: string,
+  ...keys: string[]
+): Record<string, unknown> | undefined {
+  const entry = readOptionalEntry(record, keys)
+  if (!entry || entry.value == null) return undefined
+  if (!isRecord(entry.value)) {
+    throw new Error(`Invalid Open Web Agent config at ${configPath}: ${entry.key} must be a mapping`)
+  }
+  return entry.value
+}
+
+function readOptionalStop(record: Record<string, unknown>, configPath: string): string | string[] | undefined {
+  const entry = readOptionalEntry(record, ["stop"])
+  if (!entry || entry.value == null) return undefined
+  if (typeof entry.value === "string") return entry.value
+  if (Array.isArray(entry.value) && entry.value.every((item) => typeof item === "string") && entry.value.length > 0) {
+    return entry.value
+  }
+  throw new Error(`Invalid Open Web Agent config at ${configPath}: stop must be a string or non-empty string array`)
+}
+
+function readOptionalValue(record: Record<string, unknown>, ...keys: string[]): unknown {
+  return readOptionalEntry(record, keys)?.value
+}
+
+function readOptionalEntry(
+  record: Record<string, unknown>,
+  keys: string[],
+): { key: string; value: unknown } | undefined {
+  for (const key of keys) {
+    if (key in record) return { key, value: record[key] }
+  }
+  return undefined
+}
+
+function omitUndefined<T extends Record<string, unknown>>(record: T): T {
+  return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as T
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

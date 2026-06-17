@@ -41,4 +41,46 @@ describe("OpenAICompatibleClient", () => {
       usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
     })
   })
+
+  it("forwards optional model parameters to chat completions", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const client = new OpenAICompatibleClient({
+      baseUrl: "https://provider.test/v1",
+      apiKey: "key_123",
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init: init ?? {} })
+        return Response.json({
+          id: "chatcmpl_2",
+          choices: [{ message: { content: "hello" } }],
+        })
+      },
+    })
+
+    await client.complete({
+      model: "test-model",
+      messages: [{ role: "user", content: "Say hello" }],
+      temperature: 0.4,
+      topP: 0.9,
+      maxTokens: 512,
+      presencePenalty: 0.2,
+      frequencyPenalty: -0.1,
+      seed: 42,
+      stop: ["<END>"],
+      extraBody: { reasoning_effort: "low" },
+      responseFormat: "text",
+    })
+
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      model: "test-model",
+      messages: [{ role: "user", content: "Say hello" }],
+      temperature: 0.4,
+      top_p: 0.9,
+      max_tokens: 512,
+      presence_penalty: 0.2,
+      frequency_penalty: -0.1,
+      seed: 42,
+      stop: ["<END>"],
+      reasoning_effort: "low",
+    })
+  })
 })

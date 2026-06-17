@@ -31,12 +31,7 @@ export class OpenAICompatibleClient {
     const response = await this.fetchImpl(`${trimTrailingSlash(this.options.baseUrl)}/chat/completions`, {
       method: "POST",
       headers: this.headers(),
-      body: JSON.stringify({
-        model: request.model,
-        messages: request.messages,
-        temperature: request.temperature,
-        ...(request.responseFormat === "json" ? { response_format: { type: "json_object" } } : {}),
-      }),
+      body: JSON.stringify(toChatCompletionsBody(request)),
     })
 
     if (!response.ok) {
@@ -67,6 +62,22 @@ export class OpenAICompatibleClient {
       ...(this.options.apiKey ? { authorization: `Bearer ${this.options.apiKey}` } : {}),
       ...(this.options.defaultHeaders ?? {}),
     }
+  }
+}
+
+function toChatCompletionsBody(request: ModelRequest): Record<string, unknown> {
+  return {
+    ...(request.extraBody ?? {}),
+    model: request.model,
+    messages: request.messages,
+    temperature: request.temperature,
+    ...(request.topP !== undefined ? { top_p: request.topP } : {}),
+    ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
+    ...(request.presencePenalty !== undefined ? { presence_penalty: request.presencePenalty } : {}),
+    ...(request.frequencyPenalty !== undefined ? { frequency_penalty: request.frequencyPenalty } : {}),
+    ...(request.seed !== undefined ? { seed: request.seed } : {}),
+    ...(request.stop !== undefined ? { stop: request.stop } : {}),
+    ...(request.responseFormat === "json" ? { response_format: { type: "json_object" } } : {}),
   }
 }
 

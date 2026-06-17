@@ -44,6 +44,18 @@ Open Web Agent reads user-level model settings from `~/.openwebagents/config.yam
 model: "gpt-4.1-mini"
 openai_api_key: "sk-..."
 openrouter_api_key: "sk-or-..."
+
+parameters:
+  temperature: 0
+  # top_p: 1
+  # max_tokens: 2048
+  # presence_penalty: 0
+  # frequency_penalty: 0
+  # seed: 42
+  # stop:
+  #   - "<END>"
+  # extra_body:
+  #   reasoning_effort: "low"
 ```
 
 Set one or both provider keys. Environment variables still take precedence when present:

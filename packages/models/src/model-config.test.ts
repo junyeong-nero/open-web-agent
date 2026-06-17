@@ -9,17 +9,22 @@ describe("readModelConfig", () => {
     expect(resolveModelConfigPath()).toBe(join(homedir(), ".openwebagents", "config.yaml"))
   })
 
-  it("reads provider keys and default model from env", () => {
+  it("reads provider keys and default model from env", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-model-config-"))
     expect(
-      readModelConfig({
-        OPENAI_API_KEY: "openai-key",
-        OPENROUTER_API_KEY: "openrouter-key",
-        OPEN_WEB_AGENT_MODEL: "custom-model",
-      }),
+      readModelConfig(
+        {
+          OPENAI_API_KEY: "openai-key",
+          OPENROUTER_API_KEY: "openrouter-key",
+          OPEN_WEB_AGENT_MODEL: "custom-model",
+        },
+        { configPath: join(dir, "missing-config.yaml") },
+      ),
     ).toEqual({
       defaultModel: "custom-model",
       openaiApiKey: "openai-key",
       openrouterApiKey: "openrouter-key",
+      parameters: {},
     })
   })
 
@@ -40,6 +45,46 @@ describe("readModelConfig", () => {
       defaultModel: "yaml-model",
       openaiApiKey: "yaml-openai-key",
       openrouterApiKey: "yaml-openrouter-key",
+      parameters: {},
+    })
+  })
+
+  it("reads model parameters from a YAML config file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-model-config-"))
+    const configPath = join(dir, "config.yaml")
+    await writeFile(
+      configPath,
+      [
+        'model: "yaml-model"',
+        "parameters:",
+        "  temperature: 0.4",
+        "  top_p: 0.9",
+        "  max_tokens: 512",
+        "  presence_penalty: 0.2",
+        "  frequency_penalty: -0.1",
+        "  seed: 42",
+        "  stop:",
+        '    - "<END>"',
+        "  extra_body:",
+        '    reasoning_effort: "low"',
+        "",
+      ].join("\n"),
+    )
+
+    expect(readModelConfig({}, { configPath })).toEqual({
+      defaultModel: "yaml-model",
+      openaiApiKey: null,
+      openrouterApiKey: null,
+      parameters: {
+        temperature: 0.4,
+        topP: 0.9,
+        maxTokens: 512,
+        presencePenalty: 0.2,
+        frequencyPenalty: -0.1,
+        seed: 42,
+        stop: ["<END>"],
+        extraBody: { reasoning_effort: "low" },
+      },
     })
   })
 
@@ -68,6 +113,7 @@ describe("readModelConfig", () => {
       defaultModel: "env-model",
       openaiApiKey: "env-openai-key",
       openrouterApiKey: "yaml-openrouter-key",
+      parameters: {},
     })
   })
 })
