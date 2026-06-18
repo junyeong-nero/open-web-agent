@@ -240,6 +240,48 @@ describe("RuntimeSelector", () => {
     }
   })
 
+  it("closes when an esc key event is received", async () => {
+    let canceled = 0
+    const setup = await testRender(
+      () => (
+        <RuntimeSelector
+          title="Select model"
+          emptyMessage="No matching models"
+          sections={sections}
+          theme={getTheme("opencode")}
+          onQueryChange={() => {}}
+          onSelect={() => {}}
+          onCancel={() => {
+            canceled += 1
+          }}
+        />
+      ),
+      { width: 96, height: 24 },
+    )
+
+    try {
+      await setup.flush()
+
+      setup.renderer.keyInput.processParsedKey({
+        name: "esc",
+        ctrl: false,
+        meta: false,
+        shift: false,
+        option: false,
+        sequence: "\u001b",
+        number: false,
+        raw: "\u001b",
+        eventType: "press",
+        source: "raw",
+      })
+      await setup.flush()
+
+      expect(canceled).toBe(1)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
   it("renders options in a scrollbox that responds to mouse wheel scrolling", async () => {
     const setup = await testRender(
       () => (
