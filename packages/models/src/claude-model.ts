@@ -16,7 +16,6 @@ export class ClaudeModel implements ModelPlugin {
   name = "Claude"
   provider = "claude"
   readonly modelName: string
-  readonly reasoningEffort: string
   readonly contextWindowTokens: number
   private readonly defaultModel: string
   private readonly defaultParameters: ModelParameters
@@ -27,7 +26,6 @@ export class ClaudeModel implements ModelPlugin {
     this.defaultModel = options.defaultModel ?? resolveProviderDefaultModel("claude", config.defaultModel)
     this.defaultParameters = options.defaultParameters ?? config.parameters
     this.modelName = this.defaultModel
-    this.reasoningEffort = options.reasoningEffort ?? config.reasoningEffort
     this.contextWindowTokens = options.contextWindowTokens ?? config.contextWindowTokens
     this.client = new OpenAICompatibleClient({
       baseUrl: "https://api.anthropic.com/v1",

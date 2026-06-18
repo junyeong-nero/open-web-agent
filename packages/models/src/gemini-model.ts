@@ -16,7 +16,6 @@ export class GeminiModel implements ModelPlugin {
   name = "Gemini"
   provider = "gemini"
   readonly modelName: string
-  readonly reasoningEffort: string
   readonly contextWindowTokens: number
   private readonly defaultModel: string
   private readonly defaultParameters: ModelParameters
@@ -27,7 +26,6 @@ export class GeminiModel implements ModelPlugin {
     this.defaultModel = options.defaultModel ?? resolveProviderDefaultModel("gemini", config.defaultModel)
     this.defaultParameters = options.defaultParameters ?? config.parameters
     this.modelName = this.defaultModel
-    this.reasoningEffort = options.reasoningEffort ?? config.reasoningEffort
     this.contextWindowTokens = options.contextWindowTokens ?? config.contextWindowTokens
     this.client = new OpenAICompatibleClient({
       baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",

@@ -77,10 +77,10 @@ export function createServerClient(baseUrl: string) {
     async listPlugins(): Promise<PluginList> {
       return request(`${baseUrl}/plugins`)
     },
-    async selectModel(modelId: string): Promise<{ modelId: string; modelName: string | null }> {
+    async selectModel(modelId: string, reasoningEffort?: string): Promise<{ modelId: string; modelName: string | null; reasoningEffort: string | null }> {
       return request(`${baseUrl}/config/model`, {
         method: "PATCH",
-        body: JSON.stringify({ modelId }),
+        body: JSON.stringify({ modelId, ...(reasoningEffort ? { reasoningEffort } : {}) }),
       })
     },
   }

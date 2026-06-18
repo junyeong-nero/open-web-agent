@@ -18,6 +18,7 @@ import { createServerClient } from "./client/server-client"
 import { copySelectionToClipboard, pasteSystemClipboardText } from "./clipboard/system-clipboard"
 import { formatSlashCommandHelp, listSlashCommandSuggestions, parseSlashCommand } from "./commands/slash-commands"
 import { mapKeyEvent } from "./keymap/keybindings"
+import { defaultPromptHistoryStore, type PromptHistoryStore } from "./prompt-history"
 import { createInitialState, reduceTuiEvent } from "./state/reducer"
 import type { AgentSummary, EnvironmentSummary, ModelSummary, RuntimeSelectorKind, SessionSummary, TuiState } from "./state/types"
 import { getTheme, listThemes, type TuiTheme } from "./theme/themes"
@@ -28,14 +29,31 @@ export interface AppProps {
   projectPath: string
   continueLast?: boolean
   sessionId?: string
+  promptHistory?: PromptHistoryStore
+  initialPromptHistory?: string[]
+  initialRuntimePlugins?: {
+    agents: AgentSummary[]
+    models: ModelSummary[]
+    environments: EnvironmentSummary[]
+  }
   onExit(): void
 }
 
 export function App(props: AppProps) {
   const renderer = useRenderer()
   const client = createServerClient(props.serverUrl)
-  const [state, setState] = createSignal(createInitialState(props.projectPath))
+  const promptHistoryStore = () => props.promptHistory ?? defaultPromptHistoryStore
+  const initialState = props.initialRuntimePlugins
+    ? reduceTuiEvent(createInitialState(props.projectPath), {
+        type: "plugins.loaded",
+        agents: props.initialRuntimePlugins.agents,
+        models: props.initialRuntimePlugins.models,
+        environments: props.initialRuntimePlugins.environments,
+      })
+    : createInitialState(props.projectPath)
+  const [state, setState] = createSignal(initialState)
   const [prompt, setPrompt] = createSignal("")
+  const [promptHistory, setPromptHistory] = createSignal<string[]>(props.initialPromptHistory ?? [])
   const [sessionPaletteOpen, setSessionPaletteOpen] = createSignal(false)
   const [sessionPaletteIndex, setSessionPaletteIndex] = createSignal(0)
   const [sessionPaletteQuery, setSessionPaletteQuery] = createSignal("")
@@ -46,6 +64,7 @@ export function App(props: AppProps) {
   let transcriptScroll: ScrollBoxRenderable | undefined
   const currentTheme = (): TuiTheme => getTheme(state().selectedThemeId)
   const runtimeSelectorOpen = () => state().runtimeSelectorKind !== null
+  let stream: ReturnType<typeof createEventStream> | undefined
   const runtimeSelectorConfig = createMemo(() => {
     const current = state()
     const query = current.runtimeSelectorQuery
@@ -73,19 +92,27 @@ export function App(props: AppProps) {
   const sessionSpinner = setInterval(() => setSessionLoadingPhase((phase) => (phase + 1) % 4), 140)
 
   onCleanup(() => clearInterval(sessionSpinner))
+  onCleanup(() => stream?.close())
 
-  onMount(async () => {
+  onMount(() => {
+    void initializeApp()
+  })
+
+  async function initializeApp() {
+    promptHistoryStore()
+      .load()
+      .then(setPromptHistory)
+      .catch((error) => appendSystemMessage(`Failed to load prompt history: ${formatError(error)}`))
+
     const session = await resolveStartupSession()
     setState((current) => activateSessionSummary(current, session))
     await refreshSessions()
     await loadPlugins()
 
-    const stream = createEventStream(props.serverUrl, (event) => {
+    stream = createEventStream(props.serverUrl, (event) => {
       setState((current) => reduceTuiEvent(current, { type: "run.event", event }))
     })
-
-    onCleanup(() => stream.close())
-  })
+  }
 
   async function resolveStartupSession(): Promise<SessionSummary> {
     if (props.sessionId) {
@@ -140,6 +167,14 @@ export function App(props: AppProps) {
       return
     }
 
+    const text = printableKeyText(key)
+    if (!runtimeSelectorOpen() && activePane() !== "prompt" && text) {
+      key.preventDefault()
+      setActivePane("prompt")
+      setPrompt((value) => value + text)
+      return
+    }
+
     if (action === "new") void createNewSession()
     if (action === "copy") {
       key.preventDefault()
@@ -163,6 +198,12 @@ export function App(props: AppProps) {
     if (action === "scroll-line-down" && activePane() === "transcript") {
       key.preventDefault()
       transcriptScroll?.scrollBy(1, "content")
+      return
+    }
+    if (action === "reasoning-effort-decrease" || action === "reasoning-effort-increase") {
+      if (prompt().length > 0 && activePane() === "prompt") return
+      const changed = changeReasoningEffort(action === "reasoning-effort-increase" ? 1 : -1)
+      if (changed) key.preventDefault()
       return
     }
     if (action === "cancel-or-quit") void cancelOrExit()
@@ -369,6 +410,7 @@ export function App(props: AppProps) {
   async function submitPrompt(submittedValue?: string) {
     const value = (submittedValue ?? prompt()).trim()
     if (value.length === 0) return
+    await recordPromptHistory(value)
 
     const command = parseSlashCommand(value)
     if (command.kind === "quit") {
@@ -577,9 +619,30 @@ export function App(props: AppProps) {
     await persistAndSelectModel(option.id)
   }
 
-  async function persistAndSelectModel(modelId: string) {
+  async function recordPromptHistory(value: string) {
     try {
-      await client.selectModel(modelId)
+      setPromptHistory(await promptHistoryStore().append(value))
+    } catch (error) {
+      appendSystemMessage(`Failed to save prompt history: ${formatError(error)}`)
+    }
+  }
+
+  function changeReasoningEffort(delta: -1 | 1): boolean {
+    const model = selectedModelSummary(state())
+    if (!model?.reasoningEffort) return false
+
+    const currentIndex = reasoningEfforts.indexOf(model.reasoningEffort)
+    const baseIndex = currentIndex >= 0 ? currentIndex : reasoningEfforts.indexOf("medium")
+    const nextEffort = reasoningEfforts[(baseIndex + delta + reasoningEfforts.length) % reasoningEfforts.length]
+    if (!nextEffort || nextEffort === model.reasoningEffort) return false
+
+    void persistAndSelectModel(model.id, { reasoningEffort: nextEffort, message: `Reasoning effort set to ${nextEffort}` })
+    return true
+  }
+
+  async function persistAndSelectModel(modelId: string, options: { reasoningEffort?: string; message?: string } = {}) {
+    try {
+      await client.selectModel(modelId, options.reasoningEffort)
     } catch (error) {
       setState((current) =>
         reduceTuiEvent(current, {
@@ -592,10 +655,10 @@ export function App(props: AppProps) {
 
     setState((current) =>
       reduceTuiEvent(
-        reduceTuiEvent(current, { type: "model.selected", modelId }),
+        reduceTuiEvent(current, { type: "model.selected", modelId, reasoningEffort: options.reasoningEffort }),
         {
           type: "conversation.append",
-          message: { role: "system", content: `Model set to ${modelId}` },
+          message: { role: "system", content: options.message ?? `Model set to ${modelId}` },
         },
       ),
     )
@@ -665,10 +728,12 @@ export function App(props: AppProps) {
         modelActivity={state().modelActivity}
         runStatus={state().runStatus}
         theme={currentTheme()}
+        history={promptHistory()}
         focused={!sessionPaletteOpen() && !runtimeSelectorOpen() && activePane() === "prompt"}
         onChange={setPrompt}
         onSubmit={submitPrompt}
         onFocusRequest={() => setActivePane("prompt")}
+        onReasoningEffortChange={changeReasoningEffort}
       />
       {runtimeSelectorOpen() ? (
         <RuntimeSelector
@@ -684,6 +749,8 @@ export function App(props: AppProps) {
     </box>
   )
 }
+
+const reasoningEfforts = ["low", "medium", "high"]
 
 function activateSessionSummary(state: TuiState, session: SessionSummary): TuiState {
   const selected = reduceTuiEvent(reduceTuiEvent(state, { type: "session.updated", session }), {

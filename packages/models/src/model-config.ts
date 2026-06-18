@@ -40,6 +40,7 @@ export interface WriteModelSelectionConfigOptions {
 export interface ModelSelectionConfig {
   modelId: string
   modelName?: string | null
+  reasoningEffort?: string | null
 }
 
 export type ModelProvider = "openai" | "openrouter" | "gemini" | "claude"
@@ -91,6 +92,7 @@ export async function writeModelSelectionConfig(
     ...parsed,
     model_provider: selection.modelId,
     ...(selection.modelName && selection.modelName.length > 0 ? { model: selection.modelName } : {}),
+    ...(selection.reasoningEffort && selection.reasoningEffort.length > 0 ? { reasoning_effort: selection.reasoningEffort } : {}),
   }
 
   await mkdir(dirname(configPath), { recursive: true })

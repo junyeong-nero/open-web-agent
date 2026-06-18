@@ -12,6 +12,8 @@ export type KeyAction =
   | "scroll-page-down"
   | "scroll-top"
   | "scroll-bottom"
+  | "reasoning-effort-decrease"
+  | "reasoning-effort-increase"
 
 export interface KeyLike {
   name?: string
@@ -36,5 +38,7 @@ export function mapKeyEvent(key: KeyLike): KeyAction | null {
   if (key.name === "pagedown") return "scroll-page-down"
   if (key.name === "home") return "scroll-top"
   if (key.name === "end") return "scroll-bottom"
+  if (key.name === "left") return "reasoning-effort-decrease"
+  if (key.name === "right") return "reasoning-effort-increase"
   return null
 }

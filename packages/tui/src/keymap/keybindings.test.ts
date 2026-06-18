@@ -21,6 +21,11 @@ describe("mapKeyEvent", () => {
     expect(mapKeyEvent({ name: "end" })).toBe("scroll-bottom")
   })
 
+  it("maps reasoning effort shortcut keys", () => {
+    expect(mapKeyEvent({ name: "left" })).toBe("reasoning-effort-decrease")
+    expect(mapKeyEvent({ name: "right" })).toBe("reasoning-effort-increase")
+  })
+
   it("maps ctrl+c to quit", () => {
     expect(mapKeyEvent({ name: "c", ctrl: true, sequence: "\u0003" })).toBe("quit")
     expect(mapKeyEvent({ ctrl: true, sequence: "\u0003" })).toBe("quit")
