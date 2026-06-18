@@ -10,6 +10,7 @@ export interface OpenRouterModelOptions {
   defaultParameters?: ModelParameters
   reasoningEffort?: string
   contextWindowTokens?: number
+  maxRetry?: number
   forceDefaultModel?: boolean
   fetch?: FetchLike
 }
@@ -40,6 +41,7 @@ export class OpenRouterModel implements ModelPlugin {
       baseUrl: "https://openrouter.ai/api/v1",
       apiKey: options.apiKey ?? config.openrouterApiKey,
       fetch: options.fetch,
+      maxRetry: options.maxRetry ?? config.maxRetry,
       defaultHeaders: {
         "http-referer": "https://github.com/open-web-agent/open-web-agent",
         "x-title": "Open Web Agent",

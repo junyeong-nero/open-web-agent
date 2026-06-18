@@ -61,6 +61,7 @@ model: "nvidia/nemotron-3-super-120b-a12b:free"
 model_provider: "openai"
 reasoning_effort: "medium"
 context_window_tokens: 128000
+max_retry: 2
 openai_api_key: "sk-..."
 openrouter_api_key: "sk-or-..."
 gemini_api_key: "..."
@@ -82,10 +83,10 @@ parameters:
 
 Set one or more provider keys. Environment variables still take precedence when present:
 `OPEN_WEB_AGENT_MODEL`, `OPEN_WEB_AGENT_REASONING_EFFORT`,
-`OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS`, `OPEN_WEB_AGENT_MODEL_TIMEOUT_MS`,
-`OPEN_WEB_AGENT_MODEL_PROVIDER`, `OPEN_WEB_AGENT_CODEX_AUTH_PATH`,
-`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, and
-`ANTHROPIC_API_KEY`.
+`OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS`, `OPEN_WEB_AGENT_MAX_RETRY`,
+`OPEN_WEB_AGENT_MODEL_TIMEOUT_MS`, `OPEN_WEB_AGENT_MODEL_PROVIDER`,
+`OPEN_WEB_AGENT_CODEX_AUTH_PATH`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`,
+`GEMINI_API_KEY`, and `ANTHROPIC_API_KEY`.
 
 If Codex file-backed ChatGPT auth is available at `codex_auth_path`, or if
 `CODEX_ACCESS_TOKEN` is set, the runtime also registers the `codex-oauth`

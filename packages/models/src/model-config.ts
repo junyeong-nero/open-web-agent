@@ -10,6 +10,7 @@ export interface ModelConfig {
   defaultModelProvider: string | null
   reasoningEffort: string
   contextWindowTokens: number
+  maxRetry: number
   openaiApiKey: string | null
   openrouterApiKey: string | null
   geminiApiKey: string | null
@@ -52,6 +53,7 @@ export const defaultClaudeModel = "claude-sonnet-4-6"
 const defaultModel = defaultOpenRouterModel
 const defaultReasoningEffort = "medium"
 const defaultContextWindowTokens = 128000
+const defaultMaxRetry = 0
 
 export function resolveModelConfigPath(): string {
   return join(homedir(), ".openwebagents", "config.yaml")
@@ -65,6 +67,7 @@ export function readModelConfig(env: NodeJS.ProcessEnv = process.env, options: R
     defaultModelProvider: env.OPEN_WEB_AGENT_MODEL_PROVIDER || fileConfig.defaultModelProvider || null,
     reasoningEffort: env.OPEN_WEB_AGENT_REASONING_EFFORT || fileConfig.reasoningEffort || defaultReasoningEffort,
     contextWindowTokens: readContextWindowTokens(env.OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS) ?? fileConfig.contextWindowTokens ?? defaultContextWindowTokens,
+    maxRetry: readMaxRetry(env.OPEN_WEB_AGENT_MAX_RETRY) ?? fileConfig.maxRetry ?? defaultMaxRetry,
     openaiApiKey: env.OPENAI_API_KEY || fileConfig.openaiApiKey || null,
     openrouterApiKey: env.OPENROUTER_API_KEY || fileConfig.openrouterApiKey || null,
     geminiApiKey: env.GEMINI_API_KEY || fileConfig.geminiApiKey || null,
@@ -115,6 +118,7 @@ function readConfigFile(configPath: string): Partial<ModelConfig> {
     defaultModelProvider: readOptionalString(parsed, configPath, "model_provider", "modelProvider"),
     reasoningEffort: readOptionalString(parsed, configPath, "reasoning_effort", "reasoningEffort"),
     contextWindowTokens: readOptionalPositiveInteger(parsed, configPath, "context_window_tokens", "contextWindowTokens"),
+    maxRetry: readOptionalNonNegativeInteger(parsed, configPath, "max_retry", "maxRetry"),
     openaiApiKey: readOptionalString(parsed, configPath, "openai_api_key", "openaiApiKey"),
     openrouterApiKey: readOptionalString(parsed, configPath, "openrouter_api_key", "openrouterApiKey"),
     geminiApiKey: readOptionalString(parsed, configPath, "gemini_api_key", "geminiApiKey"),
@@ -197,6 +201,15 @@ function readOptionalPositiveInteger(record: Record<string, unknown>, configPath
   return entry.value
 }
 
+function readOptionalNonNegativeInteger(record: Record<string, unknown>, configPath: string, ...keys: string[]): number | undefined {
+  const entry = readOptionalEntry(record, keys)
+  if (!entry || entry.value == null) return undefined
+  if (typeof entry.value !== "number" || !Number.isInteger(entry.value) || entry.value < 0) {
+    throw new Error(`Invalid Open Web Agent config at ${configPath}: ${entry.key} must be a non-negative integer`)
+  }
+  return entry.value
+}
+
 function readOptionalRecord(
   record: Record<string, unknown>,
   configPath: string,
@@ -243,6 +256,15 @@ function readContextWindowTokens(value: string | undefined): number | undefined 
   const parsed = Number(value)
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error("Invalid OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS: must be a positive integer")
+  }
+  return parsed
+}
+
+function readMaxRetry(value: string | undefined): number | undefined {
+  if (!value) return undefined
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error("Invalid OPEN_WEB_AGENT_MAX_RETRY: must be a non-negative integer")
   }
   return parsed
 }

@@ -115,4 +115,31 @@ describe("OpenAICompatibleClient", () => {
       temperature: 0,
     })
   })
+
+  it("retries transient chat completion failures up to maxRetry", async () => {
+    const statuses = [500, 429]
+    const client = new OpenAICompatibleClient({
+      baseUrl: "https://provider.test/v1",
+      apiKey: "key_123",
+      maxRetry: 2,
+      fetch: async () => {
+        const status = statuses.shift()
+        if (status) return new Response(`failed ${status}`, { status })
+        return Response.json({
+          id: "chatcmpl_retry",
+          choices: [{ message: { content: "after retry" } }],
+        })
+      },
+    })
+
+    const response = await client.complete({
+      model: "test-model",
+      messages: [{ role: "user", content: "retry" }],
+      temperature: 0,
+      responseFormat: "text",
+    })
+
+    expect(response.text).toBe("after retry")
+    expect(statuses).toEqual([])
+  })
 })

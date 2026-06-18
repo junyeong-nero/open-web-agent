@@ -8,6 +8,7 @@ export interface ClaudeModelOptions {
   defaultParameters?: ModelParameters
   reasoningEffort?: string
   contextWindowTokens?: number
+  maxRetry?: number
   fetch?: FetchLike
 }
 
@@ -33,6 +34,7 @@ export class ClaudeModel implements ModelPlugin {
       baseUrl: "https://api.anthropic.com/v1",
       apiKey: options.apiKey ?? config.anthropicApiKey,
       fetch: options.fetch,
+      maxRetry: options.maxRetry ?? config.maxRetry,
     })
   }
 

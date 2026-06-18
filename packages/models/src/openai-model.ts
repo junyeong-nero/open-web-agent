@@ -10,6 +10,7 @@ export interface OpenAIModelOptions {
   defaultParameters?: ModelParameters
   reasoningEffort?: string
   contextWindowTokens?: number
+  maxRetry?: number
   forceDefaultModel?: boolean
   fetch?: FetchLike
 }
@@ -40,6 +41,7 @@ export class OpenAIModel implements ModelPlugin {
       baseUrl: "https://api.openai.com/v1",
       apiKey: options.apiKey ?? config.openaiApiKey,
       fetch: options.fetch,
+      maxRetry: options.maxRetry ?? config.maxRetry,
     })
   }
 

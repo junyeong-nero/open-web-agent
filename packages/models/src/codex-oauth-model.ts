@@ -10,6 +10,7 @@ export interface CodexOAuthModelOptions {
   defaultParameters?: ModelParameters
   reasoningEffort?: string
   contextWindowTokens?: number
+  maxRetry?: number
   fetch?: FetchLike
 }
 
@@ -35,6 +36,7 @@ export class CodexOAuthModel implements ModelPlugin {
       baseUrl: "https://api.openai.com/v1",
       accessToken: options.accessToken ?? readCodexOAuthToken(),
       fetch: options.fetch,
+      maxRetry: options.maxRetry ?? config.maxRetry,
     })
   }
 
