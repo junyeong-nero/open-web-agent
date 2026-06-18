@@ -79,6 +79,27 @@ describe("session shell formatting", () => {
       prefix: "*",
       text: "navigate ok navigated",
     })
+    expect(
+      toTranscriptViewItem({
+        id: "tool-call",
+        sequence: 3,
+        kind: "tool.call",
+        message: "navigate https://example.com",
+        accent: "tool",
+        toolCall: {
+          action: "navigate",
+          argsJson: '{\n  "url": "https://example.com"\n}',
+        },
+      }),
+    ).toMatchObject({
+      block: "tool",
+      prefix: "",
+      text: "navigate",
+      toolCall: {
+        action: "navigate",
+        argsJson: '{\n  "url": "https://example.com"\n}',
+      },
+    })
     expect(toTranscriptViewItem({ id: "failed", sequence: 3, kind: "run.failed", message: "boom", accent: "danger" })).toMatchObject({
       block: "status",
       prefix: "~",

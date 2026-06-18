@@ -11,6 +11,10 @@ export interface TranscriptViewItem {
   prefix: string
   text: string
   accent: ThemeAccent
+  toolCall?: {
+    action: string
+    argsJson: string
+  }
 }
 
 export function sessionTitle(state: TuiState): string {
@@ -37,6 +41,7 @@ export function toTranscriptViewItem(item: RunLogItem): TranscriptViewItem {
   if (item.kind === "system") return viewItem(item, "system", "~", item.message)
   if (item.kind === "run.failed") return viewItem(item, "status", "~", `failed ${item.message}`.trim())
   if (item.kind === "run.cancelled") return viewItem(item, "status", "~", `cancelled ${item.message}`.trim())
+  if (item.kind === "tool.call" && item.toolCall) return viewItem(item, "tool", "", item.toolCall.action, item.toolCall)
   if (item.kind.startsWith("tool.")) return viewItem(item, "tool", "*", item.message)
   if (item.kind === "reasoning") return viewItem(item, "tool", "*", item.message)
 
@@ -81,7 +86,7 @@ export function formatContextUsage(activity: Pick<ModelActivity, "usage" | "cont
   return `${formatTokenCount(contextTokens)} (${percentage}%)`
 }
 
-function viewItem(item: RunLogItem, block: TranscriptBlock, prefix: string, text: string): TranscriptViewItem {
+function viewItem(item: RunLogItem, block: TranscriptBlock, prefix: string, text: string, toolCall?: TranscriptViewItem["toolCall"]): TranscriptViewItem {
   return {
     id: item.id,
     sequence: item.sequence,
@@ -89,6 +94,7 @@ function viewItem(item: RunLogItem, block: TranscriptBlock, prefix: string, text
     prefix,
     text,
     accent: item.accent,
+    ...(toolCall ? { toolCall } : {}),
   }
 }
 

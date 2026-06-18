@@ -31,6 +31,21 @@ describe("toRunLogItem", () => {
     ).toMatchObject({ kind: "reasoning", message: "Need page title.", accent: "reasoning" })
     expect(
       toRunLogItem(
+        event("browser.tool.started", {
+          toolCall: { id: "tool_1", type: "type", target: { selector: "#query" }, value: "today weather" },
+        }),
+      ),
+    ).toMatchObject({
+      kind: "tool.call",
+      message: "type today weather",
+      accent: "tool",
+      toolCall: {
+        action: "type",
+        argsJson: '{\n  "target": {\n    "selector": "#query"\n  },\n  "value": "today weather"\n}',
+      },
+    })
+    expect(
+      toRunLogItem(
         event("browser.tool.completed", {
           toolCall: { id: "tool_1", type: "navigate", url: "https://example.com" },
           result: { ok: true, message: "navigated" },

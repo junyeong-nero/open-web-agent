@@ -7,6 +7,12 @@ export interface RunLogItem {
   kind: string
   message: string
   accent: ThemeAccent
+  toolCall?: RunLogToolCall
+}
+
+export interface RunLogToolCall {
+  action: string
+  argsJson: string
 }
 
 export function toRunLogItem(event: RunEvent): RunLogItem | null {
@@ -24,7 +30,7 @@ export function toRunLogItem(event: RunEvent): RunLogItem | null {
   if (event.type === "browser.tool.started") {
     const toolCall = readRecord(event.payload.toolCall)
     const toolType = typeof toolCall?.type === "string" ? toolCall.type : "tool"
-    return item(event, "tool.call", formatToolCall(toolType, toolCall), "tool")
+    return item(event, "tool.call", formatToolCall(toolType, toolCall), "tool", formatToolCallDetails(toolType, toolCall))
   }
 
   if (event.type === "browser.tool.completed") {
@@ -45,8 +51,8 @@ export function toRunLogItem(event: RunEvent): RunLogItem | null {
   return null
 }
 
-function item(event: RunEvent, kind: string, message: string, accent: ThemeAccent): RunLogItem {
-  return { id: event.id, sequence: event.sequence, kind, message, accent }
+function item(event: RunEvent, kind: string, message: string, accent: ThemeAccent, toolCall?: RunLogToolCall): RunLogItem {
+  return { id: event.id, sequence: event.sequence, kind, message, accent, ...(toolCall ? { toolCall } : {}) }
 }
 
 function formatToolCall(toolType: string, toolCall: Record<string, unknown> | null): string {
@@ -54,6 +60,16 @@ function formatToolCall(toolType: string, toolCall: Record<string, unknown> | nu
   if (toolType === "wait" && typeof toolCall?.ms === "number") return `wait ${toolCall.ms}ms`
   if (toolType === "type" && typeof toolCall?.value === "string") return `type ${toolCall.value}`
   return toolType
+}
+
+function formatToolCallDetails(toolType: string, toolCall: Record<string, unknown> | null): RunLogToolCall | undefined {
+  if (!toolCall) return undefined
+
+  const args = Object.fromEntries(Object.entries(toolCall).filter(([key]) => key !== "id" && key !== "type"))
+  return {
+    action: toolType,
+    argsJson: JSON.stringify(args, null, 2),
+  }
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
