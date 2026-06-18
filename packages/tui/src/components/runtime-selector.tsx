@@ -1,6 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { For, createMemo, createSignal } from "solid-js"
 import type { InputRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/core"
+import { useKeyboard } from "@opentui/solid"
 import type { AgentSummary, EnvironmentSummary, ModelSummary } from "../state/types"
 import type { TuiTheme } from "../theme/themes"
 
@@ -88,12 +89,20 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
     if (option) props.onSelect(option)
   }
 
-  const handleKeyDown = (event: KeyEvent) => {
-    if (event.name === "escape") {
+  const cancel = (event: KeyEvent) => {
+    if (event.name === "escape" || event.name === "esc" || event.sequence === "\u001b") {
       event.preventDefault()
+      event.stopPropagation()
       props.onCancel()
-      return
+      return true
     }
+    return false
+  }
+
+  useKeyboard(cancel)
+
+  const handleKeyDown = (event: KeyEvent) => {
+    if (cancel(event)) return
 
     if (event.name === "return" || event.name === "enter" || event.name === "linefeed") {
       event.preventDefault()
