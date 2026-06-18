@@ -58,18 +58,28 @@ describe("model pools", () => {
         "openrouter:~anthropic/claude-sonnet-latest",
         "openrouter:~google/gemini-pro-latest",
         "openrouter:openrouter/fusion",
+        "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+        "openrouter:openrouter/owl-alpha",
+        "openrouter:openai/gpt-oss-120b:free",
       ]),
     )
 
     const claude = models.find((model) => model.id === "openrouter:~anthropic/claude-sonnet-latest")
+    const nemotron = models.find((model) => model.id === "openrouter:nvidia/nemotron-3-super-120b-a12b:free")
     expect(claude).toMatchObject({
       name: "OpenRouter",
       provider: "openrouter",
       modelName: "~anthropic/claude-sonnet-latest",
       contextWindowTokens: 1_000_000,
     })
+    expect(nemotron).toMatchObject({
+      name: "OpenRouter",
+      provider: "openrouter",
+      modelName: "nvidia/nemotron-3-super-120b-a12b:free",
+      contextWindowTokens: 128_000,
+    })
 
-    await claude?.complete(
+    await nemotron?.complete(
       {
         model: "configured-default",
         messages: [{ role: "user", content: "hi" }],
@@ -79,6 +89,6 @@ describe("model pools", () => {
       {} as never,
     )
 
-    expect(bodies[0]).toMatchObject({ model: "~anthropic/claude-sonnet-latest" })
+    expect(bodies[0]).toMatchObject({ model: "nvidia/nemotron-3-super-120b-a12b:free" })
   })
 })

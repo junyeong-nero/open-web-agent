@@ -161,6 +161,12 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
               }
 
               const selected = () => row.optionIndex === boundedHighlightIndex()
+              const detail = () => row.option?.detail ?? ""
+              const endDetail = () => (detail() === freeModelBadge ? detail() : "")
+              const inlineDetail = () => {
+                const value = detail()
+                return value.length > 0 && value !== freeModelBadge ? ` ${value}` : ""
+              }
               return (
                 <box
                   flexDirection="row"
@@ -169,7 +175,10 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
                   backgroundColor={selected() ? props.theme.task : props.theme.panel}
                 >
                   <text fg={selected() ? props.theme.surface : props.theme.text} wrapMode="none">
-                    {`${row.option?.selected ? "●" : " "} ${row.option?.label ?? ""} ${row.option?.detail ?? ""}`}
+                    {`${row.option?.selected ? "●" : " "} ${row.option?.label ?? ""}${inlineDetail()}`}
+                  </text>
+                  <text visible={endDetail().length > 0} fg={selected() ? props.theme.surface : props.theme.textMuted} wrapMode="none">
+                    {endDetail()}
                   </text>
                 </box>
               )
@@ -309,7 +318,7 @@ function toModelSelectorOption(model: ModelSummary, selected: boolean): RuntimeS
   return {
     id: model.id,
     label: model.modelName ?? model.name ?? model.id,
-    detail: providerDisplayName(model),
+    detail: isFreeModel(model) ? freeModelBadge : providerDisplayName(model),
     selected,
   }
 }
@@ -327,9 +336,18 @@ function providerDisplayName(model: ModelSummary): string {
 
 const providerDisplayNames: Record<string, string> = {
   claude: "Claude",
+  "codex-oauth": "OpenAI OAuth",
   gemini: "Gemini",
   openai: "OpenAI",
   openrouter: "OpenRouter",
+}
+
+const freeModelBadge = "Free"
+
+function isFreeModel(model: ModelSummary): boolean {
+  return [model.id, model.name, model.modelName].some(
+    (value) => typeof value === "string" && /(?:^|[:/\s_-])free(?:$|[:/\s_-])/i.test(value),
+  )
 }
 
 function displayValue(value: string | null | undefined, fallback: string): string {

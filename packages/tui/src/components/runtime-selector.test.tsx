@@ -58,6 +58,33 @@ describe("buildModelSelectorSections", () => {
       "openai:gpt-5.4",
     ])
   })
+
+  it("uses the requested provider labels and marks free models in the option detail", () => {
+    const providerModels: ModelSummary[] = [
+      { id: "openai:gpt-5.5", name: "OpenAI", provider: "openai", modelName: "gpt-5.5" },
+      { id: "claude", name: "Claude", provider: "claude", modelName: "claude-sonnet-4-6" },
+      { id: "gemini", name: "Gemini", provider: "gemini", modelName: "gemini-3.5-flash" },
+      { id: "codex-oauth", name: "Codex OAuth", provider: "codex-oauth", modelName: "gpt-5.5" },
+      {
+        id: "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+        name: "OpenRouter",
+        provider: "openrouter",
+        modelName: "nvidia/nemotron-3-super-120b-a12b:free",
+      },
+    ]
+
+    const sections = buildModelSelectorSections(providerModels, null, "")
+
+    expect(sections.map((section) => section.title)).toEqual(["OpenAI", "Claude", "Gemini", "OpenAI OAuth", "OpenRouter"])
+    expect(sections.at(-1)?.options).toEqual([
+      {
+        id: "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+        label: "nvidia/nemotron-3-super-120b-a12b:free",
+        detail: "Free",
+        selected: false,
+      },
+    ])
+  })
 })
 
 describe("buildAgentSelectorSections", () => {
@@ -106,7 +133,7 @@ describe("RuntimeSelector", () => {
     },
     {
       title: "OpenRouter",
-      options: [{ id: "openrouter-claude", label: "Claude Opus 4.6", detail: "OpenRouter", selected: false }],
+      options: [{ id: "openrouter-free", label: "nvidia/nemotron-3-super-120b-a12b:free", detail: "Free", selected: false }],
     },
   ]
 
@@ -136,7 +163,10 @@ describe("RuntimeSelector", () => {
       expect(frame).toContain("Favorites")
       expect(frame).toContain("● GPT-5.5 OpenAI")
       expect(frame).toContain("OpenRouter")
-      expect(frame).toContain("Claude Opus 4.6")
+      expect(frame).toContain("nvidia/nemotron-3-super-120b-a12b:free")
+      const freeModelLine = frame.split("\n").find((line) => line.includes("nvidia/nemotron-3-super-120b-a12b:free"))
+      expect(freeModelLine?.trimEnd()).toEndWith("Free")
+      expect(freeModelLine).toMatch(/:free\s{2,}Free/)
       expect(frame).toContain("Select enter")
       expect(frame).toContain("Close esc")
     } finally {
@@ -169,7 +199,7 @@ describe("RuntimeSelector", () => {
       setup.mockInput.pressEnter()
       await setup.flush()
 
-      expect(selected).toEqual(["openrouter-claude"])
+      expect(selected).toEqual(["openrouter-free"])
     } finally {
       setup.renderer.destroy()
     }
