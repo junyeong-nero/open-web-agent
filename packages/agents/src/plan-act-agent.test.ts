@@ -66,6 +66,8 @@ describe("PlanActAgent", () => {
 
     expect(events[0]?.type).toBe("plan.created")
     expect(events[0]?.payload.items).toEqual([{ id: "plan_1", title: "Open page", status: "pending" }])
+    expect(model.requests[0]).not.toHaveProperty("temperature")
+    expect(model.requests[1]).not.toHaveProperty("temperature")
     expect(decision).toMatchObject({ type: "final_answer", finalAnswer: "done" })
   })
 

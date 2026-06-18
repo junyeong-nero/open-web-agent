@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import { ModelRequestSchema } from "@open-web-agent/core"
 import { OpenAICompatibleClient } from "./openai-compatible-client"
 
 describe("OpenAICompatibleClient", () => {
@@ -40,6 +41,35 @@ describe("OpenAICompatibleClient", () => {
       text: "hello",
       usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
     })
+  })
+
+  it("omits temperature from chat completions when it is not requested", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const client = new OpenAICompatibleClient({
+      baseUrl: "https://provider.test/v1",
+      apiKey: "key_123",
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init: init ?? {} })
+        return Response.json({
+          id: "chatcmpl_no_temperature",
+          choices: [{ message: { content: "hello" } }],
+        })
+      },
+    })
+
+    await client.complete(
+      ModelRequestSchema.parse({
+        model: "test-model",
+        messages: [{ role: "user", content: "Say hello" }],
+      }),
+    )
+
+    const body = JSON.parse(String(calls[0]?.init.body))
+    expect(body).toMatchObject({
+      model: "test-model",
+      messages: [{ role: "user", content: "Say hello" }],
+    })
+    expect(body).not.toHaveProperty("temperature")
   })
 
   it("forwards optional model parameters to chat completions", async () => {

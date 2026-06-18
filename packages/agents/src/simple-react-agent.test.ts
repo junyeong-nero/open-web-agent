@@ -139,6 +139,7 @@ describe("SimpleReActAgent", () => {
 
     expect(decision.type).toBe("browser_actions")
     expect(model.requests[0]?.responseFormat).toBe("json")
+    expect(model.requests[0]).not.toHaveProperty("temperature")
   })
 
   it("describes concrete click and type target shapes in the model prompt", async () => {

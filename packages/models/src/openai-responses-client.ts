@@ -78,7 +78,7 @@ function toResponsesBody(request: ModelRequest): Record<string, unknown> {
     model: request.model,
     input,
     ...(instructions.length > 0 ? { instructions: instructions.map(formatContent).join("\n\n") } : {}),
-    temperature: request.temperature,
+    ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
     ...(request.topP !== undefined ? { top_p: request.topP } : {}),
     ...(request.maxTokens !== undefined ? { max_output_tokens: request.maxTokens } : {}),
     ...(request.presencePenalty !== undefined ? { presence_penalty: request.presencePenalty } : {}),

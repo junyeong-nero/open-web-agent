@@ -61,7 +61,6 @@ export class SimpleReActAgent implements AgentPlugin {
   private buildRequest(state: AgentState, lastError: string | null, lastRaw: string): ModelRequest {
     return {
       model: this.options.modelName,
-      temperature: 0,
       responseFormat: "json",
       messages: [
         {
