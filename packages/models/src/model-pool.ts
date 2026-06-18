@@ -25,6 +25,9 @@ export const OPENAI_MODEL_POOL: ProviderModelDefinition[] = [
 ]
 
 export const OPENROUTER_MODEL_POOL: ProviderModelDefinition[] = [
+  { id: "openrouter:nvidia/nemotron-3-super-120b-a12b:free", modelName: "nvidia/nemotron-3-super-120b-a12b:free", contextWindowTokens: 128_000 },
+  { id: "openrouter:openrouter/owl-alpha", modelName: "openrouter/owl-alpha", contextWindowTokens: 128_000 },
+  { id: "openrouter:openai/gpt-oss-120b:free", modelName: "openai/gpt-oss-120b:free", contextWindowTokens: 128_000 },
   { id: "openrouter:~openai/gpt-latest", modelName: "~openai/gpt-latest", contextWindowTokens: 1_050_000 },
   { id: "openrouter:~openai/gpt-mini-latest", modelName: "~openai/gpt-mini-latest", contextWindowTokens: 400_000 },
   { id: "openrouter:openai/gpt-5.5", modelName: "openai/gpt-5.5", contextWindowTokens: 1_050_000 },
