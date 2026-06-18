@@ -298,4 +298,33 @@ describe("PromptInput", () => {
       setup.renderer.destroy()
     }
   })
+
+  it("renders model activity as a compact thinking status", async () => {
+    const setup = await testRender(
+      () => (
+        <PromptInput
+          value=""
+          agent={null}
+          model={null}
+          modelActivity={{ ...idleModelActivity, status: "running", modelName: "gpt-test" }}
+          runStatus="running"
+          theme={getTheme("opencode")}
+          onChange={() => {}}
+          onSubmit={() => {}}
+        />
+      ),
+      { width: 80, height: 8 },
+    )
+
+    try {
+      await setup.flush()
+      const frame = setup.captureCharFrame()
+
+      expect(frame).toContain("thinking · gpt-test")
+      expect(frame).not.toContain("model inference")
+      expect(frame).not.toContain("[======>")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
 })
