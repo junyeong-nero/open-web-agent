@@ -45,11 +45,11 @@ describe("startDefaultRuntime", () => {
       expect(modelIds).toEqual(
         expect.arrayContaining([
           "openrouter",
-          "openrouter:~anthropic/claude-sonnet-latest",
-          "openrouter:~google/gemini-pro-latest",
+          "openrouter:anthropic/claude-sonnet-4.6",
+          "openrouter:google/gemini-3.5-flash",
           "openai",
           "openai:gpt-5.5",
-          "openai:gpt-5.3-codex-spark",
+          "openai:gpt-5.3-codex",
           "gemini",
           "claude",
         ]),
@@ -59,12 +59,12 @@ describe("startDefaultRuntime", () => {
         name: "OpenAI",
         provider: "openai",
         modelName: "gpt-5.5",
-        contextWindowTokens: 1_000_000,
+        contextWindowTokens: 1_050_000,
       })
-      expect(plugins.models.find((model) => model.id === "openrouter:~google/gemini-pro-latest")).toMatchObject({
+      expect(plugins.models.find((model) => model.id === "openrouter:google/gemini-3.5-flash")).toMatchObject({
         name: "OpenRouter",
         provider: "openrouter",
-        modelName: "~google/gemini-pro-latest",
+        modelName: "google/gemini-3.5-flash",
         contextWindowTokens: 1_048_576,
       })
       expect(plugins.models.find((model) => model.id === "gemini")).toMatchObject({
@@ -304,7 +304,7 @@ describe("startDefaultRuntime", () => {
       const plugins = await fetchPlugins(runtime.url)
 
       expect(plugins.models.map((model) => model.id)).toEqual(
-        expect.arrayContaining(["openrouter", "openrouter:~openai/gpt-latest", "openai", "openai:gpt-5.5", "gemini", "claude"]),
+        expect.arrayContaining(["openrouter", "openrouter:openrouter/fusion", "openai", "openai:gpt-5.5", "gemini", "claude"]),
       )
       expect(plugins.models[0]).toMatchObject({
         id: "openrouter",
