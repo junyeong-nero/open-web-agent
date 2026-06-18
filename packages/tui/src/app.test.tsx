@@ -57,9 +57,44 @@ describe("App", () => {
       setup.renderer.destroy()
     }
   })
+
+  it("persists agent and browser changes made through slash commands", async () => {
+    const persistedAgents: unknown[] = []
+    const persistedBrowsers: unknown[] = []
+    const server = startTuiServer({
+      onPersistAgent: (body) => persistedAgents.push(body),
+      onPersistBrowser: (body) => persistedBrowsers.push(body),
+    })
+    const setup = await testRender(
+      () => <App serverUrl={server.url} projectPath="/tmp/open-web-agent-test" onExit={() => {}} />,
+      { width: 100, height: 24 },
+    )
+
+    try {
+      await setup.flush()
+
+      await setup.mockInput.typeText("/agent test-agent")
+      setup.mockInput.pressEnter()
+      await setup.flush()
+      await eventually(() => expect(persistedAgents).toEqual([{ agentId: "test-agent" }]))
+
+      await setup.mockInput.typeText("/browser test-browser")
+      setup.mockInput.pressEnter()
+      await setup.flush()
+      await eventually(() => expect(persistedBrowsers).toEqual([{ browserId: "test-browser" }]))
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
 })
 
-function startTuiServer(options: { onPersistModel?: (body: unknown) => void } = {}): { url: string } {
+function startTuiServer(
+  options: {
+    onPersistModel?: (body: unknown) => void
+    onPersistAgent?: (body: unknown) => void
+    onPersistBrowser?: (body: unknown) => void
+  } = {},
+): { url: string } {
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -73,15 +108,27 @@ function startTuiServer(options: { onPersistModel?: (body: unknown) => void } = 
       }
       if (url.pathname === "/plugins" && request.method === "GET") {
         return Response.json({
-          agents: [],
+          agents: [{ id: "test-agent", name: "Test Agent", description: "Agent used by TUI tests." }],
           models: [{ id: "test-model", name: "Test Model", provider: "test", modelName: "test-runtime-model" }],
-          environments: [],
+          environments: [{ id: "test-browser", name: "Test Browser" }],
         })
       }
       if (url.pathname === "/config/model" && request.method === "PATCH") {
         return request.json().then((body) => {
           options.onPersistModel?.(body)
           return Response.json({ modelId: "test-model", modelName: "test-runtime-model" })
+        })
+      }
+      if (url.pathname === "/config/agent" && request.method === "PATCH") {
+        return request.json().then((body) => {
+          options.onPersistAgent?.(body)
+          return Response.json({ agentId: "test-agent" })
+        })
+      }
+      if (url.pathname === "/config/browser" && request.method === "PATCH") {
+        return request.json().then((body) => {
+          options.onPersistBrowser?.(body)
+          return Response.json({ browserId: "test-browser" })
         })
       }
       if (url.pathname === "/events" && request.method === "GET") {

@@ -75,10 +75,10 @@ export function App(props: AppProps) {
   onCleanup(() => clearInterval(sessionSpinner))
 
   onMount(async () => {
+    await loadPlugins()
     const session = await resolveStartupSession()
     setState((current) => activateSessionSummary(current, session))
     await refreshSessions()
-    await loadPlugins()
 
     const stream = createEventStream(props.serverUrl, (event) => {
       setState((current) => reduceTuiEvent(current, { type: "run.event", event }))
@@ -97,7 +97,7 @@ export function App(props: AppProps) {
       if (latest) return client.getSession(latest.id)
     }
 
-    const session = await client.createSession(props.projectPath, state().selectedEnvironmentId)
+    const session = await client.createSession(props.projectPath, state().selectedEnvironmentId || undefined)
     return session.session
   }
 
@@ -115,6 +115,9 @@ export function App(props: AppProps) {
           agents: plugins.agents,
           models: plugins.models,
           environments: plugins.environments,
+          defaultAgentId: plugins.defaults?.agentId,
+          defaultModelId: plugins.defaults?.modelId,
+          defaultEnvironmentId: plugins.defaults?.environmentId,
         }),
       )
     } catch (error) {
@@ -177,7 +180,7 @@ export function App(props: AppProps) {
   })
 
   async function createNewSession() {
-    const session = await client.createSession(props.projectPath, state().selectedEnvironmentId)
+    const session = await client.createSession(props.projectPath, state().selectedEnvironmentId || undefined)
     setState((current) => activateSessionSummary(current, session.session))
     await refreshSessions()
   }
@@ -486,15 +489,7 @@ export function App(props: AppProps) {
         return
       }
 
-      setState((current) =>
-        reduceTuiEvent(
-          reduceTuiEvent(current, { type: "environment.selected", environmentId }),
-          {
-            type: "conversation.append",
-            message: { role: "system", content: `Browser set to ${environmentId}` },
-          },
-        ),
-      )
+      await persistAndSelectBrowser(environmentId)
       return
     }
     if (command.kind === "agent") {
@@ -516,15 +511,7 @@ export function App(props: AppProps) {
         return
       }
 
-      setState((current) =>
-        reduceTuiEvent(
-          reduceTuiEvent(current, { type: "agent.selected", agentId }),
-          {
-            type: "conversation.append",
-            message: { role: "system", content: `Agent set to ${agentId}` },
-          },
-        ),
-      )
+      await persistAndSelectAgent(agentId)
       return
     }
     if (command.kind === "unknown") {
@@ -549,9 +536,9 @@ export function App(props: AppProps) {
     )
     setPrompt("")
     await client.submitRun(activeSessionId, command.value, {
-      agentId: state().selectedAgentId,
+      agentId: state().selectedAgentId || undefined,
       modelId: state().selectedModelId,
-      environmentId: state().selectedEnvironmentId,
+      environmentId: state().selectedEnvironmentId || undefined,
     })
   }
 
@@ -567,11 +554,11 @@ export function App(props: AppProps) {
     const kind = state().runtimeSelectorKind
     closeRuntimeSelector()
     if (kind === "agent") {
-      selectAgent(option.id)
+      await persistAndSelectAgent(option.id)
       return
     }
     if (kind === "browser") {
-      selectBrowser(option.id)
+      await persistAndSelectBrowser(option.id)
       return
     }
     await persistAndSelectModel(option.id)
@@ -601,7 +588,19 @@ export function App(props: AppProps) {
     )
   }
 
-  function selectAgent(agentId: string) {
+  async function persistAndSelectAgent(agentId: string) {
+    try {
+      await client.selectAgent(agentId)
+    } catch (error) {
+      setState((current) =>
+        reduceTuiEvent(current, {
+          type: "conversation.append",
+          message: { role: "system", content: `Failed to save agent selection: ${formatError(error)}` },
+        }),
+      )
+      return
+    }
+
     setState((current) =>
       reduceTuiEvent(
         reduceTuiEvent(current, { type: "agent.selected", agentId }),
@@ -613,7 +612,19 @@ export function App(props: AppProps) {
     )
   }
 
-  function selectBrowser(environmentId: string) {
+  async function persistAndSelectBrowser(environmentId: string) {
+    try {
+      await client.selectBrowser(environmentId)
+    } catch (error) {
+      setState((current) =>
+        reduceTuiEvent(current, {
+          type: "conversation.append",
+          message: { role: "system", content: `Failed to save browser selection: ${formatError(error)}` },
+        }),
+      )
+      return
+    }
+
     setState((current) =>
       reduceTuiEvent(
         reduceTuiEvent(current, { type: "environment.selected", environmentId }),

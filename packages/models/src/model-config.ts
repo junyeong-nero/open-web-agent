@@ -8,6 +8,8 @@ import { resolveCodexAuthPath } from "./codex-auth"
 export interface ModelConfig {
   defaultModel: string
   defaultModelProvider: string | null
+  defaultAgentId: string | null
+  defaultBrowserId: string | null
   reasoningEffort: string
   contextWindowTokens: number
   openaiApiKey: string | null
@@ -42,6 +44,14 @@ export interface ModelSelectionConfig {
   modelName?: string | null
 }
 
+export interface AgentSelectionConfig {
+  agentId: string
+}
+
+export interface BrowserSelectionConfig {
+  browserId: string
+}
+
 export type ModelProvider = "openai" | "openrouter" | "gemini" | "claude"
 
 export const defaultOpenAIModel = "gpt-4.1-mini"
@@ -63,6 +73,8 @@ export function readModelConfig(env: NodeJS.ProcessEnv = process.env, options: R
   return {
     defaultModel: env.OPEN_WEB_AGENT_MODEL || fileConfig.defaultModel || defaultModel,
     defaultModelProvider: env.OPEN_WEB_AGENT_MODEL_PROVIDER || fileConfig.defaultModelProvider || null,
+    defaultAgentId: env.OPEN_WEB_AGENT_AGENT || fileConfig.defaultAgentId || null,
+    defaultBrowserId: env.OPEN_WEB_AGENT_BROWSER || fileConfig.defaultBrowserId || null,
     reasoningEffort: env.OPEN_WEB_AGENT_REASONING_EFFORT || fileConfig.reasoningEffort || defaultReasoningEffort,
     contextWindowTokens: readContextWindowTokens(env.OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS) ?? fileConfig.contextWindowTokens ?? defaultContextWindowTokens,
     openaiApiKey: env.OPENAI_API_KEY || fileConfig.openaiApiKey || null,
@@ -97,6 +109,24 @@ export async function writeModelSelectionConfig(
   await writeFile(configPath, stringify(next), "utf8")
 }
 
+export async function writeAgentSelectionConfig(
+  selection: AgentSelectionConfig,
+  options: WriteModelSelectionConfigOptions = {},
+): Promise<void> {
+  const configPath = options.configPath ?? resolveModelConfigPath()
+  const parsed = await readRawConfigMapping(configPath)
+  await writeConfigMapping(configPath, { ...parsed, agent: selection.agentId })
+}
+
+export async function writeBrowserSelectionConfig(
+  selection: BrowserSelectionConfig,
+  options: WriteModelSelectionConfigOptions = {},
+): Promise<void> {
+  const configPath = options.configPath ?? resolveModelConfigPath()
+  const parsed = await readRawConfigMapping(configPath)
+  await writeConfigMapping(configPath, { ...parsed, browser: selection.browserId })
+}
+
 function readConfigFile(configPath: string): Partial<ModelConfig> {
   let raw: string
   try {
@@ -113,6 +143,8 @@ function readConfigFile(configPath: string): Partial<ModelConfig> {
   return {
     defaultModel: readOptionalString(parsed, configPath, "default_model", "defaultModel", "model"),
     defaultModelProvider: readOptionalString(parsed, configPath, "model_provider", "modelProvider"),
+    defaultAgentId: readOptionalString(parsed, configPath, "agent", "agent_id", "default_agent", "defaultAgentId"),
+    defaultBrowserId: readOptionalString(parsed, configPath, "browser", "browser_id", "environment_id", "default_browser", "defaultBrowserId"),
     reasoningEffort: readOptionalString(parsed, configPath, "reasoning_effort", "reasoningEffort"),
     contextWindowTokens: readOptionalPositiveInteger(parsed, configPath, "context_window_tokens", "contextWindowTokens"),
     openaiApiKey: readOptionalString(parsed, configPath, "openai_api_key", "openaiApiKey"),
@@ -137,6 +169,11 @@ async function readRawConfigMapping(configPath: string): Promise<Record<string, 
   if (parsed == null) return {}
   if (!isRecord(parsed)) throw new Error(`Invalid Open Web Agent config at ${configPath}: expected a YAML mapping`)
   return parsed
+}
+
+async function writeConfigMapping(configPath: string, mapping: Record<string, unknown>): Promise<void> {
+  await mkdir(dirname(configPath), { recursive: true })
+  await writeFile(configPath, stringify(mapping), "utf8")
 }
 
 function readParameters(record: Record<string, unknown>, configPath: string): ModelParameters | undefined {

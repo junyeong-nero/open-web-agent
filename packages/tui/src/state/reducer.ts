@@ -20,7 +20,15 @@ export type TuiEvent =
   | { type: "session.updated"; session: SessionSummary }
   | { type: "session.deleted"; sessionId: string }
   | { type: "sessions.loaded"; sessions: SessionSummary[] }
-  | { type: "plugins.loaded"; agents: AgentSummary[]; models: ModelSummary[]; environments: EnvironmentSummary[] }
+  | {
+      type: "plugins.loaded"
+      agents: AgentSummary[]
+      models: ModelSummary[]
+      environments: EnvironmentSummary[]
+      defaultAgentId?: string | null
+      defaultModelId?: string | null
+      defaultEnvironmentId?: string | null
+    }
   | { type: "agent.selected"; agentId: string }
   | { type: "model.selected"; modelId: string }
   | { type: "environment.selected"; environmentId: string }
@@ -124,16 +132,21 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
     return replacement ? activateSession(next, replacement) : { ...next, activeSessionId: null, ...emptySessionView() }
   }
   if (event.type === "plugins.loaded") {
-    const selectedAgentId = event.agents.some((agent) => agent.id === state.selectedAgentId)
-      ? state.selectedAgentId
-      : event.agents[0]?.id ?? state.selectedAgentId
+    const selectedAgentId =
+      selectConfiguredId(event.defaultAgentId, event.agents) ??
+      (event.agents.some((agent) => agent.id === state.selectedAgentId)
+        ? state.selectedAgentId
+        : event.agents[0]?.id ?? state.selectedAgentId)
     const selectedModelId =
-      state.selectedModelId && event.models.some((model) => model.id === state.selectedModelId)
+      selectConfiguredId(event.defaultModelId, event.models) ??
+      (state.selectedModelId && event.models.some((model) => model.id === state.selectedModelId)
         ? state.selectedModelId
-        : event.models[0]?.id ?? null
-    const selectedEnvironmentId = event.environments.some((environment) => environment.id === state.selectedEnvironmentId)
-      ? state.selectedEnvironmentId
-      : event.environments[0]?.id ?? state.selectedEnvironmentId
+        : event.models[0]?.id ?? null)
+    const selectedEnvironmentId =
+      selectConfiguredId(event.defaultEnvironmentId, event.environments) ??
+      (event.environments.some((environment) => environment.id === state.selectedEnvironmentId)
+        ? state.selectedEnvironmentId
+        : event.environments[0]?.id ?? state.selectedEnvironmentId)
     return {
       ...state,
       availableAgents: event.agents,
@@ -170,6 +183,11 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
   }
 
   return reduceRunEvent(state, event.event)
+}
+
+function selectConfiguredId<T extends { id: string }>(configuredId: string | null | undefined, items: T[]): string | null {
+  if (!configuredId) return null
+  return items.some((item) => item.id === configuredId) ? configuredId : null
 }
 
 function reduceRunEvent(state: TuiState, runEvent: RunEvent): TuiState {
