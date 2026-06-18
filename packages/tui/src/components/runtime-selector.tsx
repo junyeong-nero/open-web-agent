@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { For, createMemo, createSignal } from "solid-js"
-import type { InputRenderable, KeyEvent } from "@opentui/core"
+import type { InputRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/core"
 import type { AgentSummary, EnvironmentSummary, ModelSummary } from "../state/types"
 import type { TuiTheme } from "../theme/themes"
 
@@ -41,6 +41,7 @@ export interface RuntimeSelectorProps {
 
 export function RuntimeSelector(props: RuntimeSelectorProps) {
   const attachedSearchInputs = new WeakSet<InputRenderable>()
+  let optionsScroll: ScrollBoxRenderable | undefined
   const [query, setQuery] = createSignal("")
   const [highlightIndex, setHighlightIndex] = createSignal(0)
   const options = createMemo(() => props.sections.flatMap((section) => section.options))
@@ -52,11 +53,34 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
     setQuery(value)
     props.onQueryChange(value)
     setHighlightIndex(0)
+    optionsScroll?.scrollTo(0)
   }
   const moveHighlight = (delta: number) => {
     const count = options().length
     if (count === 0) return
-    setHighlightIndex((index) => (index + delta + count) % count)
+    let nextIndex = 0
+    setHighlightIndex((index) => {
+      nextIndex = (index + delta + count) % count
+      return nextIndex
+    })
+    scrollOptionIntoView(nextIndex)
+  }
+
+  const scrollOptionIntoView = (optionIndex: number) => {
+    if (!optionsScroll) return
+
+    const rowIndex = rows().findIndex((row) => row.kind === "option" && row.optionIndex === optionIndex)
+    if (rowIndex < 0) return
+
+    const viewportHeight = Math.max(1, optionsScroll.viewport.height)
+    const scrollTop = optionsScroll.scrollTop
+    if (rowIndex < scrollTop) {
+      optionsScroll.scrollTo(rowIndex)
+      return
+    }
+    if (rowIndex >= scrollTop + viewportHeight) {
+      optionsScroll.scrollTo(rowIndex - viewportHeight + 1)
+    }
   }
 
   const selectHighlighted = () => {
@@ -143,7 +167,18 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
           placeholderColor={props.theme.textMuted}
           onKeyDown={handleKeyDown}
         />
-        <box flexDirection="column" paddingTop={1} paddingBottom={1}>
+        <scrollbox
+          id="runtime-selector-options"
+          ref={(node) => {
+            optionsScroll = node as ScrollBoxRenderable
+          }}
+          height={13}
+          backgroundColor={props.theme.panel}
+          scrollY={true}
+          scrollX={false}
+          viewportCulling={true}
+          contentOptions={{ flexDirection: "column", paddingTop: 1, paddingBottom: 1 }}
+        >
           <For each={rows()}>
             {(row) => {
               if (row.kind === "empty") {
@@ -175,6 +210,7 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
               }
               return (
                 <box
+                  id={runtimeSelectorOptionRowId(row.optionIndex ?? 0)}
                   flexDirection="row"
                   justifyContent="space-between"
                   paddingX={1}
@@ -190,7 +226,7 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
               )
             }}
           </For>
-        </box>
+        </scrollbox>
         <box flexDirection="row" gap={2} paddingTop={1}>
           <text fg={props.theme.textMuted} wrapMode="none">
             Select enter
@@ -202,6 +238,10 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
       </box>
     </box>
   )
+}
+
+function runtimeSelectorOptionRowId(optionIndex: number): string {
+  return `runtime-selector-option-${optionIndex}`
 }
 
 export function buildModelSelectorSections(models: ModelSummary[], selectedModelId: string | null, query: string): RuntimeSelectorSection[] {
