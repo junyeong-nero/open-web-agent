@@ -1,6 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { For, createMemo, createSignal } from "solid-js"
 import type { InputRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/core"
+import { useKeyboard } from "@opentui/solid"
 import type { AgentSummary, EnvironmentSummary, ModelSummary } from "../state/types"
 import type { TuiTheme } from "../theme/themes"
 
@@ -93,18 +94,25 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
     if (option) props.onToggleFavorite?.(option)
   }
 
+  const cancel = (event: KeyEvent) => {
+    if (event.name === "escape" || event.name === "esc" || event.sequence === "\u001b") {
+      event.preventDefault()
+      event.stopPropagation()
+      props.onCancel()
+      return true
+    }
+    return false
+  }
+
+  useKeyboard(cancel)
+
   const handleKeyDown = (event: KeyEvent) => {
     if (isControlKey(event, "f", "\u0006")) {
       event.preventDefault()
       toggleHighlightedFavorite()
       return
     }
-
-    if (event.name === "escape") {
-      event.preventDefault()
-      props.onCancel()
-      return
-    }
+    if (cancel(event)) return
 
     if (event.name === "return" || event.name === "enter" || event.name === "linefeed") {
       event.preventDefault()
