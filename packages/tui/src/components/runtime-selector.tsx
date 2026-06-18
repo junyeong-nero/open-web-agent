@@ -1,48 +1,50 @@
 /** @jsxImportSource @opentui/solid */
-import { createMemo, createSignal, For } from "solid-js"
+import { For, createMemo, createSignal } from "solid-js"
 import type { InputRenderable, KeyEvent } from "@opentui/core"
-import type { ModelSummary } from "../state/types"
+import type { AgentSummary, EnvironmentSummary, ModelSummary } from "../state/types"
 import type { TuiTheme } from "../theme/themes"
 
-export interface ModelSelectorOption {
+export interface RuntimeSelectorOption {
   id: string
   label: string
   detail: string
   selected: boolean
 }
 
-export interface ModelSelectorSection {
+export interface RuntimeSelectorSection {
   title: string
-  options: ModelSelectorOption[]
+  options: RuntimeSelectorOption[]
 }
 
-interface ModelSelectorRow {
+interface RuntimeSelectorRow {
   kind: "section" | "option" | "empty"
   title?: string
-  option?: ModelSelectorOption
+  option?: RuntimeSelectorOption
   optionIndex?: number
 }
 
-export interface ModelSelectorProps {
-  models: ModelSummary[]
-  selectedModelId: string | null
+export interface RuntimeSelectorProps {
+  title: string
+  emptyMessage: string
+  sections: RuntimeSelectorSection[]
   theme: TuiTheme
-  onSelect(modelId: string): void
+  onQueryChange(query: string): void
+  onSelect(option: RuntimeSelectorOption): void
   onCancel(): void
 }
 
-export function ModelSelector(props: ModelSelectorProps) {
+export function RuntimeSelector(props: RuntimeSelectorProps) {
   const attachedSearchInputs = new WeakSet<InputRenderable>()
   const [query, setQuery] = createSignal("")
   const [highlightIndex, setHighlightIndex] = createSignal(0)
-  const sections = createMemo(() => buildModelSelectorSections(props.models, props.selectedModelId, query()))
-  const options = createMemo(() => sections().flatMap((section) => section.options))
-  const rows = createMemo(() => buildModelSelectorRows(sections()))
+  const options = createMemo(() => props.sections.flatMap((section) => section.options))
+  const rows = createMemo(() => buildRuntimeSelectorRows(props.sections))
   const boundedHighlightIndex = () => clamp(highlightIndex(), 0, Math.max(0, options().length - 1))
   const highlightedOption = () => options()[boundedHighlightIndex()]
 
   const updateQuery = (value: string) => {
     setQuery(value)
+    props.onQueryChange(value)
     setHighlightIndex(0)
   }
   const moveHighlight = (delta: number) => {
@@ -53,7 +55,7 @@ export function ModelSelector(props: ModelSelectorProps) {
 
   const selectHighlighted = () => {
     const option = highlightedOption()
-    if (option) props.onSelect(option.id)
+    if (option) props.onSelect(option)
   }
 
   const handleKeyDown = (event: KeyEvent) => {
@@ -93,7 +95,7 @@ export function ModelSelector(props: ModelSelectorProps) {
 
   return (
     <box
-      id="model-selector-overlay"
+      id="runtime-selector-overlay"
       position="absolute"
       top={0}
       left={0}
@@ -105,7 +107,7 @@ export function ModelSelector(props: ModelSelectorProps) {
       backgroundColor={props.theme.surface}
     >
       <box
-        id="model-selector"
+        id="runtime-selector"
         flexDirection="column"
         width={64}
         minHeight={15}
@@ -116,14 +118,14 @@ export function ModelSelector(props: ModelSelectorProps) {
       >
         <box flexDirection="row" justifyContent="space-between" paddingBottom={1}>
           <text fg={props.theme.text} wrapMode="none">
-            Select model
+            {props.title}
           </text>
           <text fg={props.theme.textMuted} wrapMode="none">
             esc
           </text>
         </box>
         <input
-          id="model-selector-search"
+          id="runtime-selector-search"
           ref={(node) => attachSearchInput(node as InputRenderable)}
           focused
           value={query()}
@@ -142,7 +144,7 @@ export function ModelSelector(props: ModelSelectorProps) {
                 return (
                   <box paddingY={1}>
                     <text fg={props.theme.textMuted} wrapMode="none">
-                      No matching models
+                      {props.emptyMessage}
                     </text>
                   </box>
                 )
@@ -187,7 +189,7 @@ export function ModelSelector(props: ModelSelectorProps) {
   )
 }
 
-export function buildModelSelectorSections(models: ModelSummary[], selectedModelId: string | null, query: string): ModelSelectorSection[] {
+export function buildModelSelectorSections(models: ModelSummary[], selectedModelId: string | null, query: string): RuntimeSelectorSection[] {
   const normalizedQuery = query.trim().toLowerCase()
   const selectedModel = models.find((model) => model.id === selectedModelId)
   const matches = (model: ModelSummary) => {
@@ -197,12 +199,12 @@ export function buildModelSelectorSections(models: ModelSummary[], selectedModel
       .some((value) => value.toLowerCase().includes(normalizedQuery))
   }
 
-  const sections: ModelSelectorSection[] = []
+  const sections: RuntimeSelectorSection[] = []
   if (selectedModel && normalizedQuery.length === 0) {
     sections.push({ title: "Favorites", options: [toModelSelectorOption(selectedModel, true)] })
   }
 
-  const grouped = new Map<string, ModelSelectorOption[]>()
+  const grouped = new Map<string, RuntimeSelectorOption[]>()
   for (const model of models) {
     if (model.id === selectedModelId && normalizedQuery.length === 0) continue
     if (!matches(model)) continue
@@ -220,11 +222,79 @@ export function buildModelSelectorSections(models: ModelSummary[], selectedModel
   return sections.filter((section) => section.options.length > 0)
 }
 
-function buildModelSelectorRows(sections: ModelSelectorSection[]): ModelSelectorRow[] {
+export function buildAgentSelectorSections(agents: AgentSummary[], selectedAgentId: string, query: string): RuntimeSelectorSection[] {
+  return buildSimpleSelectorSections({
+    items: agents,
+    selectedId: selectedAgentId,
+    groupTitle: "Agents",
+    query,
+    toOption: (agent, selected) => ({
+      id: agent.id,
+      label: displayValue(agent.name, agent.id),
+      detail: displayValue(agent.description, agent.id),
+      selected,
+    }),
+    searchable: (agent) => [agent.id, agent.name, agent.description],
+  })
+}
+
+export function buildBrowserSelectorSections(
+  environments: EnvironmentSummary[],
+  selectedEnvironmentId: string,
+  query: string,
+): RuntimeSelectorSection[] {
+  return buildSimpleSelectorSections({
+    items: environments,
+    selectedId: selectedEnvironmentId,
+    groupTitle: "Browsers",
+    query,
+    toOption: (environment, selected) => ({
+      id: environment.id,
+      label: displayValue(environment.name, environment.id),
+      detail: environment.id,
+      selected,
+    }),
+    searchable: (environment) => [environment.id, environment.name],
+  })
+}
+
+function buildSimpleSelectorSections<T extends { id: string }>(options: {
+  items: T[]
+  selectedId: string
+  groupTitle: string
+  query: string
+  toOption(item: T, selected: boolean): RuntimeSelectorOption
+  searchable(item: T): Array<string | null | undefined>
+}): RuntimeSelectorSection[] {
+  const normalizedQuery = options.query.trim().toLowerCase()
+  const selectedItem = options.items.find((item) => item.id === options.selectedId)
+  const matches = (item: T) => {
+    if (normalizedQuery.length === 0) return true
+    return options
+      .searchable(item)
+      .filter((value): value is string => typeof value === "string")
+      .some((value) => value.toLowerCase().includes(normalizedQuery))
+  }
+
+  const sections: RuntimeSelectorSection[] = []
+  if (selectedItem && normalizedQuery.length === 0) {
+    sections.push({ title: "Favorites", options: [options.toOption(selectedItem, true)] })
+  }
+
+  const itemOptions = options.items
+    .filter((item) => !(item.id === options.selectedId && normalizedQuery.length === 0))
+    .filter(matches)
+    .map((item) => options.toOption(item, item.id === options.selectedId))
+
+  if (itemOptions.length > 0) sections.push({ title: options.groupTitle, options: itemOptions })
+  return sections
+}
+
+function buildRuntimeSelectorRows(sections: RuntimeSelectorSection[]): RuntimeSelectorRow[] {
   if (sections.length === 0) return [{ kind: "empty" }]
 
   let optionIndex = 0
-  const rows: ModelSelectorRow[] = []
+  const rows: RuntimeSelectorRow[] = []
   for (const section of sections) {
     rows.push({ kind: "section", title: section.title })
     for (const option of section.options) {
@@ -235,7 +305,7 @@ function buildModelSelectorRows(sections: ModelSelectorSection[]): ModelSelector
   return rows
 }
 
-function toModelSelectorOption(model: ModelSummary, selected: boolean): ModelSelectorOption {
+function toModelSelectorOption(model: ModelSummary, selected: boolean): RuntimeSelectorOption {
   return {
     id: model.id,
     label: model.modelName ?? model.name ?? model.id,
@@ -260,6 +330,11 @@ const providerDisplayNames: Record<string, string> = {
   gemini: "Gemini",
   openai: "OpenAI",
   openrouter: "OpenRouter",
+}
+
+function displayValue(value: string | null | undefined, fallback: string): string {
+  const trimmed = value?.trim()
+  return trimmed && trimmed.length > 0 ? trimmed : fallback
 }
 
 function clamp(value: number, min: number, max: number): number {

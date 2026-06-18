@@ -51,6 +51,8 @@ export interface EnvironmentSummary {
 
 export type RunStatus = "idle" | "running" | "completed" | "failed" | "cancelled"
 
+export type RuntimeSelectorKind = "agent" | "model" | "browser"
+
 export interface SessionSummary {
   id: string
   projectPath: string
@@ -85,6 +87,8 @@ export interface TuiState extends SessionViewState {
   selectedModelId: string | null
   selectedEnvironmentId: string
   selectedThemeId: string
+  runtimeSelectorKind: RuntimeSelectorKind | null
+  runtimeSelectorQuery: string
   availableAgents: AgentSummary[]
   availableModels: ModelSummary[]
   availableEnvironments: EnvironmentSummary[]

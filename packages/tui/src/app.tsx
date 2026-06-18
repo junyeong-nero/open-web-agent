@@ -1,9 +1,15 @@
 /** @jsxImportSource @opentui/solid */
-import { createSignal, onCleanup, onMount } from "solid-js"
+import { createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useSelectionHandler } from "@opentui/solid"
 import { PromptInput } from "./components/prompt-input"
-import { ModelSelector } from "./components/model-selector"
+import {
+  RuntimeSelector,
+  buildAgentSelectorSections,
+  buildBrowserSelectorSections,
+  buildModelSelectorSections,
+  type RuntimeSelectorOption,
+} from "./components/runtime-selector"
 import { SessionHeader } from "./components/session-header"
 import { filterSessions, SessionPalette, sessionDisplayName, type SessionPaletteMode } from "./components/session-palette"
 import { TranscriptPanel } from "./components/transcript-panel"
@@ -13,7 +19,7 @@ import { copySelectionToClipboard, pasteSystemClipboardText } from "./clipboard/
 import { formatSlashCommandHelp, listSlashCommandSuggestions, parseSlashCommand } from "./commands/slash-commands"
 import { mapKeyEvent } from "./keymap/keybindings"
 import { createInitialState, reduceTuiEvent } from "./state/reducer"
-import type { AgentSummary, EnvironmentSummary, ModelSummary, SessionSummary, TuiState } from "./state/types"
+import type { AgentSummary, EnvironmentSummary, ModelSummary, RuntimeSelectorKind, SessionSummary, TuiState } from "./state/types"
 import { getTheme, listThemes, type TuiTheme } from "./theme/themes"
 import { selectedAgentSummary, selectedModelSummary } from "./components/session-shell-format"
 
@@ -36,10 +42,34 @@ export function App(props: AppProps) {
   const [sessionPaletteMode, setSessionPaletteMode] = createSignal<SessionPaletteMode>("search")
   const [sessionRenameValue, setSessionRenameValue] = createSignal("")
   const [sessionLoadingPhase, setSessionLoadingPhase] = createSignal(0)
-  const [modelSelectorOpen, setModelSelectorOpen] = createSignal(false)
   const [activePane, setActivePane] = createSignal<"prompt" | "transcript">("prompt")
   let transcriptScroll: ScrollBoxRenderable | undefined
   const currentTheme = (): TuiTheme => getTheme(state().selectedThemeId)
+  const runtimeSelectorOpen = () => state().runtimeSelectorKind !== null
+  const runtimeSelectorConfig = createMemo(() => {
+    const current = state()
+    const query = current.runtimeSelectorQuery
+    const kind = current.runtimeSelectorKind
+    if (kind === "agent") {
+      return {
+        title: "Select agent",
+        emptyMessage: "No matching agents",
+        sections: buildAgentSelectorSections(current.availableAgents, current.selectedAgentId, query),
+      }
+    }
+    if (kind === "browser") {
+      return {
+        title: "Select browser",
+        emptyMessage: "No matching browsers",
+        sections: buildBrowserSelectorSections(current.availableEnvironments, current.selectedEnvironmentId, query),
+      }
+    }
+    return {
+      title: "Select model",
+      emptyMessage: "No matching models",
+      sections: buildModelSelectorSections(current.availableModels, current.selectedModelId, query),
+    }
+  })
   const sessionSpinner = setInterval(() => setSessionLoadingPhase((phase) => (phase + 1) % 4), 140)
 
   onCleanup(() => clearInterval(sessionSpinner))
@@ -336,8 +366,8 @@ export function App(props: AppProps) {
     props.onExit()
   }
 
-  async function submitPrompt() {
-    const value = prompt().trim()
+  async function submitPrompt(submittedValue?: string) {
+    const value = (submittedValue ?? prompt()).trim()
     if (value.length === 0) return
 
     const command = parseSlashCommand(value)
@@ -418,7 +448,7 @@ export function App(props: AppProps) {
     if (command.kind === "model") {
       setPrompt("")
       if (!command.modelId) {
-        setModelSelectorOpen(true)
+        openRuntimeSelector("model")
         return
       }
 
@@ -448,12 +478,7 @@ export function App(props: AppProps) {
     if (command.kind === "browser") {
       setPrompt("")
       if (!command.environmentId) {
-        setState((current) =>
-          reduceTuiEvent(current, {
-            type: "conversation.append",
-            message: { role: "system", content: formatBrowserStatus(current.selectedEnvironmentId, current.availableEnvironments) },
-          }),
-        )
+        openRuntimeSelector("browser")
         return
       }
 
@@ -483,12 +508,7 @@ export function App(props: AppProps) {
     if (command.kind === "agent") {
       setPrompt("")
       if (!command.agentId) {
-        setState((current) =>
-          reduceTuiEvent(current, {
-            type: "conversation.append",
-            message: { role: "system", content: formatAgentStatus(current.selectedAgentId, current.availableAgents) },
-          }),
-        )
+        openRuntimeSelector("agent")
         return
       }
 
@@ -543,8 +563,29 @@ export function App(props: AppProps) {
     })
   }
 
-  function selectModelFromSelector(modelId: string) {
-    setModelSelectorOpen(false)
+  function openRuntimeSelector(kind: RuntimeSelectorKind) {
+    setState((current) => ({ ...current, runtimeSelectorKind: kind, runtimeSelectorQuery: "" }))
+  }
+
+  function closeRuntimeSelector() {
+    setState((current) => ({ ...current, runtimeSelectorKind: null, runtimeSelectorQuery: "" }))
+  }
+
+  function selectRuntimeOption(option: RuntimeSelectorOption) {
+    const kind = state().runtimeSelectorKind
+    closeRuntimeSelector()
+    if (kind === "agent") {
+      selectAgent(option.id)
+      return
+    }
+    if (kind === "browser") {
+      selectBrowser(option.id)
+      return
+    }
+    selectModel(option.id)
+  }
+
+  function selectModel(modelId: string) {
     setState((current) =>
       reduceTuiEvent(
         reduceTuiEvent(current, { type: "model.selected", modelId }),
@@ -556,8 +597,41 @@ export function App(props: AppProps) {
     )
   }
 
+  function selectAgent(agentId: string) {
+    setState((current) =>
+      reduceTuiEvent(
+        reduceTuiEvent(current, { type: "agent.selected", agentId }),
+        {
+          type: "conversation.append",
+          message: { role: "system", content: `Agent set to ${agentId}` },
+        },
+      ),
+    )
+  }
+
+  function selectBrowser(environmentId: string) {
+    setState((current) =>
+      reduceTuiEvent(
+        reduceTuiEvent(current, { type: "environment.selected", environmentId }),
+        {
+          type: "conversation.append",
+          message: { role: "system", content: `Browser set to ${environmentId}` },
+        },
+      ),
+    )
+  }
+
   return (
-    <box flexDirection="column" width="100%" height="100%" paddingX={2} paddingY={1} rowGap={1} backgroundColor={currentTheme().surface}>
+    <box
+      position="relative"
+      flexDirection="column"
+      width="100%"
+      height="100%"
+      paddingX={2}
+      paddingY={1}
+      rowGap={1}
+      backgroundColor={currentTheme().surface}
+    >
       <SessionHeader state={state()} theme={currentTheme()} />
       {sessionPaletteOpen() ? (
         <SessionPalette
@@ -577,7 +651,7 @@ export function App(props: AppProps) {
         scrollRef={(node) => {
           transcriptScroll = node
         }}
-        focused={!sessionPaletteOpen() && !modelSelectorOpen() && activePane() === "transcript"}
+        focused={!sessionPaletteOpen() && !runtimeSelectorOpen() && activePane() === "transcript"}
         onFocusRequest={() => setActivePane("transcript")}
       />
       <PromptInput
@@ -587,18 +661,20 @@ export function App(props: AppProps) {
         modelActivity={state().modelActivity}
         runStatus={state().runStatus}
         theme={currentTheme()}
-        focused={!sessionPaletteOpen() && !modelSelectorOpen() && activePane() === "prompt"}
+        focused={!sessionPaletteOpen() && !runtimeSelectorOpen() && activePane() === "prompt"}
         onChange={setPrompt}
         onSubmit={submitPrompt}
         onFocusRequest={() => setActivePane("prompt")}
       />
-      {modelSelectorOpen() ? (
-        <ModelSelector
-          models={state().availableModels}
-          selectedModelId={state().selectedModelId}
+      {runtimeSelectorOpen() ? (
+        <RuntimeSelector
+          title={runtimeSelectorConfig().title}
+          emptyMessage={runtimeSelectorConfig().emptyMessage}
+          sections={runtimeSelectorConfig().sections}
           theme={currentTheme()}
-          onSelect={selectModelFromSelector}
-          onCancel={() => setModelSelectorOpen(false)}
+          onQueryChange={(query) => setState((current) => ({ ...current, runtimeSelectorQuery: query }))}
+          onSelect={selectRuntimeOption}
+          onCancel={closeRuntimeSelector}
         />
       ) : null}
     </box>
@@ -613,10 +689,6 @@ function activateSessionSummary(state: TuiState, session: SessionSummary): TuiSt
   return session.environmentId ? reduceTuiEvent(selected, { type: "environment.selected", environmentId: session.environmentId }) : selected
 }
 
-function formatAgentStatus(selectedAgentId: string, agents: AgentSummary[]): string {
-  return `Current agent: ${selectedAgentId}. ${formatAvailableAgents(agents)}`
-}
-
 function formatAvailableAgents(agents: AgentSummary[]): string {
   if (agents.length === 0) return "Available agents: not loaded"
   return `Available agents: ${agents.map((agent) => agent.id).join(", ")}`
@@ -625,10 +697,6 @@ function formatAvailableAgents(agents: AgentSummary[]): string {
 function formatAvailableModels(models: ModelSummary[]): string {
   if (models.length === 0) return "Available models: none configured"
   return `Available models: ${models.map((model) => model.id).join(", ")}`
-}
-
-function formatBrowserStatus(selectedEnvironmentId: string, environments: EnvironmentSummary[]): string {
-  return `Current browser: ${selectedEnvironmentId}. ${formatAvailableBrowsers(environments)}`
 }
 
 function formatAvailableBrowsers(environments: EnvironmentSummary[]): string {

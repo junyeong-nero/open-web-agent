@@ -22,6 +22,8 @@ describe("reduceTuiEvent", () => {
       selectedModelId: null,
       selectedEnvironmentId: "playwright-browser",
       selectedThemeId: "opencode",
+      runtimeSelectorKind: null,
+      runtimeSelectorQuery: "",
       availableAgents: [],
       availableModels: [],
       availableEnvironments: [],

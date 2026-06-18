@@ -16,7 +16,7 @@ export interface PromptInputProps {
   theme: TuiTheme
   focused?: boolean
   onChange(value: string): void
-  onSubmit(): void
+  onSubmit(value: string): void
   onFocusRequest?(): void
 }
 
@@ -52,7 +52,7 @@ export function PromptInput(props: PromptInputProps) {
     props.onChange(value)
     textarea?.clear()
     setDraftValue("")
-    props.onSubmit()
+    props.onSubmit(value)
   }
   const handleSlashCompletion = () => {
     const suggestion = commandSuggestions()[selectedSuggestionIndex()]
