@@ -11,7 +11,7 @@ import {
   type RuntimeSelectorOption,
 } from "./components/runtime-selector"
 import { SessionHeader } from "./components/session-header"
-import { filterSessions, SessionPalette, sessionDisplayName, type SessionPaletteMode } from "./components/session-palette"
+import { filterSessions, scrollSessionIndexIntoView, SessionPalette, sessionDisplayName, type SessionPaletteMode } from "./components/session-palette"
 import { TranscriptPanel } from "./components/transcript-panel"
 import { createEventStream } from "./client/event-source"
 import { createServerClient } from "./client/server-client"
@@ -61,6 +61,7 @@ export function App(props: AppProps) {
   const [sessionRenameValue, setSessionRenameValue] = createSignal("")
   const [sessionLoadingPhase, setSessionLoadingPhase] = createSignal(0)
   const [activePane, setActivePane] = createSignal<"prompt" | "transcript">("prompt")
+  let sessionPaletteScroll: ScrollBoxRenderable | undefined
   let transcriptScroll: ScrollBoxRenderable | undefined
   const currentTheme = (): TuiTheme => getTheme(state().selectedThemeId)
   const runtimeSelectorOpen = () => state().runtimeSelectorKind !== null
@@ -316,19 +317,26 @@ export function App(props: AppProps) {
     if (key.name === "backspace" || key.sequence === "\u007f") {
       setSessionPaletteQuery((query) => query.slice(0, -1))
       setSessionPaletteIndex(0)
+      sessionPaletteScroll?.scrollTo(0)
       return
     }
     const text = printableKeyText(key)
     if (text) {
       setSessionPaletteQuery((query) => query + text)
       setSessionPaletteIndex(0)
+      sessionPaletteScroll?.scrollTo(0)
     }
   }
 
   function moveSessionSelection(delta: number) {
     const count = visibleSessions().length
     if (count === 0) return
-    setSessionPaletteIndex((index) => (index + delta + count) % count)
+    let nextIndex = 0
+    setSessionPaletteIndex((index) => {
+      nextIndex = (index + delta + count) % count
+      return nextIndex
+    })
+    scrollSessionIndexIntoView(sessionPaletteScroll, nextIndex, count)
   }
 
   async function selectPaletteSession() {
@@ -721,6 +729,9 @@ export function App(props: AppProps) {
           renameValue={sessionRenameValue()}
           loadingPhase={sessionLoadingPhase()}
           theme={currentTheme()}
+          scrollRef={(node) => {
+            sessionPaletteScroll = node
+          }}
         />
       ) : null}
       <TranscriptPanel

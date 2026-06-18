@@ -1,5 +1,6 @@
 /** @jsxImportSource @opentui/solid */
-import { For } from "solid-js"
+import type { ScrollBoxRenderable } from "@opentui/core"
+import { For, createMemo } from "solid-js"
 import type { SessionSummary } from "../state/types"
 import type { TuiTheme } from "../theme/themes"
 
@@ -14,11 +15,40 @@ export interface SessionPaletteProps {
   renameValue: string
   loadingPhase: number
   theme: TuiTheme
+  scrollRef?: (node: ScrollBoxRenderable) => void
+}
+
+const maxVisibleSessionRows = 10
+
+export interface SessionPaletteScrollTarget {
+  scrollTop: number
+  viewport: { height: number }
+  scrollTo(top: number): void
+}
+
+export function scrollSessionIndexIntoView(scroll: SessionPaletteScrollTarget | undefined, index: number, count: number) {
+  if (!scroll) return
+  if (count === 0) {
+    scroll.scrollTo(0)
+    return
+  }
+
+  const rowIndex = clamp(index, 0, count - 1)
+  const viewportHeight = Math.max(1, scroll.viewport.height)
+  const scrollTop = scroll.scrollTop
+  if (rowIndex < scrollTop) {
+    scroll.scrollTo(rowIndex)
+    return
+  }
+  if (rowIndex >= scrollTop + viewportHeight) {
+    scroll.scrollTo(rowIndex - viewportHeight + 1)
+  }
 }
 
 export function SessionPalette(props: SessionPaletteProps) {
-  const visibleSessions = () => filterSessions(props.sessions, props.query)
+  const visibleSessions = createMemo(() => filterSessions(props.sessions, props.query))
   const inputLabel = () => (props.mode === "rename" ? props.renameValue : props.query)
+  const sessionListHeight = () => Math.max(1, Math.min(visibleSessions().length || 1, maxVisibleSessionRows))
 
   return (
     <box flexDirection="column" flexShrink={0} backgroundColor={props.theme.panel} paddingX={2} paddingY={1} rowGap={1}>
@@ -33,33 +63,49 @@ export function SessionPalette(props: SessionPaletteProps) {
       <text fg={props.mode === "rename" ? props.theme.warning : props.theme.textMuted} wrapMode="none">
         {props.mode === "rename" ? `Rename ${inputLabel()}` : `Search ${inputLabel()}`}
       </text>
-      <For each={visibleSessions()}>
-        {(session, index) => {
-          const selected = () => index() === props.selectedIndex
-          const active = () => session.id === props.activeSessionId
-          return (
-            <box
-              flexDirection="row"
-              gap={1}
-              paddingX={selected() ? 1 : 0}
-              backgroundColor={selected() ? props.theme.task : props.theme.panel}
-            >
-              <text fg={selected() ? props.theme.surface : session.runStatus === "running" ? props.theme.reasoning : props.theme.textMuted} wrapMode="none">
-                {sessionLeftMark(session, props.loadingPhase)}
-              </text>
-              <text fg={selected() ? props.theme.surface : active() ? props.theme.task : props.theme.text} wrapMode="none">
-                {sessionDisplayName(session)}
-              </text>
-              <text fg={selected() ? props.theme.surface : props.theme.textMuted} wrapMode="none">
-                {sessionMeta(session, active())}
-              </text>
-            </box>
-          )
+      <scrollbox
+        id="session-palette-list"
+        ref={(node) => {
+          props.scrollRef?.(node as ScrollBoxRenderable)
         }}
-      </For>
-      <text visible={visibleSessions().length === 0} fg={props.theme.textMuted} wrapMode="none">
-        No matching sessions
-      </text>
+        height={sessionListHeight()}
+        backgroundColor={props.theme.panel}
+        scrollY={true}
+        scrollX={false}
+        viewportCulling={true}
+        contentOptions={{ flexDirection: "column" }}
+      >
+        <For each={visibleSessions()}>
+          {(session, index) => {
+            const selected = () => index() === props.selectedIndex
+            const active = () => session.id === props.activeSessionId
+            return (
+              <box
+                flexDirection="row"
+                gap={1}
+                paddingX={selected() ? 1 : 0}
+                backgroundColor={selected() ? props.theme.task : props.theme.panel}
+              >
+                <text
+                  fg={selected() ? props.theme.surface : session.runStatus === "running" ? props.theme.reasoning : props.theme.textMuted}
+                  wrapMode="none"
+                >
+                  {sessionLeftMark(session, props.loadingPhase)}
+                </text>
+                <text fg={selected() ? props.theme.surface : active() ? props.theme.task : props.theme.text} wrapMode="none">
+                  {sessionDisplayName(session)}
+                </text>
+                <text fg={selected() ? props.theme.surface : props.theme.textMuted} wrapMode="none">
+                  {sessionMeta(session, active())}
+                </text>
+              </box>
+            )
+          }}
+        </For>
+        <text visible={visibleSessions().length === 0} fg={props.theme.textMuted} wrapMode="none">
+          No matching sessions
+        </text>
+      </scrollbox>
       <text fg={props.theme.textMuted} wrapMode="none">
         pin/unpin ctrl+f  delete ctrl+d  rename ctrl+n  enter open
       </text>
@@ -96,4 +142,8 @@ function sessionMeta(session: SessionSummary, active: boolean): string {
 
 function sessionSearchText(session: SessionSummary): string {
   return [session.id, session.title, session.projectPath, session.runStatus].filter(Boolean).join(" ").toLowerCase()
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(value, max))
 }
