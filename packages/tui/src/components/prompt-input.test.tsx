@@ -118,6 +118,36 @@ describe("PromptInput", () => {
     }
   })
 
+  it("submits the current textarea value", async () => {
+    const submitted: string[] = []
+    const setup = await testRender(
+      () => (
+        <PromptInput
+          value=""
+          agent={null}
+          model={null}
+          modelActivity={idleModelActivity}
+          runStatus="idle"
+          theme={getTheme("opencode")}
+          onChange={() => {}}
+          onSubmit={(value) => submitted.push(value)}
+        />
+      ),
+      { width: 80, height: 12 },
+    )
+
+    try {
+      await setup.flush()
+      await setup.mockInput.typeText("/agent")
+      setup.mockInput.pressEnter()
+      await setup.flush()
+
+      expect(submitted).toEqual(["/agent"])
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
   it("moves slash command selection with arrow keys before completing", async () => {
     const changes: string[] = []
     const setup = await testRender(
