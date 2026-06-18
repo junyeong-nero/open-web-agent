@@ -51,64 +51,85 @@ export function SessionPalette(props: SessionPaletteProps) {
   const sessionListHeight = () => Math.max(1, Math.min(visibleSessions().length || 1, maxVisibleSessionRows))
 
   return (
-    <box flexDirection="column" flexShrink={0} backgroundColor={props.theme.panel} paddingX={2} paddingY={1} rowGap={1}>
-      <box flexDirection="row" justifyContent="space-between">
-        <text fg={props.theme.text} wrapMode="none">
-          Sessions
+    <box
+      id="session-palette-overlay"
+      position="absolute"
+      top={0}
+      left={0}
+      width="100%"
+      height="100%"
+      zIndex={50}
+      alignItems="center"
+      justifyContent="center"
+      backgroundColor={props.theme.surface}
+    >
+      <box
+        id="session-palette"
+        flexDirection="column"
+        width={64}
+        paddingX={2}
+        paddingY={1}
+        rowGap={1}
+        backgroundColor={props.theme.panel}
+      >
+        <box flexDirection="row" justifyContent="space-between">
+          <text fg={props.theme.text} wrapMode="none">
+            Sessions
+          </text>
+          <text fg={props.theme.textMuted} wrapMode="none">
+            esc
+          </text>
+        </box>
+        <text fg={props.mode === "rename" ? props.theme.warning : props.theme.textMuted} wrapMode="none">
+          {props.mode === "rename" ? `Rename ${inputLabel()}` : `Search ${inputLabel()}`}
         </text>
+        <scrollbox
+          id="session-palette-list"
+          ref={(node) => {
+            props.scrollRef?.(node as ScrollBoxRenderable)
+          }}
+          height={sessionListHeight()}
+          backgroundColor={props.theme.panel}
+          scrollY={true}
+          scrollX={false}
+          viewportCulling={true}
+          contentOptions={{ flexDirection: "column" }}
+        >
+          <For each={visibleSessions()}>
+            {(session, index) => {
+              const selected = () => index() === props.selectedIndex
+              const active = () => session.id === props.activeSessionId
+              return (
+                <box
+                  flexDirection="row"
+                  gap={1}
+                  paddingX={selected() ? 1 : 0}
+                  backgroundColor={selected() ? props.theme.task : props.theme.panel}
+                >
+                  <text
+                    fg={selected() ? props.theme.surface : session.runStatus === "running" ? props.theme.reasoning : props.theme.textMuted}
+                    wrapMode="none"
+                  >
+                    {sessionLeftMark(session, props.loadingPhase)}
+                  </text>
+                  <text fg={selected() ? props.theme.surface : active() ? props.theme.task : props.theme.text} wrapMode="none">
+                    {sessionDisplayName(session)}
+                  </text>
+                  <text fg={selected() ? props.theme.surface : props.theme.textMuted} wrapMode="none">
+                    {sessionMeta(session, active())}
+                  </text>
+                </box>
+              )
+            }}
+          </For>
+          <text visible={visibleSessions().length === 0} fg={props.theme.textMuted} wrapMode="none">
+            No matching sessions
+          </text>
+        </scrollbox>
         <text fg={props.theme.textMuted} wrapMode="none">
-          esc
+          pin/unpin ctrl+f  delete ctrl+d  rename ctrl+n  enter open
         </text>
       </box>
-      <text fg={props.mode === "rename" ? props.theme.warning : props.theme.textMuted} wrapMode="none">
-        {props.mode === "rename" ? `Rename ${inputLabel()}` : `Search ${inputLabel()}`}
-      </text>
-      <scrollbox
-        id="session-palette-list"
-        ref={(node) => {
-          props.scrollRef?.(node as ScrollBoxRenderable)
-        }}
-        height={sessionListHeight()}
-        backgroundColor={props.theme.panel}
-        scrollY={true}
-        scrollX={false}
-        viewportCulling={true}
-        contentOptions={{ flexDirection: "column" }}
-      >
-        <For each={visibleSessions()}>
-          {(session, index) => {
-            const selected = () => index() === props.selectedIndex
-            const active = () => session.id === props.activeSessionId
-            return (
-              <box
-                flexDirection="row"
-                gap={1}
-                paddingX={selected() ? 1 : 0}
-                backgroundColor={selected() ? props.theme.task : props.theme.panel}
-              >
-                <text
-                  fg={selected() ? props.theme.surface : session.runStatus === "running" ? props.theme.reasoning : props.theme.textMuted}
-                  wrapMode="none"
-                >
-                  {sessionLeftMark(session, props.loadingPhase)}
-                </text>
-                <text fg={selected() ? props.theme.surface : active() ? props.theme.task : props.theme.text} wrapMode="none">
-                  {sessionDisplayName(session)}
-                </text>
-                <text fg={selected() ? props.theme.surface : props.theme.textMuted} wrapMode="none">
-                  {sessionMeta(session, active())}
-                </text>
-              </box>
-            )
-          }}
-        </For>
-        <text visible={visibleSessions().length === 0} fg={props.theme.textMuted} wrapMode="none">
-          No matching sessions
-        </text>
-      </scrollbox>
-      <text fg={props.theme.textMuted} wrapMode="none">
-        pin/unpin ctrl+f  delete ctrl+d  rename ctrl+n  enter open
-      </text>
     </box>
   )
 }

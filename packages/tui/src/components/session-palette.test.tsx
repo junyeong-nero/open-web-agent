@@ -7,6 +7,37 @@ import { getTheme } from "../theme/themes"
 import { SessionPalette, scrollSessionIndexIntoView, type SessionPaletteScrollTarget } from "./session-palette"
 
 describe("SessionPalette", () => {
+  it("renders as a centered overlay", async () => {
+    const setup = await testRender(
+      () => (
+        <SessionPalette
+          sessions={buildSessions(1)}
+          activeSessionId="ses_0"
+          selectedIndex={0}
+          query=""
+          mode="search"
+          renameValue=""
+          loadingPhase={0}
+          theme={getTheme("opencode")}
+        />
+      ),
+      { width: 96, height: 24 },
+    )
+
+    try {
+      await setup.flush()
+      const overlay = setup.renderer.root.findDescendantById("session-palette-overlay")
+      const palette = setup.renderer.root.findDescendantById("session-palette")
+
+      expect(overlay).toBeTruthy()
+      expect(palette).toBeTruthy()
+      expect(palette!.screenX).toBeGreaterThan(0)
+      expect(palette!.screenY).toBeGreaterThan(0)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
   it("renders sessions in a scrollbox that responds to mouse wheel scrolling", async () => {
     const setup = await testRender(
       () => (
