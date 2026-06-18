@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { createOpenAIModelPool, createOpenRouterModelPool } from "./model-pool"
+import { OPENAI_MODEL_POOL, OPENROUTER_MODEL_POOL, createOpenAIModelPool, createOpenRouterModelPool } from "./model-pool"
 
 describe("model pools", () => {
   it("builds selectable OpenAI models that force the selected model slug", async () => {
@@ -14,7 +14,7 @@ describe("model pools", () => {
     })
 
     const gpt = models.find((model) => model.id === "openai:gpt-5.5")
-    const codex = models.find((model) => model.id === "openai:gpt-5.3-codex-spark")
+    const codex = models.find((model) => model.id === "openai:gpt-5.3-codex")
 
     expect(gpt).toMatchObject({
       name: "OpenAI",
@@ -25,7 +25,7 @@ describe("model pools", () => {
     expect(codex).toMatchObject({
       name: "OpenAI",
       provider: "openai",
-      modelName: "gpt-5.3-codex-spark",
+      modelName: "gpt-5.3-codex",
       contextWindowTokens: 400_000,
     })
 
@@ -54,9 +54,6 @@ describe("model pools", () => {
 
     expect(models.map((model) => model.id)).toEqual(
       expect.arrayContaining([
-        "openrouter:~openai/gpt-latest",
-        "openrouter:~anthropic/claude-sonnet-latest",
-        "openrouter:~google/gemini-pro-latest",
         "openrouter:openrouter/fusion",
         "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
         "openrouter:openrouter/owl-alpha",
@@ -64,12 +61,12 @@ describe("model pools", () => {
       ]),
     )
 
-    const claude = models.find((model) => model.id === "openrouter:~anthropic/claude-sonnet-latest")
+    const claude = models.find((model) => model.id === "openrouter:anthropic/claude-sonnet-4.6")
     const nemotron = models.find((model) => model.id === "openrouter:nvidia/nemotron-3-super-120b-a12b:free")
     expect(claude).toMatchObject({
       name: "OpenRouter",
       provider: "openrouter",
-      modelName: "~anthropic/claude-sonnet-latest",
+      modelName: "anthropic/claude-sonnet-4.6",
       contextWindowTokens: 1_000_000,
     })
     expect(nemotron).toMatchObject({
@@ -90,5 +87,17 @@ describe("model pools", () => {
     )
 
     expect(bodies[0]).toMatchObject({ model: "nvidia/nemotron-3-super-120b-a12b:free" })
+  })
+
+  it("does not expose tilde aliases or duplicate direct OpenAI models in the static pools", () => {
+    expect(OPENROUTER_MODEL_POOL.filter((definition) => definition.modelName.startsWith("~"))).toEqual([])
+
+    const directOpenAIModelNames = new Set(OPENAI_MODEL_POOL.map((definition) => definition.modelName))
+    const duplicatedOpenRouterModelNames = OPENROUTER_MODEL_POOL.map((definition) => definition.modelName)
+      .filter((modelName) => modelName.startsWith("openai/"))
+      .map((modelName) => modelName.replace(/^openai\//, ""))
+      .filter((modelName) => directOpenAIModelNames.has(modelName))
+
+    expect(duplicatedOpenRouterModelNames).toEqual([])
   })
 })

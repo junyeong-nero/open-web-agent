@@ -15,7 +15,11 @@ describe("runCommand", () => {
         projectPath: "/tmp/open-web-agent-project",
       },
       {
-        env: { OWA_HOME: home },
+        env: {
+          OWA_HOME: home,
+          OPEN_WEB_AGENT_AGENT: "mock-agent",
+          OPEN_WEB_AGENT_CODEX_AUTH_PATH: join(home, "missing-codex-auth.json"),
+        },
         stdout: (line) => lines.push(line),
       },
     )
@@ -50,7 +54,12 @@ describe("runCommand", () => {
           agentId: "text-vision-mixed-grounding",
         },
         {
-          env: { OWA_HOME: home, OPENAI_API_KEY: "test-openai-key", OPEN_WEB_AGENT_MODEL: "gpt-test" },
+          env: {
+            OWA_HOME: home,
+            OPENAI_API_KEY: "test-openai-key",
+            OPEN_WEB_AGENT_MODEL: "gpt-test",
+            OPEN_WEB_AGENT_CODEX_AUTH_PATH: join(home, "missing-codex-auth.json"),
+          },
           stdout: (line) => lines.push(line),
         },
       )

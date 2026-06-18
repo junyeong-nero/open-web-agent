@@ -49,7 +49,7 @@ describe("parseArgs", () => {
   it("recognizes eval combos with slash-containing model ids", () => {
     expect(
       parseArgs(
-        ["eval", "--task", "example-domain-title", "--combo", "simple-react-agent/openrouter:~openai/gpt-latest/mock-browser"],
+        ["eval", "--task", "example-domain-title", "--combo", "simple-react-agent/openrouter:anthropic/claude-sonnet-4.6/mock-browser"],
         "/tmp/project",
       ),
     ).toEqual({
@@ -58,7 +58,7 @@ describe("parseArgs", () => {
       combinations: [
         {
           agentId: "simple-react-agent",
-          modelId: "openrouter:~openai/gpt-latest",
+          modelId: "openrouter:anthropic/claude-sonnet-4.6",
           environmentId: "mock-browser",
         },
       ],
