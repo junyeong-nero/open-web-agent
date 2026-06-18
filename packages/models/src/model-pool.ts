@@ -54,12 +54,12 @@ export const OPENROUTER_MODEL_POOL: ProviderModelDefinition[] = [
 
 type OpenAIModelPoolOptions = Pick<
   OpenAIModelOptions,
-  "apiKey" | "defaultParameters" | "reasoningEffort" | "fetch"
+  "apiKey" | "defaultParameters" | "reasoningEffort" | "maxRetry" | "fetch"
 >
 
 type OpenRouterModelPoolOptions = Pick<
   OpenRouterModelOptions,
-  "apiKey" | "defaultParameters" | "reasoningEffort" | "fetch"
+  "apiKey" | "defaultParameters" | "reasoningEffort" | "maxRetry" | "fetch"
 >
 
 export function createOpenAIModelPool(options: OpenAIModelPoolOptions = {}): ModelPlugin[] {

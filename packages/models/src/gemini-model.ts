@@ -8,6 +8,7 @@ export interface GeminiModelOptions {
   defaultParameters?: ModelParameters
   reasoningEffort?: string
   contextWindowTokens?: number
+  maxRetry?: number
   fetch?: FetchLike
 }
 
@@ -33,6 +34,7 @@ export class GeminiModel implements ModelPlugin {
       baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
       apiKey: options.apiKey ?? config.geminiApiKey,
       fetch: options.fetch,
+      maxRetry: options.maxRetry ?? config.maxRetry,
     })
   }
 

@@ -80,4 +80,28 @@ describe("OpenAIResponsesClient", () => {
 
     expect(response.text).toBe("from output content")
   })
+
+  it("retries transient Responses API failures up to maxRetry", async () => {
+    let attempts = 0
+    const client = new OpenAIResponsesClient({
+      baseUrl: "https://provider.test/v1",
+      accessToken: "oauth-token",
+      maxRetry: 2,
+      fetch: async () => {
+        attempts += 1
+        if (attempts < 3) return new Response("temporarily unavailable", { status: 503 })
+        return Response.json({ id: "resp_retry", output_text: "after retry" })
+      },
+    })
+
+    const response = await client.complete({
+      model: "gpt-test",
+      messages: [{ role: "user", content: "retry" }],
+      temperature: 0,
+      responseFormat: "text",
+    })
+
+    expect(response.text).toBe("after retry")
+    expect(attempts).toBe(3)
+  })
 })

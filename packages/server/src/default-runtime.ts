@@ -73,11 +73,13 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
         defaultParameters: modelConfig.parameters,
         reasoningEffort: modelConfig.reasoningEffort,
         contextWindowTokens: modelConfig.contextWindowTokens,
+        maxRetry: modelConfig.maxRetry,
       }),
       ...createOpenRouterModelPool({
         apiKey: modelConfig.openrouterApiKey,
         defaultParameters: modelConfig.parameters,
         reasoningEffort: modelConfig.reasoningEffort,
+        maxRetry: modelConfig.maxRetry,
       }),
     )
   }
@@ -89,11 +91,13 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
         defaultParameters: modelConfig.parameters,
         reasoningEffort: modelConfig.reasoningEffort,
         contextWindowTokens: modelConfig.contextWindowTokens,
+        maxRetry: modelConfig.maxRetry,
       }),
       ...createOpenAIModelPool({
         apiKey: modelConfig.openaiApiKey,
         defaultParameters: modelConfig.parameters,
         reasoningEffort: modelConfig.reasoningEffort,
+        maxRetry: modelConfig.maxRetry,
       }),
     )
   }
@@ -105,6 +109,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
         defaultParameters: modelConfig.parameters,
         reasoningEffort: modelConfig.reasoningEffort,
         contextWindowTokens: modelConfig.contextWindowTokens,
+        maxRetry: modelConfig.maxRetry,
       }),
     )
   }
@@ -116,6 +121,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
         defaultParameters: modelConfig.parameters,
         reasoningEffort: modelConfig.reasoningEffort,
         contextWindowTokens: modelConfig.contextWindowTokens,
+        maxRetry: modelConfig.maxRetry,
       }),
     )
   }
@@ -129,6 +135,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
         defaultParameters: modelConfig.parameters,
         reasoningEffort: modelConfig.reasoningEffort,
         contextWindowTokens: modelConfig.contextWindowTokens,
+        maxRetry: modelConfig.maxRetry,
       }),
     )
   }

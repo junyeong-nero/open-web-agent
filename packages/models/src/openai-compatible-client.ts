@@ -1,4 +1,5 @@
 import type { ModelRequest, ModelResponse } from "@open-web-agent/core"
+import { ModelProviderHttpError, retryModelCall } from "./retry"
 
 export type FetchLike = (url: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
@@ -7,6 +8,7 @@ export interface OpenAICompatibleClientOptions {
   apiKey: string | null
   fetch?: FetchLike
   defaultHeaders?: Record<string, string>
+  maxRetry?: number
 }
 
 interface ChatCompletionResponse {
@@ -28,17 +30,19 @@ export class OpenAICompatibleClient {
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
     const startedAt = performance.now()
-    const response = await this.fetchImpl(`${trimTrailingSlash(this.options.baseUrl)}/chat/completions`, {
-      method: "POST",
-      headers: this.headers(),
-      body: JSON.stringify(toChatCompletionsBody(request)),
-    })
+    const raw = await retryModelCall(async () => {
+      const response = await this.fetchImpl(`${trimTrailingSlash(this.options.baseUrl)}/chat/completions`, {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify(toChatCompletionsBody(request)),
+      })
 
-    if (!response.ok) {
-      throw new Error(`Model provider returned HTTP ${response.status}: ${await response.text()}`)
-    }
+      if (!response.ok) {
+        throw new ModelProviderHttpError(response.status, await response.text())
+      }
 
-    const raw = (await response.json()) as ChatCompletionResponse
+      return (await response.json()) as ChatCompletionResponse
+    }, { maxRetry: this.options.maxRetry })
     const usage = raw.usage
 
     return {
