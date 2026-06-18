@@ -98,25 +98,22 @@ export function App(props: AppProps) {
   }
 
   useKeyboard((key) => {
+    const action = mapKeyEvent(key)
+    if (action === "quit") {
+      key.preventDefault()
+      exit()
+      return
+    }
+
     if (sessionPaletteOpen()) {
       handleSessionPaletteKey(key)
       return
     }
 
-    const action = mapKeyEvent(key)
-    if (action === "quit") exit()
     if (action === "new") void createNewSession()
     if (action === "copy") {
       key.preventDefault()
       void copySelectionToClipboard(renderer)
-    }
-    if (action === "copy-or-cancel") {
-      if (renderer.hasSelection) {
-        key.preventDefault()
-        void copySelectionToClipboard(renderer)
-        return
-      }
-      void cancelOrExit()
     }
     if (action === "paste") {
       key.preventDefault()
