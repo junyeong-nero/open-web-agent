@@ -58,12 +58,14 @@ Open Web Agent reads user-level model settings from `~/.openwebagents/config.yam
 
 ```yaml
 model: "nvidia/nemotron-3-super-120b-a12b:free"
+model_provider: "openai"
 reasoning_effort: "medium"
 context_window_tokens: 128000
 openai_api_key: "sk-..."
 openrouter_api_key: "sk-or-..."
 gemini_api_key: "..."
 anthropic_api_key: "sk-ant-..."
+codex_auth_path: "~/.codex/auth.json"
 
 parameters:
   temperature: 0
@@ -81,8 +83,15 @@ parameters:
 Set one or more provider keys. Environment variables still take precedence when present:
 `OPEN_WEB_AGENT_MODEL`, `OPEN_WEB_AGENT_REASONING_EFFORT`,
 `OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS`, `OPEN_WEB_AGENT_MODEL_TIMEOUT_MS`,
+`OPEN_WEB_AGENT_MODEL_PROVIDER`, `OPEN_WEB_AGENT_CODEX_AUTH_PATH`,
 `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, and
 `ANTHROPIC_API_KEY`.
+
+If Codex file-backed ChatGPT auth is available at `codex_auth_path`, or if
+`CODEX_ACCESS_TOKEN` is set, the runtime also registers the `codex-oauth`
+provider. Changing models from the TUI with `/model <id>` writes the selected
+provider and provider model name back to `~/.openwebagents/config.yaml`, so
+the next TUI session starts with the same provider.
 
 ## Development Commands
 

@@ -464,15 +464,7 @@ export function App(props: AppProps) {
         return
       }
 
-      setState((current) =>
-        reduceTuiEvent(
-          reduceTuiEvent(current, { type: "model.selected", modelId }),
-          {
-            type: "conversation.append",
-            message: { role: "system", content: `Model set to ${modelId}` },
-          },
-        ),
-      )
+      await persistAndSelectModel(modelId)
       return
     }
     if (command.kind === "browser") {
@@ -571,7 +563,7 @@ export function App(props: AppProps) {
     setState((current) => ({ ...current, runtimeSelectorKind: null, runtimeSelectorQuery: "" }))
   }
 
-  function selectRuntimeOption(option: RuntimeSelectorOption) {
+  async function selectRuntimeOption(option: RuntimeSelectorOption) {
     const kind = state().runtimeSelectorKind
     closeRuntimeSelector()
     if (kind === "agent") {
@@ -582,10 +574,22 @@ export function App(props: AppProps) {
       selectBrowser(option.id)
       return
     }
-    selectModel(option.id)
+    await persistAndSelectModel(option.id)
   }
 
-  function selectModel(modelId: string) {
+  async function persistAndSelectModel(modelId: string) {
+    try {
+      await client.selectModel(modelId)
+    } catch (error) {
+      setState((current) =>
+        reduceTuiEvent(current, {
+          type: "conversation.append",
+          message: { role: "system", content: `Failed to save model selection: ${formatError(error)}` },
+        }),
+      )
+      return
+    }
+
     setState((current) =>
       reduceTuiEvent(
         reduceTuiEvent(current, { type: "model.selected", modelId }),

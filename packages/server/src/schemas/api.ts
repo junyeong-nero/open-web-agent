@@ -23,6 +23,11 @@ export const CreateRunRequestSchema = z.object({
   environmentId: z.string().min(1).optional(),
 })
 
+export const UpdateModelConfigRequestSchema = z.object({
+  modelId: z.string().min(1),
+})
+
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequestSchema>
 export type UpdateSessionRequest = z.infer<typeof UpdateSessionRequestSchema>
 export type CreateRunRequest = z.infer<typeof CreateRunRequestSchema>
+export type UpdateModelConfigRequest = z.infer<typeof UpdateModelConfigRequestSchema>

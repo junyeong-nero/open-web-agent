@@ -37,9 +37,29 @@ describe("App", () => {
       setup.renderer.destroy()
     }
   })
+
+  it("persists model changes made through the /model command", async () => {
+    const persisted: unknown[] = []
+    const server = startTuiServer({ onPersistModel: (body) => persisted.push(body) })
+    const setup = await testRender(
+      () => <App serverUrl={server.url} projectPath="/tmp/open-web-agent-test" onExit={() => {}} />,
+      { width: 100, height: 24 },
+    )
+
+    try {
+      await setup.flush()
+
+      await setup.mockInput.typeText("/model test-model")
+      setup.mockInput.pressEnter()
+      await setup.flush()
+      await eventually(() => expect(persisted).toEqual([{ modelId: "test-model" }]))
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
 })
 
-function startTuiServer(): { url: string } {
+function startTuiServer(options: { onPersistModel?: (body: unknown) => void } = {}): { url: string } {
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -52,7 +72,17 @@ function startTuiServer(): { url: string } {
         return Response.json({ sessions: [sessionSummary] })
       }
       if (url.pathname === "/plugins" && request.method === "GET") {
-        return Response.json({ agents: [], models: [], environments: [] })
+        return Response.json({
+          agents: [],
+          models: [{ id: "test-model", name: "Test Model", provider: "test", modelName: "test-runtime-model" }],
+          environments: [],
+        })
+      }
+      if (url.pathname === "/config/model" && request.method === "PATCH") {
+        return request.json().then((body) => {
+          options.onPersistModel?.(body)
+          return Response.json({ modelId: "test-model", modelName: "test-runtime-model" })
+        })
       }
       if (url.pathname === "/events" && request.method === "GET") {
         return new Response(new ReadableStream(), { headers: { "content-type": "text/event-stream" } })
@@ -62,6 +92,21 @@ function startTuiServer(): { url: string } {
   })
   servers.push(server)
   return { url: `http://${server.hostname}:${server.port}` }
+}
+
+async function eventually(assertion: () => void): Promise<void> {
+  const startedAt = Date.now()
+  let lastError: unknown
+  while (Date.now() - startedAt < 1000) {
+    try {
+      assertion()
+      return
+    } catch (error) {
+      lastError = error
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+  }
+  throw lastError
 }
 
 const sessionSummary = {

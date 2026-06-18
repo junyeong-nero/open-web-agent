@@ -1,12 +1,13 @@
 import { Hono } from "hono"
 import type { EventBus, PluginRegistry, RunOrchestrator, SessionState } from "@open-web-agent/core"
 import type { SQLiteStore } from "@open-web-agent/storage"
+import { BrowserSessionManager } from "./browser-session-manager"
+import { registerConfigRoutes } from "./routes/config"
 import { registerEventRoutes } from "./routes/events"
 import { registerHealthRoutes } from "./routes/health"
 import { registerPluginRoutes } from "./routes/plugins"
 import { registerRunRoutes, type RunRecord } from "./routes/runs"
 import { registerSessionRoutes } from "./routes/sessions"
-import { BrowserSessionManager } from "./browser-session-manager"
 
 export interface CreateAppDeps {
   eventBus: EventBus
@@ -15,6 +16,7 @@ export interface CreateAppDeps {
   sessions: Map<string, SessionState>
   storage?: SQLiteStore
   browserSessions?: BrowserSessionManager
+  modelConfigPath?: string
 }
 
 export function createApp(deps: CreateAppDeps): Hono {
@@ -39,6 +41,7 @@ export function createApp(deps: CreateAppDeps): Hono {
     storage: deps.storage,
     browserSessions,
   })
+  registerConfigRoutes(app, { registry: deps.registry, modelConfigPath: deps.modelConfigPath })
   registerPluginRoutes(app, { registry: deps.registry })
 
   return app
