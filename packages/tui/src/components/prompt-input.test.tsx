@@ -221,6 +221,47 @@ describe("PromptInput", () => {
     }
   })
 
+  it("recalls prompt history with up and down arrows when slash suggestions are hidden", async () => {
+    const changes: string[] = []
+    const setup = await testRender(
+      () => (
+        <PromptInput
+          value=""
+          agent={null}
+          model={null}
+          modelActivity={idleModelActivity}
+          runStatus="idle"
+          theme={getTheme("opencode")}
+          history={["first prompt", "second prompt"]}
+          onChange={(value) => changes.push(value)}
+          onSubmit={() => {}}
+        />
+      ),
+      { width: 80, height: 12 },
+    )
+
+    try {
+      await setup.flush()
+      const textarea = setup.renderer.root.findDescendantById("prompt-input-textarea")
+
+      expect(textarea).toBeInstanceOf(TextareaRenderable)
+
+      await setup.mockInput.typeText("draft")
+      setup.mockInput.pressArrow("up")
+      setup.mockInput.pressArrow("up")
+      setup.mockInput.pressArrow("down")
+      setup.mockInput.pressArrow("down")
+      await setup.flush()
+
+      expect((textarea as TextareaRenderable).plainText).toBe("draft")
+      expect(changes).toContain("second prompt")
+      expect(changes).toContain("first prompt")
+      expect(changes.at(-1)).toBe("draft")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
   it("renders agent, model, effort metadata with a blank row after the input", async () => {
     const setup = await testRender(
       () => (

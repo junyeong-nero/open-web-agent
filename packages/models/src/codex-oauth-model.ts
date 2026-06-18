@@ -3,6 +3,7 @@ import { readCodexOAuthToken } from "./codex-auth"
 import { readModelConfig, type ModelParameters } from "./model-config"
 import { OpenAIResponsesClient } from "./openai-responses-client"
 import type { FetchLike } from "./openai-compatible-client"
+import { withResponsesReasoningEffort } from "./reasoning-effort"
 
 export interface CodexOAuthModelOptions {
   accessToken?: string | null
@@ -41,6 +42,8 @@ export class CodexOAuthModel implements ModelPlugin {
   }
 
   async complete(request: ModelRequest, _ctx: RuntimeContext): Promise<ModelResponse> {
-    return this.client.complete({ ...request, ...this.defaultParameters, model: request.model || this.defaultModel })
+    return this.client.complete(
+      withResponsesReasoningEffort({ ...request, ...this.defaultParameters, model: request.model || this.defaultModel }, this.reasoningEffort),
+    )
   }
 }

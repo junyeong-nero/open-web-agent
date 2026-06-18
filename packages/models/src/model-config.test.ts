@@ -246,11 +246,12 @@ describe("readModelConfig", () => {
       ].join("\n"),
     )
 
-    await writeModelSelectionConfig({ modelId: "codex-oauth", modelName: "gpt-5.5" }, { configPath })
+    await writeModelSelectionConfig({ modelId: "codex-oauth", modelName: "gpt-5.5", reasoningEffort: "high" }, { configPath })
 
     expect(parse(await readFile(configPath, "utf8"))).toMatchObject({
       model: "gpt-5.5",
       model_provider: "codex-oauth",
+      reasoning_effort: "high",
       openai_api_key: "yaml-openai-key",
       parameters: { temperature: 0.25 },
       unknown_key: "keep-me",

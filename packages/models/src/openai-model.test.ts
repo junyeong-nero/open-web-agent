@@ -46,4 +46,27 @@ describe("OpenAIModel", () => {
       max_tokens: 512,
     })
   })
+
+  it("forwards configured reasoning effort to OpenAI-compatible requests", async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const model = new OpenAIModel({
+      apiKey: "openai-key",
+      defaultModel: "gpt-test",
+      reasoningEffort: "high",
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return Response.json({ id: "res_1", choices: [{ message: { content: "ok" } }], usage: null })
+      },
+    })
+
+    await model.complete(
+      { model: "gpt-test", messages: [{ role: "user", content: "hi" }], temperature: 0, responseFormat: "text" },
+      {} as never,
+    )
+
+    expect(bodies[0]).toMatchObject({
+      model: "gpt-test",
+      reasoning_effort: "high",
+    })
+  })
 })

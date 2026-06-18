@@ -30,7 +30,7 @@ export type TuiEvent =
       defaultEnvironmentId?: string | null
     }
   | { type: "agent.selected"; agentId: string }
-  | { type: "model.selected"; modelId: string }
+  | { type: "model.selected"; modelId: string; reasoningEffort?: string }
   | { type: "environment.selected"; environmentId: string }
   | { type: "theme.selected"; themeId: string }
   | { type: "run.event"; event: RunEvent }
@@ -158,7 +158,15 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
     }
   }
   if (event.type === "agent.selected") return { ...state, selectedAgentId: event.agentId }
-  if (event.type === "model.selected") return { ...state, selectedModelId: event.modelId }
+  if (event.type === "model.selected") {
+    const availableModels =
+      event.reasoningEffort === undefined
+        ? state.availableModels
+        : state.availableModels.map((model) =>
+            model.id === event.modelId ? { ...model, reasoningEffort: event.reasoningEffort } : model,
+          )
+    return { ...state, selectedModelId: event.modelId, availableModels }
+  }
   if (event.type === "environment.selected") return { ...state, selectedEnvironmentId: event.environmentId }
   if (event.type === "theme.selected") return { ...state, selectedThemeId: event.themeId }
   if (event.type === "slash.details") {

@@ -80,4 +80,25 @@ describe("createServerClient", () => {
       { path: "/config/browser", body: { browserId: "playwright-browser" } },
     ])
   })
+
+  it("sends reasoning effort when selecting a model with effort changes", async () => {
+    const requests: unknown[] = []
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        const url = new URL(request.url)
+        if (url.pathname === "/config/model" && request.method === "PATCH") {
+          requests.push(await request.json())
+          return Response.json({ modelId: "test-model", modelName: "test-runtime-model", reasoningEffort: "high" })
+        }
+        return new Response("not found", { status: 404 })
+      },
+    })
+    servers.push(server)
+
+    await createServerClient(`http://${server.hostname}:${server.port}`).selectModel("test-model", "high")
+
+    expect(requests).toEqual([{ modelId: "test-model", reasoningEffort: "high" }])
+  })
 })

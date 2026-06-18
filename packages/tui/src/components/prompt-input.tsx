@@ -15,16 +15,21 @@ export interface PromptInputProps {
   runStatus: TuiState["runStatus"]
   theme: TuiTheme
   focused?: boolean
+  history?: string[]
   onChange(value: string): void
   onSubmit(value: string): void
   onFocusRequest?(): void
+  onReasoningEffortChange?(delta: -1 | 1): boolean
 }
 
 export function PromptInput(props: PromptInputProps) {
   let textarea: (TextareaRenderable & { plainText?: string }) | undefined
+  let programmaticValue: string | null = null
   const [barPhase, setBarPhase] = createSignal(0)
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = createSignal(0)
   const [draftValue, setDraftValue] = createSignal(props.value)
+  const [historyIndex, setHistoryIndex] = createSignal<number | null>(null)
+  const [historyDraft, setHistoryDraft] = createSignal("")
   const interval = setInterval(() => setBarPhase((phase) => (phase + 1) % 14), 120)
   const keyBindings = [
     { name: "return", action: "submit" as const },
@@ -37,6 +42,21 @@ export function PromptInput(props: PromptInputProps) {
 
   const currentValue = () => textarea?.plainText ?? draftValue()
   const commandSuggestions = () => listSlashCommandSuggestions(draftValue())
+  const setTextareaValue = (value: string) => {
+    if (textarea && textarea.plainText !== value) {
+      programmaticValue = value
+      textarea.setText(value)
+      textarea.cursorOffset = value.length
+    }
+    setDraftValue(value)
+  }
+  const reportValue = (value: string) => {
+    setTextareaValue(value)
+    props.onChange(value)
+  }
+  createEffect(() => {
+    setTextareaValue(props.value)
+  })
   createEffect(() => {
     const count = commandSuggestions().length
     setSelectedSuggestionIndex((index) => (count === 0 ? 0 : Math.min(index, count - 1)))
@@ -44,12 +64,19 @@ export function PromptInput(props: PromptInputProps) {
   const handleContentChange = (_event: unknown) => {
     const value = currentValue()
     setDraftValue(value)
+    if (programmaticValue === value) {
+      programmaticValue = null
+      return
+    }
+    setHistoryIndex(null)
+    setHistoryDraft("")
     props.onChange(value)
   }
   const handleSubmit = () => {
     const value = currentValue()
-    setDraftValue(value)
-    props.onChange(value)
+    setHistoryIndex(null)
+    setHistoryDraft("")
+    reportValue(value)
     textarea?.clear()
     setDraftValue("")
     props.onSubmit(value)
@@ -60,14 +87,11 @@ export function PromptInput(props: PromptInputProps) {
     if (!completion) return false
 
     if (!textarea) {
-      setDraftValue(completion)
-      props.onChange(completion)
+      reportValue(completion)
       return true
     }
 
-    textarea.setText(completion)
-    textarea.cursorOffset = completion.length
-    setDraftValue(completion)
+    reportValue(completion)
     return true
   }
   const moveSlashSelection = (delta: -1 | 1) => {
@@ -75,6 +99,33 @@ export function PromptInput(props: PromptInputProps) {
     if (count === 0) return false
 
     setSelectedSuggestionIndex((index) => (index + delta + count) % count)
+    return true
+  }
+  const moveHistory = (delta: -1 | 1) => {
+    const history = props.history ?? []
+    if (history.length === 0) return false
+
+    const currentIndex = historyIndex()
+    if (currentIndex === null) {
+      if (delta > 0) return false
+      setHistoryDraft(currentValue())
+      const nextIndex = history.length - 1
+      setHistoryIndex(nextIndex)
+      reportValue(history[nextIndex] ?? "")
+      return true
+    }
+
+    const nextIndex = currentIndex + delta
+    if (nextIndex >= history.length) {
+      setHistoryIndex(null)
+      reportValue(historyDraft())
+      setHistoryDraft("")
+      return true
+    }
+
+    const clampedIndex = Math.max(0, nextIndex)
+    setHistoryIndex(clampedIndex)
+    reportValue(history[clampedIndex] ?? "")
     return true
   }
   const handleKeyDown = (event: KeyEvent) => {
@@ -88,9 +139,27 @@ export function PromptInput(props: PromptInputProps) {
       return
     }
 
+    if (event.name === "up" && moveHistory(-1)) {
+      event.preventDefault()
+      return
+    }
+
+    if (event.name === "down" && moveHistory(1)) {
+      event.preventDefault()
+      return
+    }
+
     if (event.name === "tab" && !event.shift && handleSlashCompletion()) {
       event.preventDefault()
       return
+    }
+
+    if ((event.name === "left" || event.name === "right") && currentValue().length === 0) {
+      const changed = props.onReasoningEffortChange?.(event.name === "right" ? 1 : -1) ?? false
+      if (changed) {
+        event.preventDefault()
+        return
+      }
     }
 
     if ((event.name === "return" || event.name === "enter" || event.name === "linefeed") && !event.shift) {
@@ -108,6 +177,7 @@ export function PromptInput(props: PromptInputProps) {
           id="prompt-input-textarea"
           ref={(node) => {
             textarea = node as TextareaRenderable & { plainText?: string }
+            setTextareaValue(props.value)
           }}
           focused={props.focused ?? true}
           minHeight={1}

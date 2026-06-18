@@ -86,10 +86,128 @@ describe("App", () => {
       setup.renderer.destroy()
     }
   })
+
+  it("focuses the prompt and inserts printable text when typing from another pane", async () => {
+    const server = startTuiServer()
+    const setup = await testRender(
+      () => <App serverUrl={server.url} projectPath="/tmp/open-web-agent-test" onExit={() => {}} />,
+      { width: 100, height: 24 },
+    )
+
+    try {
+      await setup.flush()
+      const textarea = setup.renderer.root.findDescendantById("prompt-input-textarea")
+
+      expect(textarea).toBeInstanceOf(TextareaRenderable)
+
+      setup.mockInput.pressTab()
+      await setup.flush()
+      await setup.mockInput.typeText("h")
+      await setup.flush()
+
+      expect((textarea as TextareaRenderable).focused).toBe(true)
+      expect((textarea as TextareaRenderable).plainText).toBe("h")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  it("loads global prompt history and recalls it in a fresh app session", async () => {
+    const server = startTuiServer()
+    const setup = await testRender(
+      () => (
+        <App
+          serverUrl={server.url}
+          projectPath="/tmp/open-web-agent-test"
+          initialPromptHistory={["persisted prompt"]}
+          onExit={() => {}}
+        />
+      ),
+      { width: 100, height: 24 },
+    )
+
+    try {
+      await setup.flush()
+      const textarea = setup.renderer.root.findDescendantById("prompt-input-textarea")
+
+      expect(textarea).toBeInstanceOf(TextareaRenderable)
+
+      await eventually(async () => {
+        setup.mockInput.pressArrow("up")
+        await setup.flush()
+        expect((textarea as TextareaRenderable).plainText).toBe("persisted prompt")
+      })
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  it("persists reasoning effort changes with right and left arrows for supported models", async () => {
+    const persisted: unknown[] = []
+    const model = { id: "test-model", name: "Test Model", provider: "test", modelName: "test-runtime-model", reasoningEffort: "medium" }
+    const server = startTuiServer({
+      models: [model],
+      onPersistModel: (body) => persisted.push(body),
+    })
+    const setup = await testRender(
+      () => (
+        <App
+          serverUrl={server.url}
+          projectPath="/tmp/open-web-agent-test"
+          initialRuntimePlugins={{
+            agents: [],
+            models: [model],
+            environments: [],
+          }}
+          onExit={() => {}}
+        />
+      ),
+      { width: 100, height: 24 },
+    )
+
+    try {
+      await setup.flush()
+
+      setup.mockInput.pressArrow("right")
+      await setup.flush()
+      setup.mockInput.pressArrow("left")
+      await setup.flush()
+
+      await eventually(() =>
+        expect(persisted).toEqual([
+          { modelId: "test-model", reasoningEffort: "high" },
+          { modelId: "test-model", reasoningEffort: "medium" },
+        ]),
+      )
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  it("leaves reasoning effort unchanged for models without effort support", async () => {
+    const persisted: unknown[] = []
+    const server = startTuiServer({ onPersistModel: (body) => persisted.push(body) })
+    const setup = await testRender(
+      () => <App serverUrl={server.url} projectPath="/tmp/open-web-agent-test" onExit={() => {}} />,
+      { width: 100, height: 24 },
+    )
+
+    try {
+      await setup.flush()
+
+      setup.mockInput.pressArrow("right")
+      await setup.flush()
+
+      expect(persisted).toEqual([])
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
 })
 
 function startTuiServer(
   options: {
+    models?: Array<{ id: string; name: string; provider: string; modelName: string; reasoningEffort?: string | null }>
     onPersistModel?: (body: unknown) => void
     onPersistAgent?: (body: unknown) => void
     onPersistBrowser?: (body: unknown) => void
@@ -109,7 +227,7 @@ function startTuiServer(
       if (url.pathname === "/plugins" && request.method === "GET") {
         return Response.json({
           agents: [{ id: "test-agent", name: "Test Agent", description: "Agent used by TUI tests." }],
-          models: [{ id: "test-model", name: "Test Model", provider: "test", modelName: "test-runtime-model" }],
+          models: options.models ?? [{ id: "test-model", name: "Test Model", provider: "test", modelName: "test-runtime-model" }],
           environments: [{ id: "test-browser", name: "Test Browser" }],
         })
       }
@@ -141,12 +259,12 @@ function startTuiServer(
   return { url: `http://${server.hostname}:${server.port}` }
 }
 
-async function eventually(assertion: () => void): Promise<void> {
+async function eventually(assertion: () => void | Promise<void>): Promise<void> {
   const startedAt = Date.now()
   let lastError: unknown
   while (Date.now() - startedAt < 1000) {
     try {
-      assertion()
+      await assertion()
       return
     } catch (error) {
       lastError = error

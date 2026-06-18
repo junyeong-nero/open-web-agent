@@ -15,13 +15,19 @@ export function registerConfigRoutes(app: Hono, deps: ConfigRouteDeps): void {
 
     const model = deps.registry.listModels().find((candidate) => candidate.id === parsed.data.modelId)
     if (!model) return c.json({ error: "Unknown model" }, 400)
+    if (parsed.data.reasoningEffort && !model.reasoningEffort) {
+      return c.json({ error: "Model does not support reasoning effort" }, 400)
+    }
+
+    const reasoningEffort = parsed.data.reasoningEffort ?? model.reasoningEffort ?? null
+    if (parsed.data.reasoningEffort) model.reasoningEffort = parsed.data.reasoningEffort
 
     await writeModelSelectionConfig(
-      { modelId: model.id, modelName: model.modelName ?? null },
+      { modelId: model.id, modelName: model.modelName ?? null, reasoningEffort },
       { configPath: deps.modelConfigPath },
     )
 
-    return c.json({ modelId: model.id, modelName: model.modelName ?? null })
+    return c.json({ modelId: model.id, modelName: model.modelName ?? null, reasoningEffort })
   })
 
   app.patch("/config/agent", async (c) => {

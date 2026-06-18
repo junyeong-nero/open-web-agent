@@ -60,4 +60,27 @@ describe("CodexOAuthModel", () => {
     expect(JSON.parse(String(calls[0]?.init.body))).toMatchObject({ model: "gpt-test", temperature: 0.2 })
     expect(response.text).toBe("codex oauth answer")
   })
+
+  it("forwards configured reasoning effort to Responses API requests", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const model = new CodexOAuthModel({
+      accessToken: "oauth-token",
+      defaultModel: "gpt-test",
+      reasoningEffort: "high",
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init: init ?? {} })
+        return Response.json({ id: "resp_1", output_text: "ok" })
+      },
+    })
+
+    await model.complete(
+      { model: "", messages: [{ role: "user", content: "hi" }], temperature: 0, responseFormat: "text" },
+      {} as never,
+    )
+
+    expect(JSON.parse(String(calls[0]?.init.body))).toMatchObject({
+      model: "gpt-test",
+      reasoning: { effort: "high" },
+    })
+  })
 })

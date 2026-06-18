@@ -25,6 +25,7 @@ export const CreateRunRequestSchema = z.object({
 
 export const UpdateModelConfigRequestSchema = z.object({
   modelId: z.string().min(1),
+  reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
 })
 
 export const UpdateAgentConfigRequestSchema = z.object({

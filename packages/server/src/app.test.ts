@@ -149,6 +149,7 @@ class TestModel implements ModelPlugin {
   name = "Test Model"
   provider = "test"
   modelName = "test-runtime-model"
+  reasoningEffort = "medium"
 
   async complete(_request: ModelRequest, _ctx: RuntimeContext): Promise<ModelResponse> {
     return { id: "model_response_1", text: "{}", raw: {}, usage: null, latencyMs: 0 }
@@ -612,14 +613,37 @@ describe("createApp", () => {
       method: "PATCH",
       body: JSON.stringify({ modelId: "test-model" }),
     })
-    const body = await json<{ modelId: string; modelName: string | null }>(response)
+    const body = await json<{ modelId: string; modelName: string | null; reasoningEffort: string | null }>(response)
 
-    expect(body).toEqual({ modelId: "test-model", modelName: "test-runtime-model" })
+    expect(body).toEqual({ modelId: "test-model", modelName: "test-runtime-model", reasoningEffort: "medium" })
     await readFile(configPath, "utf8")
     expect(readModelConfig({}, { configPath })).toMatchObject({
       defaultModel: "test-runtime-model",
       defaultModelProvider: "test-model",
+      reasoningEffort: "medium",
     })
+  })
+
+  it("PATCH /config/model persists reasoning effort changes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-server-config-"))
+    const configPath = join(dir, ".config.yaml")
+    const { request } = await setup(0, undefined, false, true, configPath)
+
+    const response = await request("/config/model", {
+      method: "PATCH",
+      body: JSON.stringify({ modelId: "test-model", reasoningEffort: "high" }),
+    })
+    const body = await json<{ modelId: string; modelName: string | null; reasoningEffort: string | null }>(response)
+
+    expect(body).toEqual({ modelId: "test-model", modelName: "test-runtime-model", reasoningEffort: "high" })
+    expect(readModelConfig({}, { configPath })).toMatchObject({
+      defaultModel: "test-runtime-model",
+      defaultModelProvider: "test-model",
+      reasoningEffort: "high",
+    })
+    expect((await json<{ models: Array<{ id: string; reasoningEffort: string | null }> }>(await request("/plugins/models"))).models).toContainEqual(
+      expect.objectContaining({ id: "test-model", reasoningEffort: "high" }),
+    )
   })
 
   it("PATCH /config/model rejects an unknown model provider", async () => {

@@ -1,6 +1,7 @@
 import type { ModelPlugin, ModelRequest, ModelResponse, RuntimeContext } from "@open-web-agent/core"
 import { OpenAICompatibleClient, type FetchLike } from "./openai-compatible-client"
 import { readModelConfig, resolveProviderDefaultModel, type ModelParameters } from "./model-config"
+import { withChatReasoningEffort } from "./reasoning-effort"
 
 export interface OpenAIModelOptions {
   id?: string
@@ -47,6 +48,6 @@ export class OpenAIModel implements ModelPlugin {
 
   async complete(request: ModelRequest, _ctx: RuntimeContext): Promise<ModelResponse> {
     const model = this.forceDefaultModel ? this.defaultModel : request.model || this.defaultModel
-    return this.client.complete({ ...request, ...this.defaultParameters, model })
+    return this.client.complete(withChatReasoningEffort({ ...request, ...this.defaultParameters, model }, this.reasoningEffort))
   }
 }
