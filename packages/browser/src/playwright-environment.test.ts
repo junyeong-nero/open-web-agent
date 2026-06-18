@@ -58,6 +58,45 @@ describe("PlaywrightEnvironment", () => {
     ).toBe(false)
   })
 
+  it("adds the Chromium minimized startup flag when browser focus prevention is enabled", () => {
+    expect("resolveChromiumLaunchOptions" in playwrightEnvironment).toBe(true)
+    const resolveChromiumLaunchOptions = (
+      playwrightEnvironment as typeof playwrightEnvironment & {
+        resolveChromiumLaunchOptions(options: { headless?: boolean; preventFocus?: boolean }): {
+          headless: boolean
+          args?: string[]
+        }
+      }
+    ).resolveChromiumLaunchOptions
+
+    expect(resolveChromiumLaunchOptions({ preventFocus: true })).toEqual({
+      headless: false,
+      args: ["--start-minimized"],
+    })
+    expect(resolveChromiumLaunchOptions({ headless: true, preventFocus: true })).toEqual({ headless: true })
+  })
+
+  it("does not bring an existing page to the front when browser focus prevention is enabled", async () => {
+    const env = new PlaywrightEnvironment({ preventFocus: true })
+    const ctx = await context()
+    let bringToFrontCalls = 0
+    ;(env as unknown as { runs: Map<string, unknown> }).runs.set(ctx.session.id, {
+      browser: {},
+      context: {},
+      page: {
+        async bringToFront() {
+          bringToFrontCalls += 1
+        },
+      },
+      lastScreenshotPath: null,
+      screenshotCount: 0,
+    })
+
+    await env.attachSession(ctx)
+
+    expect(bringToFrontCalls).toBe(0)
+  })
+
   it("navigates, interacts with a fixture page, observes text, and captures a screenshot", async () => {
     const env = new PlaywrightEnvironment({ headless: true })
     const tools = new PlaywrightBrowserToolAdapter(env)
