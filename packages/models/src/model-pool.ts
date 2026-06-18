@@ -9,8 +9,8 @@ export interface ProviderModelDefinition {
 }
 
 export const OPENAI_MODEL_POOL: ProviderModelDefinition[] = [
-  { id: "openai:gpt-5.5", modelName: "gpt-5.5", contextWindowTokens: 1_050_000 },
-  { id: "openai:gpt-5.4", modelName: "gpt-5.4", contextWindowTokens: 1_050_000 },
+  { id: "openai:gpt-5.5", modelName: "gpt-5.5", contextWindowTokens: 1_000_000 },
+  { id: "openai:gpt-5.4", modelName: "gpt-5.4", contextWindowTokens: 1_000_000 },
   { id: "openai:gpt-5.4-mini", modelName: "gpt-5.4-mini", contextWindowTokens: 400_000 },
   { id: "openai:gpt-5.4-nano", modelName: "gpt-5.4-nano", contextWindowTokens: 400_000 },
   { id: "openai:gpt-5.3-codex", modelName: "gpt-5.3-codex", contextWindowTokens: 400_000 },

@@ -20,7 +20,7 @@ describe("model pools", () => {
       name: "OpenAI",
       provider: "openai",
       modelName: "gpt-5.5",
-      contextWindowTokens: 1_050_000,
+      contextWindowTokens: 1_000_000,
     })
     expect(codex).toMatchObject({
       name: "OpenAI",

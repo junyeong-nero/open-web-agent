@@ -59,7 +59,7 @@ describe("startDefaultRuntime", () => {
         name: "OpenAI",
         provider: "openai",
         modelName: "gpt-5.5",
-        contextWindowTokens: 1_050_000,
+        contextWindowTokens: 1_000_000,
       })
       expect(plugins.models.find((model) => model.id === "openrouter:google/gemini-3.5-flash")).toMatchObject({
         name: "OpenRouter",
