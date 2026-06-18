@@ -25,12 +25,12 @@ export interface PromptInputProps {
 export function PromptInput(props: PromptInputProps) {
   let textarea: (TextareaRenderable & { plainText?: string }) | undefined
   let programmaticValue: string | null = null
-  const [barPhase, setBarPhase] = createSignal(0)
+  const [spinnerPhase, setSpinnerPhase] = createSignal(0)
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = createSignal(0)
   const [draftValue, setDraftValue] = createSignal(props.value)
   const [historyIndex, setHistoryIndex] = createSignal<number | null>(null)
   const [historyDraft, setHistoryDraft] = createSignal("")
-  const interval = setInterval(() => setBarPhase((phase) => (phase + 1) % 14), 120)
+  const interval = setInterval(() => setSpinnerPhase((phase) => (phase + 1) % MODEL_ACTIVITY_FRAMES.length), 120)
   const keyBindings = [
     { name: "return", action: "submit" as const },
     { name: "enter", action: "submit" as const },
@@ -242,7 +242,7 @@ export function PromptInput(props: PromptInputProps) {
       </box>
       <box visible={props.modelActivity.status === "running"} paddingX={2} paddingTop={1}>
         <text fg={props.theme.reasoning} wrapMode="none">
-          {inferenceLoadingBar(barPhase())}
+          {modelInferenceStatus(props.modelActivity, spinnerPhase())}
         </text>
       </box>
       <box flexDirection="row" justifyContent="space-between" paddingX={2} paddingTop={1} paddingBottom={1} gap={2}>
@@ -261,9 +261,10 @@ function formatSuggestionCompletion(suggestion: SlashCommandSuggestion): string 
   return suggestion.argumentHint ? `${suggestion.name} ` : suggestion.name
 }
 
-function inferenceLoadingBar(phase: number): string {
-  const width = 18
-  const filled = Math.min(width, phase + 5)
-  const empty = Math.max(0, width - filled)
-  return `[${"=".repeat(filled)}>${" ".repeat(empty)}] model inference`
+const MODEL_ACTIVITY_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+function modelInferenceStatus(activity: ModelActivity, phase: number): string {
+  const frame = MODEL_ACTIVITY_FRAMES[phase % MODEL_ACTIVITY_FRAMES.length] ?? MODEL_ACTIVITY_FRAMES[0]
+  const modelName = activity.modelName?.trim()
+  return modelName ? `${frame} thinking · ${modelName}` : `${frame} thinking`
 }
