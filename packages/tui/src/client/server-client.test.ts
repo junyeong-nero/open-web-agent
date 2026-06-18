@@ -50,4 +50,34 @@ describe("createServerClient", () => {
       },
     ])
   })
+
+  it("persists selected agent and browser ids", async () => {
+    const requests: Array<{ path: string; body: unknown }> = []
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        const url = new URL(request.url)
+        if (url.pathname === "/config/agent" && request.method === "PATCH") {
+          requests.push({ path: url.pathname, body: await request.json() })
+          return Response.json({ agentId: "plan-act-agent" })
+        }
+        if (url.pathname === "/config/browser" && request.method === "PATCH") {
+          requests.push({ path: url.pathname, body: await request.json() })
+          return Response.json({ browserId: "playwright-browser" })
+        }
+        return new Response("not found", { status: 404 })
+      },
+    })
+    servers.push(server)
+
+    const client = createServerClient(`http://${server.hostname}:${server.port}`)
+    expect(await client.selectAgent("plan-act-agent")).toEqual({ agentId: "plan-act-agent" })
+    expect(await client.selectBrowser("playwright-browser")).toEqual({ browserId: "playwright-browser" })
+
+    expect(requests).toEqual([
+      { path: "/config/agent", body: { agentId: "plan-act-agent" } },
+      { path: "/config/browser", body: { browserId: "playwright-browser" } },
+    ])
+  })
 })

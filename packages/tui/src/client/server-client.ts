@@ -20,6 +20,11 @@ export interface PluginList {
     }
   >
   environments: PluginSummary[]
+  defaults?: {
+    agentId?: string | null
+    modelId?: string | null
+    environmentId?: string | null
+  }
 }
 
 export interface SessionSummary {
@@ -81,6 +86,18 @@ export function createServerClient(baseUrl: string) {
       return request(`${baseUrl}/config/model`, {
         method: "PATCH",
         body: JSON.stringify({ modelId }),
+      })
+    },
+    async selectAgent(agentId: string): Promise<{ agentId: string }> {
+      return request(`${baseUrl}/config/agent`, {
+        method: "PATCH",
+        body: JSON.stringify({ agentId }),
+      })
+    },
+    async selectBrowser(browserId: string): Promise<{ browserId: string }> {
+      return request(`${baseUrl}/config/browser`, {
+        method: "PATCH",
+        body: JSON.stringify({ browserId }),
       })
     },
   }

@@ -208,6 +208,35 @@ describe("startDefaultRuntime", () => {
     }
   })
 
+  it("uses persisted agent and browser defaults for selectors and new sessions", async () => {
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const configPath = join(home, ".config.yaml")
+    await writeFile(configPath, ['agent: "plan-act-agent"', 'browser: "playwright-browser"', ""].join("\n"))
+
+    const runtime = await startDefaultRuntime({
+      home,
+      configPath,
+      env: isolatedEnv(home),
+    })
+
+    try {
+      const plugins = await fetchPlugins(runtime.url)
+      expect(plugins.agents[0]?.id).toBe("plan-act-agent")
+      expect(plugins.environments[0]?.id).toBe("playwright-browser")
+
+      const response = await fetch(`${runtime.url}/sessions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectPath: "/tmp/open-web-agent-default-browser-test" }),
+      })
+      expect(response.ok).toBe(true)
+      const body = (await response.json()) as { session: { environmentId: string | null } }
+      expect(body.session.environmentId).toBe("playwright-browser")
+    } finally {
+      await runtime.stop()
+    }
+  })
+
   it("registers Python agents from a manifest directory", async () => {
     const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
     const agentsDir = join(home, "agents")

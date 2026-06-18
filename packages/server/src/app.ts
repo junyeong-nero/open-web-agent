@@ -17,6 +17,11 @@ export interface CreateAppDeps {
   storage?: SQLiteStore
   browserSessions?: BrowserSessionManager
   modelConfigPath?: string
+  runtimeDefaults?: {
+    agentId?: string | null
+    modelId?: string | null
+    environmentId?: string | null
+  }
 }
 
 export function createApp(deps: CreateAppDeps): Hono {
@@ -42,7 +47,7 @@ export function createApp(deps: CreateAppDeps): Hono {
     browserSessions,
   })
   registerConfigRoutes(app, { registry: deps.registry, modelConfigPath: deps.modelConfigPath })
-  registerPluginRoutes(app, { registry: deps.registry })
+  registerPluginRoutes(app, { registry: deps.registry, defaults: deps.runtimeDefaults })
 
   return app
 }

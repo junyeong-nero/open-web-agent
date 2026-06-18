@@ -280,6 +280,27 @@ describe("reduceTuiEvent", () => {
     expect(selectedBrowser.availableEnvironments.map((environment) => environment.id)).toEqual(["mock-browser", "playwright-browser"])
   })
 
+  it("uses persisted runtime defaults from loaded plugins when present", () => {
+    const loaded = reduceTuiEvent(createInitialState("/tmp/project"), {
+      type: "plugins.loaded",
+      defaultAgentId: "plan-act-agent",
+      defaultEnvironmentId: "mock-browser",
+      agents: [
+        { id: "mock-agent", name: "Mock Agent", description: "Deterministic" },
+        { id: "see-act", name: "See-Act Agent", description: "Model-driven browser control" },
+        { id: "plan-act-agent", name: "PlanAct Agent", description: "Plans first" },
+      ],
+      models: [],
+      environments: [
+        { id: "mock-browser", name: "Mock Browser" },
+        { id: "playwright-browser", name: "Playwright Browser" },
+      ],
+    })
+
+    expect(loaded.selectedAgentId).toBe("plan-act-agent")
+    expect(loaded.selectedEnvironmentId).toBe("mock-browser")
+  })
+
   it("tracks model inference activity and context usage from model events", () => {
     const loaded = reduceTuiEvent(createInitialState("/tmp/project"), {
       type: "plugins.loaded",

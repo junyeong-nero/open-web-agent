@@ -3,7 +3,14 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { parse } from "yaml"
-import { readModelConfig, resolveModelConfigPath, resolveProviderDefaultModel, writeModelSelectionConfig } from "./model-config"
+import {
+  readModelConfig,
+  resolveModelConfigPath,
+  resolveProviderDefaultModel,
+  writeAgentSelectionConfig,
+  writeBrowserSelectionConfig,
+  writeModelSelectionConfig,
+} from "./model-config"
 
 describe("readModelConfig", () => {
   it("resolves the default user config path", () => {
@@ -37,6 +44,8 @@ describe("readModelConfig", () => {
           ANTHROPIC_API_KEY: "anthropic-key",
           OPEN_WEB_AGENT_MODEL: "custom-model",
           OPEN_WEB_AGENT_MODEL_PROVIDER: "codex-oauth",
+          OPEN_WEB_AGENT_AGENT: "env-agent",
+          OPEN_WEB_AGENT_BROWSER: "env-browser",
           OPEN_WEB_AGENT_REASONING_EFFORT: "high",
           OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS: "256000",
           OPEN_WEB_AGENT_CODEX_AUTH_PATH: "/tmp/codex-auth.json",
@@ -46,6 +55,8 @@ describe("readModelConfig", () => {
     ).toEqual({
       defaultModel: "custom-model",
       defaultModelProvider: "codex-oauth",
+      defaultAgentId: "env-agent",
+      defaultBrowserId: "env-browser",
       reasoningEffort: "high",
       contextWindowTokens: 256000,
       openaiApiKey: "openai-key",
@@ -65,6 +76,8 @@ describe("readModelConfig", () => {
       [
         'model: "yaml-model"',
         'model_provider: "codex-oauth"',
+        'agent: "yaml-agent"',
+        'browser: "yaml-browser"',
         'reasoning_effort: "low"',
         "context_window_tokens: 64000",
         'openai_api_key: "yaml-openai-key"',
@@ -79,6 +92,8 @@ describe("readModelConfig", () => {
     expect(readModelConfig({}, { configPath })).toEqual({
       defaultModel: "yaml-model",
       defaultModelProvider: "codex-oauth",
+      defaultAgentId: "yaml-agent",
+      defaultBrowserId: "yaml-browser",
       reasoningEffort: "low",
       contextWindowTokens: 64000,
       openaiApiKey: "yaml-openai-key",
@@ -123,6 +138,8 @@ describe("readModelConfig", () => {
     expect(readModelConfig({}, { configPath })).toEqual({
       defaultModel: "yaml-model",
       defaultModelProvider: null,
+      defaultAgentId: null,
+      defaultBrowserId: null,
       reasoningEffort: "medium",
       contextWindowTokens: 128000,
       openaiApiKey: null,
@@ -150,6 +167,8 @@ describe("readModelConfig", () => {
       configPath,
       [
         'default_model: "yaml-model"',
+        'agent: "yaml-agent"',
+        'browser: "yaml-browser"',
         'reasoning_effort: "low"',
         "context_window_tokens: 64000",
         'openai_api_key: "yaml-openai-key"',
@@ -169,6 +188,8 @@ describe("readModelConfig", () => {
           ANTHROPIC_API_KEY: "env-anthropic-key",
           OPEN_WEB_AGENT_MODEL: "env-model",
           OPEN_WEB_AGENT_MODEL_PROVIDER: "env-provider",
+          OPEN_WEB_AGENT_AGENT: "env-agent",
+          OPEN_WEB_AGENT_BROWSER: "env-browser",
           OPEN_WEB_AGENT_REASONING_EFFORT: "medium",
           OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS: "128000",
           OPEN_WEB_AGENT_CODEX_AUTH_PATH: "/tmp/env-codex-auth.json",
@@ -178,6 +199,8 @@ describe("readModelConfig", () => {
     ).toEqual({
       defaultModel: "env-model",
       defaultModelProvider: "env-provider",
+      defaultAgentId: "env-agent",
+      defaultBrowserId: "env-browser",
       reasoningEffort: "medium",
       contextWindowTokens: 128000,
       openaiApiKey: "env-openai-key",
@@ -192,6 +215,8 @@ describe("readModelConfig", () => {
   it("uses display defaults for reasoning effort and context window", () => {
     expect(readModelConfig({}, { configPath: "/tmp/missing-open-web-agent-config.yaml" })).toMatchObject({
       defaultModelProvider: null,
+      defaultAgentId: null,
+      defaultBrowserId: null,
       reasoningEffort: "medium",
       contextWindowTokens: 128000,
     })
@@ -220,6 +245,39 @@ describe("readModelConfig", () => {
       openai_api_key: "yaml-openai-key",
       parameters: { temperature: 0.25 },
       unknown_key: "keep-me",
+    })
+  })
+
+  it("persists selected agent and browser while preserving existing config", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-runtime-config-"))
+    const configPath = join(dir, ".openwebagents", "config.yaml")
+    await mkdir(join(dir, ".openwebagents"), { recursive: true })
+    await writeFile(
+      configPath,
+      [
+        'model: "gpt-5.5"',
+        'model_provider: "codex-oauth"',
+        "parameters:",
+        "  temperature: 0.25",
+        "unknown_key: keep-me",
+        "",
+      ].join("\n"),
+    )
+
+    await writeAgentSelectionConfig({ agentId: "plan-act-agent" }, { configPath })
+    await writeBrowserSelectionConfig({ browserId: "playwright-browser" }, { configPath })
+
+    expect(parse(await readFile(configPath, "utf8"))).toMatchObject({
+      model: "gpt-5.5",
+      model_provider: "codex-oauth",
+      agent: "plan-act-agent",
+      browser: "playwright-browser",
+      parameters: { temperature: 0.25 },
+      unknown_key: "keep-me",
+    })
+    expect(readModelConfig({}, { configPath })).toMatchObject({
+      defaultAgentId: "plan-act-agent",
+      defaultBrowserId: "playwright-browser",
     })
   })
 })

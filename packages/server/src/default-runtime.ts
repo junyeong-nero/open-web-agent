@@ -151,6 +151,11 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   for (const agent of await loadPythonAgentManifests(options.agentsDir ?? join(home, "agents"), { model: selectedModel })) {
     registry.registerAgent(agent)
   }
+  const configuredDefaultAgentId = resolveRegisteredId(
+    registry.listAgents().map((agent) => agent.id),
+    modelConfig.defaultAgentId,
+  )
+  const defaultAgentId = configuredDefaultAgentId ?? "mock-agent"
 
   const mockEnvironment = new MockEnvironment(options.environmentDelayMs)
   const playwrightEnvironment = new PlaywrightEnvironment()
@@ -158,20 +163,25 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   registry.registerToolAdapter(new MockBrowserToolAdapter(mockEnvironment))
   registry.registerEnvironment(playwrightEnvironment)
   registry.registerToolAdapter(new PlaywrightBrowserToolAdapter(playwrightEnvironment))
+  const configuredDefaultEnvironmentId = resolveRegisteredId(
+    registry.listEnvironments().map((environment) => environment.id),
+    modelConfig.defaultBrowserId,
+  )
+  const defaultEnvironmentId = configuredDefaultEnvironmentId ?? "mock-browser"
 
   const sessions = new Map<string, SessionState>()
   const browserSessions = new BrowserSessionManager({
     eventBus,
     registry,
-    defaultEnvironmentId: "mock-browser",
+    defaultEnvironmentId,
   })
   const orchestrator = new RunOrchestrator({
     home,
     eventBus,
     registry,
-    agentId: "mock-agent",
+    agentId: defaultAgentId,
     modelId: defaultModelId,
-    environmentId: "mock-browser",
+    environmentId: defaultEnvironmentId,
     maxSteps: 4,
   })
   const storage = new SQLiteStore(join(home, "metadata.sqlite"))
@@ -184,6 +194,11 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     storage,
     browserSessions,
     modelConfigPath: options.configPath,
+    runtimeDefaults: {
+      agentId: configuredDefaultAgentId,
+      modelId: modelConfig.defaultModelProvider ? defaultModelId : null,
+      environmentId: configuredDefaultEnvironmentId,
+    },
   })
   const server = await startServer({
     app,
@@ -211,6 +226,11 @@ function orderModels(models: ModelPlugin[], defaultModelProvider: string | null)
   const selected = models.find((model) => model.id === defaultModelProvider)
   if (!selected) return models
   return [selected, ...models.filter((model) => model.id !== defaultModelProvider)]
+}
+
+function resolveRegisteredId(ids: string[], configuredId: string | null): string | null {
+  if (!configuredId) return null
+  return ids.includes(configuredId) ? configuredId : null
 }
 
 function readModelCallTimeoutMs(env: NodeJS.ProcessEnv): number | undefined {

@@ -635,6 +635,66 @@ describe("createApp", () => {
     expect(await response.json()).toEqual({ error: "Unknown model" })
   })
 
+  it("PATCH /config/agent persists a selected agent for future sessions", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-server-config-"))
+    const configPath = join(dir, ".config.yaml")
+    const { request } = await setup(0, undefined, true, false, configPath)
+
+    const response = await request("/config/agent", {
+      method: "PATCH",
+      body: JSON.stringify({ agentId: "alternate-agent" }),
+    })
+    const body = await json<{ agentId: string }>(response)
+
+    expect(body).toEqual({ agentId: "alternate-agent" })
+    expect(readModelConfig({}, { configPath })).toMatchObject({
+      defaultAgentId: "alternate-agent",
+    })
+  })
+
+  it("PATCH /config/agent rejects an unknown agent", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-server-config-"))
+    const { request } = await setup(0, undefined, true, false, join(dir, ".config.yaml"))
+
+    const response = await request("/config/agent", {
+      method: "PATCH",
+      body: JSON.stringify({ agentId: "missing-agent" }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: "Unknown agent" })
+  })
+
+  it("PATCH /config/browser persists a selected browser for future sessions", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-server-config-"))
+    const configPath = join(dir, ".config.yaml")
+    const { request } = await setup(0, undefined, false, true, configPath)
+
+    const response = await request("/config/browser", {
+      method: "PATCH",
+      body: JSON.stringify({ browserId: "alternate-browser" }),
+    })
+    const body = await json<{ browserId: string }>(response)
+
+    expect(body).toEqual({ browserId: "alternate-browser" })
+    expect(readModelConfig({}, { configPath })).toMatchObject({
+      defaultBrowserId: "alternate-browser",
+    })
+  })
+
+  it("PATCH /config/browser rejects an unknown browser", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-server-config-"))
+    const { request } = await setup(0, undefined, false, true, join(dir, ".config.yaml"))
+
+    const response = await request("/config/browser", {
+      method: "PATCH",
+      body: JSON.stringify({ browserId: "missing-browser" }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: "Unknown browser" })
+  })
+
   it("POST /runs/:runId/cancel returns cancelled false for an unknown run", async () => {
     const { request } = await setup()
 

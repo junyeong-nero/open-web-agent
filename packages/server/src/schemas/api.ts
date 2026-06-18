@@ -27,7 +27,17 @@ export const UpdateModelConfigRequestSchema = z.object({
   modelId: z.string().min(1),
 })
 
+export const UpdateAgentConfigRequestSchema = z.object({
+  agentId: z.string().min(1),
+})
+
+export const UpdateBrowserConfigRequestSchema = z.object({
+  browserId: z.string().min(1),
+})
+
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequestSchema>
 export type UpdateSessionRequest = z.infer<typeof UpdateSessionRequestSchema>
 export type CreateRunRequest = z.infer<typeof CreateRunRequestSchema>
 export type UpdateModelConfigRequest = z.infer<typeof UpdateModelConfigRequestSchema>
+export type UpdateAgentConfigRequest = z.infer<typeof UpdateAgentConfigRequestSchema>
+export type UpdateBrowserConfigRequest = z.infer<typeof UpdateBrowserConfigRequestSchema>
