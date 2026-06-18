@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import {
   EventBus,
   type AgentState,
@@ -15,6 +15,11 @@ import {
 import { PythonAgentAdapter } from "./python-agent-adapter"
 
 const python = process.env.PYTHON ?? "python3"
+const repoAgentsDir = resolve(import.meta.dir, "../../../agents")
+const commonImportPrelude = `
+import sys
+sys.path.insert(0, ${JSON.stringify(repoAgentsDir)})
+`
 
 function state(): AgentState {
   return {
@@ -95,6 +100,140 @@ class FakeModel implements ModelPlugin {
 }
 
 describe("PythonAgentAdapter", () => {
+  it("runs BaseAgent subclasses that return final answers", async () => {
+    const script = await writePythonScript(`
+${commonImportPrelude}
+from _common.agent import BaseAgent
+
+class FixtureAgent(BaseAgent):
+    def step(self, ctx):
+        return ctx.final_answer(f"handled: {ctx.prompt}", thought="fixture")
+
+if __name__ == "__main__":
+    FixtureAgent().run()
+`)
+    const agent = new PythonAgentAdapter({
+      id: "python-base-agent",
+      name: "Python Base Agent",
+      description: "Uses BaseAgent",
+      command: [python, script],
+      protocol: "jsonl",
+    })
+
+    const decision = await agent.step(state(), ctx())
+
+    expect(decision).toEqual({
+      type: "final_answer",
+      thought: "fixture",
+      finalAnswer: "handled: Read example.com",
+      confidence: 1,
+    })
+  })
+
+  it("lets BaseAgent subclasses request JSON from the runtime model", async () => {
+    class JsonModel extends FakeModel {
+      override async complete(request: ModelRequest): Promise<ModelResponse> {
+        this.requests.push(request)
+        return {
+          id: "json-response",
+          text: JSON.stringify({ answer: "model json answer" }),
+          raw: { ok: true },
+          usage: null,
+          latencyMs: 0,
+        }
+      }
+    }
+    const script = await writePythonScript(`
+${commonImportPrelude}
+from _common.agent import BaseAgent
+
+class FixtureAgent(BaseAgent):
+    def step(self, ctx):
+        parsed = ctx.model.complete_json(
+            system="Return JSON.",
+            user=ctx.observation_text(),
+        )
+        return ctx.final_answer(parsed["answer"], thought="json")
+
+if __name__ == "__main__":
+    FixtureAgent().run()
+`)
+    const model = new JsonModel()
+    const agent = new PythonAgentAdapter({
+      id: "python-base-model-agent",
+      name: "Python Base Model Agent",
+      description: "Uses BaseAgent model helpers",
+      command: [python, script],
+      protocol: "jsonl",
+      model,
+    })
+
+    const decision = await agent.step(state(), ctx())
+
+    expect(model.requests).toHaveLength(1)
+    expect(model.requests[0]).toMatchObject({
+      temperature: 0,
+      responseFormat: "json",
+      messages: [
+        { role: "system", content: "Return JSON." },
+        { role: "user" },
+      ],
+    })
+    expect(decision).toMatchObject({ type: "final_answer", finalAnswer: "model json answer" })
+  })
+
+  it("lets BaseAgent subclasses emit events and browser action decisions", async () => {
+    const script = await writePythonScript(`
+${commonImportPrelude}
+from _common.agent import BaseAgent
+
+class FixtureAgent(BaseAgent):
+    def step(self, ctx):
+        ctx.events.plan_created([
+            {"id": "open", "title": "Open the page", "status": "active"},
+        ])
+        return ctx.actions.navigate("open_example", "https://example.com", reason="Open example.com")
+
+if __name__ == "__main__":
+    FixtureAgent().run()
+`)
+    const runtimeContext = ctx()
+    const agent = new PythonAgentAdapter({
+      id: "python-base-action-agent",
+      name: "Python Base Action Agent",
+      description: "Uses BaseAgent action helpers",
+      command: [python, script],
+      protocol: "jsonl",
+    })
+
+    const decision = await agent.step(
+      { ...state(), lastObservation: { ...state().lastObservation!, url: "about:blank" } },
+      runtimeContext,
+    )
+
+    expect(runtimeContext.emitted).toEqual([
+      {
+        type: "plan.created",
+        payload: {
+          items: [{ id: "open", title: "Open the page", status: "active" }],
+        },
+      },
+    ])
+    expect(decision).toEqual({
+      type: "browser_actions",
+      thought: "Open example.com",
+      actions: [
+        {
+          id: "open_example",
+          kind: "navigate",
+          reason: "Open example.com",
+          requiresApproval: false,
+          toolCalls: [{ id: "open_example_tool", type: "navigate", url: "https://example.com" }],
+        },
+      ],
+    })
+  })
+
   it("sends lifecycle requests and parses step decisions", async () => {
     const logPath = join(await mkdtemp(join(tmpdir(), "owa-python-agent-log-")), "requests.jsonl")
     const script = await writePythonScript(`
