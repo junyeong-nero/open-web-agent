@@ -49,6 +49,28 @@ describe("copySelectionToClipboard", () => {
     expect(copied).toBe(true)
     expect(fallbackText).toEqual(["fallback copy"])
   })
+
+  it("prefers a system clipboard writer for non-ASCII selections", async () => {
+    const fallbackText: string[] = []
+    const oscText: string[] = []
+    const copied = await copySelectionToClipboard(
+      {
+        getSelection: () => ({ getSelectedText: () => "오늘 날씨" }),
+        copyToClipboardOSC52: (text) => {
+          oscText.push(text)
+          return true
+        },
+      },
+      async (text) => {
+        fallbackText.push(text)
+        return true
+      },
+    )
+
+    expect(copied).toBe(true)
+    expect(fallbackText).toEqual(["오늘 날씨"])
+    expect(oscText).toEqual([])
+  })
 })
 
 describe("readSystemClipboardText", () => {
