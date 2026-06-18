@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
-import type { ScrollBoxRenderable } from "@opentui/core"
 import { For, createMemo } from "solid-js"
+import type { ScrollBoxRenderable } from "@opentui/core"
 import type { SessionSummary } from "../state/types"
 import type { TuiTheme } from "../theme/themes"
 
