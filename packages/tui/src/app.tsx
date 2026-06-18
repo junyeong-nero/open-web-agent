@@ -19,6 +19,7 @@ import { copySelectionToClipboard, pasteSystemClipboardText } from "./clipboard/
 import { formatSlashCommandHelp, listSlashCommandSuggestions, parseSlashCommand } from "./commands/slash-commands"
 import { mapKeyEvent } from "./keymap/keybindings"
 import { defaultPromptHistoryStore, type PromptHistoryStore } from "./prompt-history"
+import { reduceRuntimeSelectionSuccess } from "./runtime-selection"
 import { createInitialState, reduceTuiEvent } from "./state/reducer"
 import type { AgentSummary, EnvironmentSummary, ModelSummary, RuntimeSelectorKind, SessionSummary, TuiState } from "./state/types"
 import { getTheme, listThemes, type TuiTheme } from "./theme/themes"
@@ -654,11 +655,11 @@ export function App(props: AppProps) {
     const nextEffort = reasoningEfforts[(baseIndex + delta + reasoningEfforts.length) % reasoningEfforts.length]
     if (!nextEffort || nextEffort === model.reasoningEffort) return false
 
-    void persistAndSelectModel(model.id, { reasoningEffort: nextEffort, message: `Reasoning effort set to ${nextEffort}` })
+    void persistAndSelectModel(model.id, { reasoningEffort: nextEffort })
     return true
   }
 
-  async function persistAndSelectModel(modelId: string, options: { reasoningEffort?: string; message?: string } = {}) {
+  async function persistAndSelectModel(modelId: string, options: { reasoningEffort?: string } = {}) {
     try {
       await client.selectModel(modelId, options.reasoningEffort)
     } catch (error) {
@@ -672,13 +673,7 @@ export function App(props: AppProps) {
     }
 
     setState((current) =>
-      reduceTuiEvent(
-        reduceTuiEvent(current, { type: "model.selected", modelId, reasoningEffort: options.reasoningEffort }),
-        {
-          type: "conversation.append",
-          message: { role: "system", content: options.message ?? `Model set to ${modelId}` },
-        },
-      ),
+      reduceRuntimeSelectionSuccess(current, { kind: "model", modelId, reasoningEffort: options.reasoningEffort }),
     )
   }
 
@@ -695,15 +690,7 @@ export function App(props: AppProps) {
       return
     }
 
-    setState((current) =>
-      reduceTuiEvent(
-        reduceTuiEvent(current, { type: "agent.selected", agentId }),
-        {
-          type: "conversation.append",
-          message: { role: "system", content: `Agent set to ${agentId}` },
-        },
-      ),
-    )
+    setState((current) => reduceRuntimeSelectionSuccess(current, { kind: "agent", agentId }))
   }
 
   async function persistAndSelectBrowser(environmentId: string) {
@@ -719,15 +706,7 @@ export function App(props: AppProps) {
       return
     }
 
-    setState((current) =>
-      reduceTuiEvent(
-        reduceTuiEvent(current, { type: "environment.selected", environmentId }),
-        {
-          type: "conversation.append",
-          message: { role: "system", content: `Browser set to ${environmentId}` },
-        },
-      ),
-    )
+    setState((current) => reduceRuntimeSelectionSuccess(current, { kind: "browser", environmentId }))
   }
 
   return (
