@@ -1,5 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { describe, expect, it } from "bun:test"
+import { ScrollBoxRenderable } from "@opentui/core"
 import { testRender } from "@opentui/solid"
 import type { AgentSummary, EnvironmentSummary, ModelSummary } from "../state/types"
 import { getTheme } from "../theme/themes"
@@ -159,6 +160,17 @@ describe("RuntimeSelector", () => {
       options: [{ id: "openrouter-free", label: "nvidia/nemotron-3-super-120b-a12b:free", detail: "Free", selected: false }],
     },
   ]
+  const longSections = [
+    {
+      title: "OpenRouter",
+      options: Array.from({ length: 24 }, (_, index) => ({
+        id: `model-${index}`,
+        label: `Model ${index}`,
+        detail: "OpenRouter",
+        selected: false,
+      })),
+    },
+  ]
 
   it("renders a centered picker with search, sections, selected marker, and footer shortcuts", async () => {
     const setup = await testRender(
@@ -223,6 +235,78 @@ describe("RuntimeSelector", () => {
       await setup.flush()
 
       expect(selected).toEqual(["openrouter-free"])
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  it("renders options in a scrollbox that responds to mouse wheel scrolling", async () => {
+    const setup = await testRender(
+      () => (
+        <RuntimeSelector
+          title="Select model"
+          emptyMessage="No matching models"
+          sections={longSections}
+          theme={getTheme("opencode")}
+          onQueryChange={() => {}}
+          onSelect={() => {}}
+          onCancel={() => {}}
+        />
+      ),
+      { width: 96, height: 24 },
+    )
+
+    try {
+      await setup.flush()
+      const scrollbox = setup.renderer.root.findDescendantById("runtime-selector-options")
+
+      expect(scrollbox).toBeInstanceOf(ScrollBoxRenderable)
+
+      const optionsScroll = scrollbox as ScrollBoxRenderable
+      expect(optionsScroll.scrollHeight).toBeGreaterThan(optionsScroll.viewport.height)
+
+      await setup.mockMouse.scroll(optionsScroll.screenX + 1, optionsScroll.screenY + 1, "down")
+      await setup.flush()
+
+      expect(optionsScroll.scrollTop).toBeGreaterThan(0)
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  it("keeps the keyboard-highlighted option visible while navigating a long list", async () => {
+    const selected: string[] = []
+    const setup = await testRender(
+      () => (
+        <RuntimeSelector
+          title="Select model"
+          emptyMessage="No matching models"
+          sections={longSections}
+          theme={getTheme("opencode")}
+          onQueryChange={() => {}}
+          onSelect={(option: RuntimeSelectorOption) => selected.push(option.id)}
+          onCancel={() => {}}
+        />
+      ),
+      { width: 96, height: 24 },
+    )
+
+    try {
+      await setup.flush()
+      const scrollbox = setup.renderer.root.findDescendantById("runtime-selector-options")
+
+      expect(scrollbox).toBeInstanceOf(ScrollBoxRenderable)
+
+      const optionsScroll = scrollbox as ScrollBoxRenderable
+      for (let index = 0; index < 16; index += 1) setup.mockInput.pressArrow("down")
+      await setup.flush()
+
+      expect(optionsScroll.scrollTop).toBeGreaterThan(0)
+
+      setup.mockInput.pressEnter()
+      await setup.flush()
+
+      expect(selected).toEqual(["model-16"])
     } finally {
       setup.renderer.destroy()
     }
