@@ -299,14 +299,20 @@ describe("PromptInput", () => {
     }
   })
 
-  it("renders model activity as a compact thinking status", async () => {
+  it("renders model activity inline with the prompt metadata", async () => {
     const setup = await testRender(
       () => (
         <PromptInput
           value=""
-          agent={null}
-          model={null}
-          modelActivity={{ ...idleModelActivity, status: "running", modelName: "gpt-test" }}
+          agent={{ id: "plan-act-agent", name: "PlanAct Agent", description: "Plans before acting." }}
+          model={{
+            id: "openai",
+            name: "OpenAI",
+            provider: "openai",
+            modelName: "GPT-5.5",
+            reasoningEffort: "high",
+          }}
+          modelActivity={{ ...idleModelActivity, status: "running", modelName: "GPT-5.5" }}
           runStatus="running"
           theme={getTheme("opencode")}
           onChange={() => {}}
@@ -318,11 +324,13 @@ describe("PromptInput", () => {
 
     try {
       await setup.flush()
-      const frame = setup.captureCharFrame()
+      const rows = setup.captureCharFrame().split("\n")
+      const metadataRow = rows.findIndex((row) => row.includes("PlanAct / GPT-5.5 / high"))
+      const thinkingRow = rows.findIndex((row) => row.includes("thinking"))
 
-      expect(frame).toContain("thinking · gpt-test")
-      expect(frame).not.toContain("model inference")
-      expect(frame).not.toContain("[======>")
+      expect(metadataRow).toBeGreaterThan(-1)
+      expect(rows[metadataRow]).toContain("⠋ PlanAct / GPT-5.5 / high")
+      expect(thinkingRow).toBe(-1)
     } finally {
       setup.renderer.destroy()
     }

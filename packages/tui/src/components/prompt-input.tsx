@@ -240,14 +240,9 @@ export function PromptInput(props: PromptInputProps) {
           }}
         </For>
       </box>
-      <box visible={props.modelActivity.status === "running"} paddingX={2} paddingTop={1}>
-        <text fg={props.theme.reasoning} wrapMode="none">
-          {modelInferenceStatus(props.modelActivity, spinnerPhase())}
-        </text>
-      </box>
       <box flexDirection="row" justifyContent="space-between" paddingX={2} paddingTop={1} paddingBottom={1} gap={2}>
         <text fg={props.theme.text} wrapMode="none">
-          {promptMeta(props.agent, props.model)}
+          {promptMetaWithActivity(props.agent, props.model, props.modelActivity, spinnerPhase())}
         </text>
         <text fg={props.theme.textMuted} wrapMode="none">
           {promptHint(props.runStatus, formatContextUsage(props.modelActivity))}
@@ -263,8 +258,14 @@ function formatSuggestionCompletion(suggestion: SlashCommandSuggestion): string 
 
 const MODEL_ACTIVITY_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
-function modelInferenceStatus(activity: ModelActivity, phase: number): string {
+function promptMetaWithActivity(agent: AgentSummary | null, model: ModelSummary | null, activity: ModelActivity, phase: number): string {
+  const meta = promptMeta(agent, model)
+  if (activity.status !== "running") return meta
+
+  return `${modelActivityFrame(phase)} ${meta}`
+}
+
+function modelActivityFrame(phase: number): string {
   const frame = MODEL_ACTIVITY_FRAMES[phase % MODEL_ACTIVITY_FRAMES.length] ?? MODEL_ACTIVITY_FRAMES[0]
-  const modelName = activity.modelName?.trim()
-  return modelName ? `${frame} thinking · ${modelName}` : `${frame} thinking`
+  return frame
 }
