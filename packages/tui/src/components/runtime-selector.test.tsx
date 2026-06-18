@@ -59,6 +59,29 @@ describe("buildModelSelectorSections", () => {
     ])
   })
 
+  it("sorts provider sections independently of runtime registration order", () => {
+    const providerModels: ModelSummary[] = [
+      {
+        id: "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+        name: "OpenRouter",
+        provider: "openrouter",
+        modelName: "nvidia/nemotron-3-super-120b-a12b:free",
+      },
+      { id: "openrouter:openai/gpt-5.5", name: "OpenRouter", provider: "openrouter", modelName: "openai/gpt-5.5" },
+      { id: "openai", name: "OpenAI", provider: "openai", modelName: "gpt-5.5" },
+      { id: "gemini", name: "Gemini", provider: "gemini", modelName: "gemini-3.5-flash" },
+      { id: "openrouter:google/gemini-3.5-flash", name: "OpenRouter", provider: "openrouter", modelName: "google/gemini-3.5-flash" },
+    ]
+
+    const sections = buildModelSelectorSections(providerModels, "openrouter:nvidia/nemotron-3-super-120b-a12b:free", "")
+
+    expect(sections.map((section) => section.title)).toEqual(["Favorites", "OpenAI", "Gemini", "OpenRouter"])
+    expect(sections.at(-1)?.options.map((option) => option.id)).toEqual([
+      "openrouter:openai/gpt-5.5",
+      "openrouter:google/gemini-3.5-flash",
+    ])
+  })
+
   it("uses the requested provider labels and marks free models in the option detail", () => {
     const providerModels: ModelSummary[] = [
       { id: "openai:gpt-5.5", name: "OpenAI", provider: "openai", modelName: "gpt-5.5" },

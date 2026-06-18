@@ -23,6 +23,12 @@ interface RuntimeSelectorRow {
   optionIndex?: number
 }
 
+interface ModelSelectorGroup {
+  provider: string
+  title: string
+  options: RuntimeSelectorOption[]
+}
+
 export interface RuntimeSelectorProps {
   title: string
   emptyMessage: string
@@ -213,19 +219,20 @@ export function buildModelSelectorSections(models: ModelSummary[], selectedModel
     sections.push({ title: "Favorites", options: [toModelSelectorOption(selectedModel, true)] })
   }
 
-  const grouped = new Map<string, RuntimeSelectorOption[]>()
+  const grouped = new Map<string, ModelSelectorGroup>()
   for (const model of models) {
     if (model.id === selectedModelId && normalizedQuery.length === 0) continue
     if (!matches(model)) continue
 
+    const provider = providerSortKey(model)
     const title = providerDisplayName(model)
-    const options = grouped.get(title) ?? []
-    options.push(toModelSelectorOption(model, model.id === selectedModelId))
-    grouped.set(title, options)
+    const group = grouped.get(provider) ?? { provider, title, options: [] }
+    group.options.push(toModelSelectorOption(model, model.id === selectedModelId))
+    grouped.set(provider, group)
   }
 
-  for (const [title, options] of grouped) {
-    sections.push({ title, options })
+  for (const group of [...grouped.values()].sort(compareModelSelectorGroups)) {
+    sections.push({ title: group.title, options: group.options })
   }
 
   return sections.filter((section) => section.options.length > 0)
@@ -334,6 +341,23 @@ function providerDisplayName(model: ModelSummary): string {
     .join(" ")
 }
 
+function providerSortKey(model: ModelSummary): string {
+  const provider = model.provider.trim().toLowerCase()
+  return provider.length > 0 ? provider : model.id.toLowerCase()
+}
+
+function compareModelSelectorGroups(a: ModelSelectorGroup, b: ModelSelectorGroup): number {
+  const priorityDiff = providerSortPriority(a.provider) - providerSortPriority(b.provider)
+  if (priorityDiff !== 0) return priorityDiff
+
+  return a.title.localeCompare(b.title, undefined, { sensitivity: "base" })
+}
+
+function providerSortPriority(provider: string): number {
+  const index = modelProviderOrder.indexOf(provider)
+  return index === -1 ? modelProviderOrder.length : index
+}
+
 const providerDisplayNames: Record<string, string> = {
   claude: "Claude",
   "codex-oauth": "OpenAI OAuth",
@@ -341,6 +365,8 @@ const providerDisplayNames: Record<string, string> = {
   openai: "OpenAI",
   openrouter: "OpenRouter",
 }
+
+const modelProviderOrder = ["openai", "claude", "gemini", "codex-oauth", "openrouter"]
 
 const freeModelBadge = "Free"
 
