@@ -35,12 +35,15 @@ export interface WriteSystemClipboardOptions {
   run?: ClipboardWriteCommandRunner
 }
 
+const nonAsciiPattern = /[^\x00-\x7F]/u
+
 export async function copySelectionToClipboard(
   renderer: ClipboardRenderer,
   write: ClipboardTextWriter = writeSystemClipboardText,
 ): Promise<boolean> {
   const text = renderer.getSelection()?.getSelectedText() ?? ""
   if (text.length === 0) return false
+  if (nonAsciiPattern.test(text) && (await write(text))) return true
   if (renderer.copyToClipboardOSC52(text)) return true
   return write(text)
 }
