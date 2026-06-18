@@ -237,6 +237,28 @@ describe("startDefaultRuntime", () => {
     }
   })
 
+  it("passes the configured browser focus preference to Playwright", async () => {
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const configPath = join(home, ".config.yaml")
+    await writeFile(configPath, ["browser_prevent_focus: true", ""].join("\n"))
+
+    const runtime = await startDefaultRuntime({
+      home,
+      configPath,
+      env: isolatedEnv(home),
+    })
+
+    try {
+      const environment = runtime.registry.getEnvironment("playwright-browser") as unknown as {
+        options?: { preventFocus?: boolean }
+      }
+
+      expect(environment.options?.preventFocus).toBe(true)
+    } finally {
+      await runtime.stop()
+    }
+  })
+
   it("registers Python agents from a manifest directory", async () => {
     const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
     const agentsDir = join(home, "agents")

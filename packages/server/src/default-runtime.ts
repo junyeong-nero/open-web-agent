@@ -165,7 +165,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   const defaultAgentId = configuredDefaultAgentId ?? "mock-agent"
 
   const mockEnvironment = new MockEnvironment(options.environmentDelayMs)
-  const playwrightEnvironment = new PlaywrightEnvironment()
+  const playwrightEnvironment = new PlaywrightEnvironment({ preventFocus: modelConfig.browserPreventFocus })
   registry.registerEnvironment(mockEnvironment)
   registry.registerToolAdapter(new MockBrowserToolAdapter(mockEnvironment))
   registry.registerEnvironment(playwrightEnvironment)

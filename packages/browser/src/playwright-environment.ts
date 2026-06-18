@@ -15,6 +15,7 @@ import type {
 export interface PlaywrightEnvironmentOptions {
   browserName?: "chromium" | "firefox" | "webkit"
   headless?: boolean
+  preventFocus?: boolean
 }
 
 interface PlaywrightRunState {
@@ -38,7 +39,9 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
 
   async attachSession(ctx: RuntimeContext): Promise<void> {
     const state = await this.ensureState(ctx)
-    await state.page.bringToFront().catch(() => {})
+    if (!this.options.preventFocus) {
+      await state.page.bringToFront().catch(() => {})
+    }
   }
 
   async reset(ctx: RuntimeContext): Promise<void> {
@@ -96,11 +99,12 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
     const headless = resolvePlaywrightHeadless(this.options)
     if (this.options.browserName === "firefox") return firefox.launch({ headless })
     if (this.options.browserName === "webkit") return webkit.launch({ headless })
+    const launchOptions = resolveChromiumLaunchOptions(this.options)
     try {
-      return await chromium.launch({ headless })
+      return await chromium.launch(launchOptions)
     } catch (error) {
       const executablePath = findCachedChromiumExecutable()
-      if (executablePath) return chromium.launch({ headless, executablePath })
+      if (executablePath) return chromium.launch({ ...launchOptions, executablePath })
       throw error
     }
   }
@@ -300,6 +304,16 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
 
 export function resolvePlaywrightHeadless(options: Pick<PlaywrightEnvironmentOptions, "headless">): boolean {
   return options.headless ?? false
+}
+
+export function resolveChromiumLaunchOptions(
+  options: Pick<PlaywrightEnvironmentOptions, "headless" | "preventFocus">,
+): { headless: boolean; args?: string[] } {
+  const headless = resolvePlaywrightHeadless(options)
+  return {
+    headless,
+    ...(!headless && options.preventFocus ? { args: ["--start-minimized"] } : {}),
+  }
 }
 
 function locatorForTarget(page: Page, target: {

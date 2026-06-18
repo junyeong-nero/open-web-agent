@@ -61,6 +61,7 @@ model: "nvidia/nemotron-3-super-120b-a12b:free"
 model_provider: "openai"
 agent: "see-act"
 browser: "playwright-browser"
+browser_prevent_focus: true
 reasoning_effort: "medium"
 context_window_tokens: 128000
 max_retry: 2
@@ -86,6 +87,7 @@ parameters:
 Set one or more provider keys. Environment variables still take precedence when present:
 `OPEN_WEB_AGENT_MODEL`, `OPEN_WEB_AGENT_MODEL_PROVIDER`,
 `OPEN_WEB_AGENT_AGENT`, `OPEN_WEB_AGENT_BROWSER`,
+`OPEN_WEB_AGENT_BROWSER_PREVENT_FOCUS`,
 `OPEN_WEB_AGENT_REASONING_EFFORT`,
 `OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS`, `OPEN_WEB_AGENT_MAX_RETRY`,
 `OPEN_WEB_AGENT_MODEL_TIMEOUT_MS`,

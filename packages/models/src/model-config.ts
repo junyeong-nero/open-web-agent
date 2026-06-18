@@ -10,6 +10,7 @@ export interface ModelConfig {
   defaultModelProvider: string | null
   defaultAgentId: string | null
   defaultBrowserId: string | null
+  browserPreventFocus: boolean
   reasoningEffort: string
   contextWindowTokens: number
   maxRetry: number
@@ -65,6 +66,7 @@ const defaultModel = defaultOpenRouterModel
 const defaultReasoningEffort = "medium"
 const defaultContextWindowTokens = 128000
 const defaultMaxRetry = 0
+const defaultBrowserPreventFocus = false
 
 export function resolveModelConfigPath(): string {
   return join(homedir(), ".openwebagents", "config.yaml")
@@ -78,6 +80,10 @@ export function readModelConfig(env: NodeJS.ProcessEnv = process.env, options: R
     defaultModelProvider: env.OPEN_WEB_AGENT_MODEL_PROVIDER || fileConfig.defaultModelProvider || null,
     defaultAgentId: env.OPEN_WEB_AGENT_AGENT || fileConfig.defaultAgentId || null,
     defaultBrowserId: env.OPEN_WEB_AGENT_BROWSER || fileConfig.defaultBrowserId || null,
+    browserPreventFocus:
+      readBooleanEnv(env.OPEN_WEB_AGENT_BROWSER_PREVENT_FOCUS, "OPEN_WEB_AGENT_BROWSER_PREVENT_FOCUS") ??
+      fileConfig.browserPreventFocus ??
+      defaultBrowserPreventFocus,
     reasoningEffort: env.OPEN_WEB_AGENT_REASONING_EFFORT || fileConfig.reasoningEffort || defaultReasoningEffort,
     contextWindowTokens: readContextWindowTokens(env.OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS) ?? fileConfig.contextWindowTokens ?? defaultContextWindowTokens,
     maxRetry: readMaxRetry(env.OPEN_WEB_AGENT_MAX_RETRY) ?? fileConfig.maxRetry ?? defaultMaxRetry,
@@ -150,6 +156,7 @@ function readConfigFile(configPath: string): Partial<ModelConfig> {
     defaultModelProvider: readOptionalString(parsed, configPath, "model_provider", "modelProvider"),
     defaultAgentId: readOptionalString(parsed, configPath, "agent", "agent_id", "default_agent", "defaultAgentId"),
     defaultBrowserId: readOptionalString(parsed, configPath, "browser", "browser_id", "environment_id", "default_browser", "defaultBrowserId"),
+    browserPreventFocus: readOptionalBoolean(parsed, configPath, "browser_prevent_focus", "browserPreventFocus", "prevent_browser_focus", "preventBrowserFocus"),
     reasoningEffort: readOptionalString(parsed, configPath, "reasoning_effort", "reasoningEffort"),
     contextWindowTokens: readOptionalPositiveInteger(parsed, configPath, "context_window_tokens", "contextWindowTokens"),
     maxRetry: readOptionalNonNegativeInteger(parsed, configPath, "max_retry", "maxRetry"),
@@ -249,6 +256,15 @@ function readOptionalNonNegativeInteger(record: Record<string, unknown>, configP
   return entry.value
 }
 
+function readOptionalBoolean(record: Record<string, unknown>, configPath: string, ...keys: string[]): boolean | undefined {
+  const entry = readOptionalEntry(record, keys)
+  if (!entry || entry.value == null) return undefined
+  if (typeof entry.value !== "boolean") {
+    throw new Error(`Invalid Open Web Agent config at ${configPath}: ${entry.key} must be a boolean`)
+  }
+  return entry.value
+}
+
 function readOptionalRecord(
   record: Record<string, unknown>,
   configPath: string,
@@ -260,6 +276,14 @@ function readOptionalRecord(
     throw new Error(`Invalid Open Web Agent config at ${configPath}: ${entry.key} must be a mapping`)
   }
   return entry.value
+}
+
+function readBooleanEnv(value: string | undefined, name: string): boolean | undefined {
+  if (value == null || value.length === 0) return undefined
+  const normalized = value.toLowerCase()
+  if (["1", "true", "yes", "on"].includes(normalized)) return true
+  if (["0", "false", "no", "off"].includes(normalized)) return false
+  throw new Error(`Invalid ${name}: must be a boolean`)
 }
 
 function readOptionalStop(record: Record<string, unknown>, configPath: string): string | string[] | undefined {
