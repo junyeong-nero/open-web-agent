@@ -74,20 +74,25 @@ export function App(props: AppProps) {
       return {
         title: "Select agent",
         emptyMessage: "No matching agents",
-        sections: buildAgentSelectorSections(current.availableAgents, current.selectedAgentId, query),
+        sections: buildAgentSelectorSections(current.availableAgents, current.selectedAgentId, query, current.runtimeFavoriteIds.agent),
       }
     }
     if (kind === "browser") {
       return {
         title: "Select browser",
         emptyMessage: "No matching browsers",
-        sections: buildBrowserSelectorSections(current.availableEnvironments, current.selectedEnvironmentId, query),
+        sections: buildBrowserSelectorSections(
+          current.availableEnvironments,
+          current.selectedEnvironmentId,
+          query,
+          current.runtimeFavoriteIds.browser,
+        ),
       }
     }
     return {
       title: "Select model",
       emptyMessage: "No matching models",
-      sections: buildModelSelectorSections(current.availableModels, current.selectedModelId, query),
+      sections: buildModelSelectorSections(current.availableModels, current.selectedModelId, query, current.runtimeFavoriteIds.model),
     }
   })
   const sessionSpinner = setInterval(() => setSessionLoadingPhase((phase) => (phase + 1) % 4), 140)
@@ -614,6 +619,24 @@ export function App(props: AppProps) {
     await persistAndSelectModel(option.id)
   }
 
+  function toggleRuntimeFavorite(option: RuntimeSelectorOption) {
+    const kind = state().runtimeSelectorKind
+    if (!kind) return
+    setState((current) => {
+      const favoriteIds = current.runtimeFavoriteIds[kind]
+      const nextFavoriteIds = favoriteIds.includes(option.id)
+        ? favoriteIds.filter((id) => id !== option.id)
+        : [...favoriteIds, option.id]
+      return {
+        ...current,
+        runtimeFavoriteIds: {
+          ...current.runtimeFavoriteIds,
+          [kind]: nextFavoriteIds,
+        },
+      }
+    })
+  }
+
   async function recordPromptHistory(value: string) {
     try {
       setPromptHistory(await promptHistoryStore().append(value))
@@ -765,6 +788,7 @@ export function App(props: AppProps) {
           theme={currentTheme()}
           onQueryChange={(query) => setState((current) => ({ ...current, runtimeSelectorQuery: query }))}
           onSelect={selectRuntimeOption}
+          onToggleFavorite={toggleRuntimeFavorite}
           onCancel={closeRuntimeSelector}
         />
       ) : null}

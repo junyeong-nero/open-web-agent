@@ -24,6 +24,7 @@ describe("reduceTuiEvent", () => {
       selectedThemeId: "opencode",
       runtimeSelectorKind: null,
       runtimeSelectorQuery: "",
+      runtimeFavoriteIds: { agent: [], model: [], browser: [] },
       availableAgents: [],
       availableModels: [],
       availableEnvironments: [],

@@ -46,6 +46,31 @@ describe("buildModelSelectorSections", () => {
     ])
   })
 
+  it("groups registered model favorites with the selected model", () => {
+    const sections = buildModelSelectorSections(models, "openai", "", ["openrouter-free"])
+
+    expect(sections).toEqual([
+      {
+        title: "Favorites",
+        options: [
+          { id: "openai", label: "GPT-5.5", detail: "OpenAI", selected: true },
+          { id: "openrouter-free", label: "DeepSeek V4 Flash Free", detail: "Free", selected: false },
+        ],
+      },
+      {
+        title: "OpenRouter",
+        options: [
+          {
+            id: "openrouter-claude",
+            label: "Claude Opus 4.6",
+            detail: "OpenRouter",
+            selected: false,
+          },
+        ],
+      },
+    ])
+  })
+
   it("groups models by provider even when names differ", () => {
     const providerModels: ModelSummary[] = [
       { id: "openai:gpt-5.5", name: "GPT-5.5", provider: "openai", modelName: "gpt-5.5" },
@@ -128,6 +153,18 @@ describe("buildAgentSelectorSections", () => {
       },
     ])
   })
+
+  it("groups registered agent favorites with the selected agent", () => {
+    expect(buildAgentSelectorSections(agents, "see-act", "", ["plan-act-agent"])).toEqual([
+      {
+        title: "Favorites",
+        options: [
+          { id: "see-act", label: "SeeAct", detail: "Visual grounding agent", selected: true },
+          { id: "plan-act-agent", label: "PlanAct", detail: "Plans before acting", selected: false },
+        ],
+      },
+    ])
+  })
 })
 
 describe("buildBrowserSelectorSections", () => {
@@ -143,6 +180,18 @@ describe("buildBrowserSelectorSections", () => {
             detail: "mock-browser",
             selected: false,
           },
+        ],
+      },
+    ])
+  })
+
+  it("groups registered browser favorites with the selected browser", () => {
+    expect(buildBrowserSelectorSections(browsers, "playwright-browser", "", ["mock-browser"])).toEqual([
+      {
+        title: "Favorites",
+        options: [
+          { id: "playwright-browser", label: "Playwright Browser", detail: "playwright-browser", selected: true },
+          { id: "mock-browser", label: "Mock Browser", detail: "mock-browser", selected: false },
         ],
       },
     ])
@@ -235,6 +284,42 @@ describe("RuntimeSelector", () => {
       await setup.flush()
 
       expect(selected).toEqual(["openrouter-free"])
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  it("toggles the highlighted option as a favorite with ctrl+f", async () => {
+    const toggled: string[] = []
+    const setup = await testRender(
+      () => (
+        <RuntimeSelector
+          title="Select model"
+          emptyMessage="No matching models"
+          sections={sections}
+          theme={getTheme("opencode")}
+          onQueryChange={() => {}}
+          onSelect={() => {}}
+          onToggleFavorite={(option: RuntimeSelectorOption) => toggled.push(option.id)}
+          onCancel={() => {}}
+        />
+      ),
+      { width: 96, height: 24 },
+    )
+
+    try {
+      await setup.flush()
+
+      setup.mockInput.pressKey("f", { ctrl: true })
+      await setup.flush()
+
+      setup.mockInput.pressArrow("down")
+      await setup.flush()
+      setup.mockInput.pressKey("f", { ctrl: true })
+      await setup.flush()
+
+      expect(toggled).toEqual(["openai", "openrouter-free"])
+      expect(setup.captureCharFrame()).toContain("Favorite ctrl+f")
     } finally {
       setup.renderer.destroy()
     }

@@ -53,6 +53,8 @@ export type RunStatus = "idle" | "running" | "completed" | "failed" | "cancelled
 
 export type RuntimeSelectorKind = "agent" | "model" | "browser"
 
+export type RuntimeFavoriteIds = Record<RuntimeSelectorKind, string[]>
+
 export interface SessionSummary {
   id: string
   projectPath: string
@@ -89,6 +91,7 @@ export interface TuiState extends SessionViewState {
   selectedThemeId: string
   runtimeSelectorKind: RuntimeSelectorKind | null
   runtimeSelectorQuery: string
+  runtimeFavoriteIds: RuntimeFavoriteIds
   availableAgents: AgentSummary[]
   availableModels: ModelSummary[]
   availableEnvironments: EnvironmentSummary[]

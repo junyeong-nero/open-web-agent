@@ -37,6 +37,7 @@ export interface RuntimeSelectorProps {
   theme: TuiTheme
   onQueryChange(query: string): void
   onSelect(option: RuntimeSelectorOption): void
+  onToggleFavorite?(option: RuntimeSelectorOption): void
   onCancel(): void
 }
 
@@ -88,6 +89,10 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
     const option = highlightedOption()
     if (option) props.onSelect(option)
   }
+  const toggleHighlightedFavorite = () => {
+    const option = highlightedOption()
+    if (option) props.onToggleFavorite?.(option)
+  }
 
   const cancel = (event: KeyEvent) => {
     if (event.name === "escape" || event.name === "esc" || event.sequence === "\u001b") {
@@ -102,6 +107,11 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
   useKeyboard(cancel)
 
   const handleKeyDown = (event: KeyEvent) => {
+    if (isControlKey(event, "f", "\u0006")) {
+      event.preventDefault()
+      toggleHighlightedFavorite()
+      return
+    }
     if (cancel(event)) return
 
     if (event.name === "return" || event.name === "enter" || event.name === "linefeed") {
@@ -240,6 +250,9 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
           <text fg={props.theme.textMuted} wrapMode="none">
             Select enter
           </text>
+          <text visible={Boolean(props.onToggleFavorite)} fg={props.theme.textMuted} wrapMode="none">
+            Favorite ctrl+f
+          </text>
           <text fg={props.theme.textMuted} wrapMode="none">
             Close esc
           </text>
@@ -253,9 +266,15 @@ function runtimeSelectorOptionRowId(optionIndex: number): string {
   return `runtime-selector-option-${optionIndex}`
 }
 
-export function buildModelSelectorSections(models: ModelSummary[], selectedModelId: string | null, query: string): RuntimeSelectorSection[] {
+export function buildModelSelectorSections(
+  models: ModelSummary[],
+  selectedModelId: string | null,
+  query: string,
+  favoriteModelIds: readonly string[] = [],
+): RuntimeSelectorSection[] {
   const normalizedQuery = query.trim().toLowerCase()
-  const selectedModel = models.find((model) => model.id === selectedModelId)
+  const favoriteIds = favoriteRuntimeIds(selectedModelId, favoriteModelIds)
+  const favoriteIdSet = new Set(favoriteIds)
   const matches = (model: ModelSummary) => {
     if (normalizedQuery.length === 0) return true
     return [model.id, model.name, model.provider, model.modelName]
@@ -264,13 +283,17 @@ export function buildModelSelectorSections(models: ModelSummary[], selectedModel
   }
 
   const sections: RuntimeSelectorSection[] = []
-  if (selectedModel && normalizedQuery.length === 0) {
-    sections.push({ title: "Favorites", options: [toModelSelectorOption(selectedModel, true)] })
+  if (normalizedQuery.length === 0) {
+    const favoriteOptions = favoriteIds.flatMap((id) => {
+      const model = models.find((item) => item.id === id)
+      return model ? [toModelSelectorOption(model, model.id === selectedModelId)] : []
+    })
+    if (favoriteOptions.length > 0) sections.push({ title: "Favorites", options: favoriteOptions })
   }
 
   const grouped = new Map<string, ModelSelectorGroup>()
   for (const model of models) {
-    if (model.id === selectedModelId && normalizedQuery.length === 0) continue
+    if (favoriteIdSet.has(model.id) && normalizedQuery.length === 0) continue
     if (!matches(model)) continue
 
     const provider = providerSortKey(model)
@@ -287,10 +310,16 @@ export function buildModelSelectorSections(models: ModelSummary[], selectedModel
   return sections.filter((section) => section.options.length > 0)
 }
 
-export function buildAgentSelectorSections(agents: AgentSummary[], selectedAgentId: string, query: string): RuntimeSelectorSection[] {
+export function buildAgentSelectorSections(
+  agents: AgentSummary[],
+  selectedAgentId: string,
+  query: string,
+  favoriteAgentIds: readonly string[] = [],
+): RuntimeSelectorSection[] {
   return buildSimpleSelectorSections({
     items: agents,
     selectedId: selectedAgentId,
+    favoriteIds: favoriteAgentIds,
     groupTitle: "Agents",
     query,
     toOption: (agent, selected) => ({
@@ -307,10 +336,12 @@ export function buildBrowserSelectorSections(
   environments: EnvironmentSummary[],
   selectedEnvironmentId: string,
   query: string,
+  favoriteEnvironmentIds: readonly string[] = [],
 ): RuntimeSelectorSection[] {
   return buildSimpleSelectorSections({
     items: environments,
     selectedId: selectedEnvironmentId,
+    favoriteIds: favoriteEnvironmentIds,
     groupTitle: "Browsers",
     query,
     toOption: (environment, selected) => ({
@@ -326,13 +357,15 @@ export function buildBrowserSelectorSections(
 function buildSimpleSelectorSections<T extends { id: string }>(options: {
   items: T[]
   selectedId: string
+  favoriteIds?: readonly string[]
   groupTitle: string
   query: string
   toOption(item: T, selected: boolean): RuntimeSelectorOption
   searchable(item: T): Array<string | null | undefined>
 }): RuntimeSelectorSection[] {
   const normalizedQuery = options.query.trim().toLowerCase()
-  const selectedItem = options.items.find((item) => item.id === options.selectedId)
+  const favoriteIds = favoriteRuntimeIds(options.selectedId, options.favoriteIds ?? [])
+  const favoriteIdSet = new Set(favoriteIds)
   const matches = (item: T) => {
     if (normalizedQuery.length === 0) return true
     return options
@@ -342,17 +375,26 @@ function buildSimpleSelectorSections<T extends { id: string }>(options: {
   }
 
   const sections: RuntimeSelectorSection[] = []
-  if (selectedItem && normalizedQuery.length === 0) {
-    sections.push({ title: "Favorites", options: [options.toOption(selectedItem, true)] })
+  if (normalizedQuery.length === 0) {
+    const favoriteOptions = favoriteIds.flatMap((id) => {
+      const item = options.items.find((current) => current.id === id)
+      return item ? [options.toOption(item, item.id === options.selectedId)] : []
+    })
+    if (favoriteOptions.length > 0) sections.push({ title: "Favorites", options: favoriteOptions })
   }
 
   const itemOptions = options.items
-    .filter((item) => !(item.id === options.selectedId && normalizedQuery.length === 0))
+    .filter((item) => !(favoriteIdSet.has(item.id) && normalizedQuery.length === 0))
     .filter(matches)
     .map((item) => options.toOption(item, item.id === options.selectedId))
 
   if (itemOptions.length > 0) sections.push({ title: options.groupTitle, options: itemOptions })
   return sections
+}
+
+function favoriteRuntimeIds(selectedId: string | null, registeredIds: readonly string[]): string[] {
+  const ids = selectedId ? [selectedId, ...registeredIds] : [...registeredIds]
+  return [...new Set(ids)]
 }
 
 function buildRuntimeSelectorRows(sections: RuntimeSelectorSection[]): RuntimeSelectorRow[] {
@@ -432,4 +474,8 @@ function displayValue(value: string | null | undefined, fallback: string): strin
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
+}
+
+function isControlKey(key: { name?: string; ctrl?: boolean; sequence?: string }, name: string, sequence: string): boolean {
+  return (key.ctrl === true && key.name === name) || key.sequence === sequence
 }
