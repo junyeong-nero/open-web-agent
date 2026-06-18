@@ -1,7 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { createMemo, createSignal, For } from "solid-js"
 import type { InputRenderable, KeyEvent } from "@opentui/core"
-import { useKeyboard } from "@opentui/solid"
 import type { ModelSummary } from "../state/types"
 import type { TuiTheme } from "../theme/themes"
 
@@ -90,10 +89,7 @@ export function ModelSelector(props: ModelSelectorProps) {
     node.on("input", syncQuery)
     node.on("change", syncQuery)
     node.on("enter", selectHighlighted)
-    node.onKeyDown = handleKeyDown
   }
-
-  useKeyboard(handleKeyDown)
 
   return (
     <box
@@ -249,13 +245,21 @@ function toModelSelectorOption(model: ModelSummary, selected: boolean): ModelSel
 }
 
 function providerDisplayName(model: ModelSummary): string {
-  if (model.name) return model.name
   if (model.provider.length === 0) return model.id
+  const knownProviderName = providerDisplayNames[model.provider.toLowerCase()]
+  if (knownProviderName) return knownProviderName
   return model.provider
     .split(/[-_\s]+/)
     .filter(Boolean)
     .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
     .join(" ")
+}
+
+const providerDisplayNames: Record<string, string> = {
+  claude: "Claude",
+  gemini: "Gemini",
+  openai: "OpenAI",
+  openrouter: "OpenRouter",
 }
 
 function clamp(value: number, min: number, max: number): number {

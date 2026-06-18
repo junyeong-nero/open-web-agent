@@ -28,6 +28,20 @@ describe("buildModelSelectorSections", () => {
       },
     ])
   })
+
+  it("groups models by provider even when names differ", () => {
+    const providerModels: ModelSummary[] = [
+      { id: "openai:gpt-5.5", name: "GPT-5.5", provider: "openai", modelName: "gpt-5.5" },
+      { id: "openai:gpt-5.4", name: "GPT-5.4", provider: "openai", modelName: "gpt-5.4" },
+      { id: "openrouter:claude", name: "Claude Opus", provider: "openrouter", modelName: "anthropic/claude-opus" },
+    ]
+
+    expect(buildModelSelectorSections(providerModels, null, "").map((section) => section.title)).toEqual(["OpenAI", "OpenRouter"])
+    expect(buildModelSelectorSections(providerModels, null, "")[0]?.options.map((option) => option.id)).toEqual([
+      "openai:gpt-5.5",
+      "openai:gpt-5.4",
+    ])
+  })
 })
 
 describe("ModelSelector", () => {
