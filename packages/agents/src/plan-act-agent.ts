@@ -75,7 +75,6 @@ export class PlanActAgent implements AgentPlugin {
 
     return {
       model: this.options.modelName,
-      temperature: 0,
       responseFormat: "json",
       messages: [
         {

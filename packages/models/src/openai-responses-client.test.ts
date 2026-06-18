@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import { ModelRequestSchema } from "@open-web-agent/core"
 import { OpenAIResponsesClient } from "./openai-responses-client"
 
 describe("OpenAIResponsesClient", () => {
@@ -50,6 +51,35 @@ describe("OpenAIResponsesClient", () => {
       text: "hello",
       usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
     })
+  })
+
+  it("omits temperature from Responses API requests when it is not requested", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const client = new OpenAIResponsesClient({
+      baseUrl: "https://provider.test/v1",
+      accessToken: "oauth-token",
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init: init ?? {} })
+        return Response.json({
+          id: "resp_no_temperature",
+          output_text: "hello",
+        })
+      },
+    })
+
+    await client.complete(
+      ModelRequestSchema.parse({
+        model: "gpt-test",
+        messages: [{ role: "user", content: "Say hello" }],
+      }),
+    )
+
+    const body = JSON.parse(String(calls[0]?.init.body))
+    expect(body).toMatchObject({
+      model: "gpt-test",
+      input: [{ role: "user", content: "Say hello" }],
+    })
+    expect(body).not.toHaveProperty("temperature")
   })
 
   it("extracts text from output message content when output_text is absent", async () => {

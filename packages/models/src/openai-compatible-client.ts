@@ -74,7 +74,7 @@ function toChatCompletionsBody(request: ModelRequest): Record<string, unknown> {
     ...(request.extraBody ?? {}),
     model: request.model,
     messages: request.messages,
-    temperature: request.temperature,
+    ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
     ...(request.topP !== undefined ? { top_p: request.topP } : {}),
     ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
     ...(request.presencePenalty !== undefined ? { presence_penalty: request.presencePenalty } : {}),
