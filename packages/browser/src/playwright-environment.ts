@@ -58,13 +58,13 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
     const opening = this.openingSessions.get(key)
     if (opening) return withAbort(opening, ctx.abortSignal)
 
-    const openingSession = this.openSessionState(ctx, key)
+    const openingSession = this.openSessionState(key)
     this.openingSessions.set(key, openingSession)
     return withAbort(openingSession, ctx.abortSignal)
   }
 
-  private async openSessionState(ctx: RuntimeContext, key: string): Promise<PlaywrightSessionState> {
-    const browser = await this.ensureBrowser(ctx)
+  private async openSessionState(key: string): Promise<PlaywrightSessionState> {
+    const browser = await this.ensureBrowser()
     const context = await browser.newContext()
     try {
       const page = await context.newPage()
@@ -84,7 +84,7 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
     }
   }
 
-  private async ensureBrowser(ctx: RuntimeContext): Promise<Browser> {
+  private async ensureBrowser(): Promise<Browser> {
     if (this.browser?.isConnected()) return this.browser
 
     if (this.browser && !this.browser.isConnected()) {
@@ -103,7 +103,7 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
         })
     }
 
-    return withAbort(this.openingBrowser, ctx.abortSignal)
+    return this.openingBrowser
   }
 
   private async discardSessionStates(): Promise<void> {

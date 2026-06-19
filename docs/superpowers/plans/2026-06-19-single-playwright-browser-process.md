@@ -544,7 +544,7 @@ Spec coverage:
 
 Red-flag scan:
 
-- No incomplete work markers remain in this plan.
+- No TBD/TODO-style placeholders remain; unchecked boxes are retained as the plan's execution template.
 
 Type consistency:
 

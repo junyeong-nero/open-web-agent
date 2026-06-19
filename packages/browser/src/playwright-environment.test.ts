@@ -6,7 +6,11 @@ import { EventBus, type RuntimeContext } from "@open-web-agent/core"
 import * as playwrightEnvironment from "./playwright-environment"
 import { PlaywrightBrowserToolAdapter, PlaywrightEnvironment } from "./playwright-environment"
 
-async function context(sessionId = "ses_1", runId = "run_1"): Promise<RuntimeContext> {
+async function context(
+  sessionId = "ses_1",
+  runId = "run_1",
+  abortSignal: AbortSignal = new AbortController().signal,
+): Promise<RuntimeContext> {
   return {
     session: {
       id: sessionId,
@@ -17,7 +21,7 @@ async function context(sessionId = "ses_1", runId = "run_1"): Promise<RuntimeCon
     runId,
     runDir: await mkdtemp(join(tmpdir(), "owa-playwright-env-")),
     eventBus: new EventBus(),
-    abortSignal: new AbortController().signal,
+    abortSignal,
     now: () => new Date("2026-06-17T00:00:00.000Z"),
     async emit() {
       throw new Error("not used")
@@ -121,9 +125,18 @@ function createFakeBrowser() {
 }
 
 function stubBrowserLaunch(env: PlaywrightEnvironment, browser: unknown | Promise<unknown>): { launchCalls: () => number } {
+  return stubBrowserLaunches(env, [browser])
+}
+
+function stubBrowserLaunches(
+  env: PlaywrightEnvironment,
+  browsers: Array<unknown | Promise<unknown>>,
+): { launchCalls: () => number } {
   let launchCalls = 0
   ;(env as unknown as { launchBrowser(): Promise<unknown> }).launchBrowser = async () => {
+    const browser = browsers[launchCalls]
     launchCalls += 1
+    if (!browser) throw new Error(`unexpected browser launch ${launchCalls}`)
     return await browser
   }
   return { launchCalls: () => launchCalls }
@@ -230,6 +243,30 @@ describe("PlaywrightEnvironment", () => {
     expect(fake.contexts[0]?.pages[0]?.bringToFrontCalls).toBe(1)
   })
 
+  it("replaces stale session state when the shared browser disconnects", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const stale = createFakeBrowser()
+    const fresh = createFakeBrowser()
+    const launch = stubBrowserLaunches(env, [stale.browser, fresh.browser])
+    const ctx = await context("ses_1", "run_1")
+
+    await env.openSession(ctx)
+    stale.disconnect()
+    await env.attachSession(ctx)
+
+    expect(launch.launchCalls()).toBe(2)
+    expect(stale.contexts).toHaveLength(1)
+    expect(stale.contexts[0]?.closeCalls).toBe(1)
+    expect(fresh.contexts).toHaveLength(1)
+    expect(fresh.contexts[0]?.pages).toHaveLength(1)
+    expect(fresh.contexts[0]?.pages[0]?.bringToFrontCalls).toBe(1)
+
+    await env.close(ctx)
+
+    expect(fresh.contexts[0]?.closeCalls).toBe(1)
+    expect(fresh.closeCalls()).toBe(1)
+  })
+
   it("keeps the shared browser open until the final session closes", async () => {
     const env = new PlaywrightEnvironment({ headless: true })
     const fake = createFakeBrowser()
@@ -288,6 +325,48 @@ describe("PlaywrightEnvironment", () => {
     expect(fake.contexts[0]?.pages).toHaveLength(1)
 
     await env.close(ctx)
+
+    expect(fake.contexts[0]?.closeCalls).toBe(1)
+    expect(fake.closeCalls()).toBe(1)
+  })
+
+  it("keeps same-session coalesced opens alive when the initiating caller aborts", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const fake = createFakeBrowser()
+    let resolveLaunch!: (browser: unknown) => void
+    const pendingLaunch = new Promise<unknown>((resolve) => {
+      resolveLaunch = resolve
+    })
+    const launch = stubBrowserLaunch(env, pendingLaunch)
+    const firstAbort = new AbortController()
+    const first = await context("ses_1", "run_1", firstAbort.signal)
+    const second = await context("ses_1", "run_2")
+
+    const firstOpen = env.openSession(first)
+    const secondOpen = env.openSession(second)
+    const firstResult = firstOpen.then(
+      () => null,
+      (error: unknown) => error,
+    )
+    const secondResult = secondOpen.then(
+      () => "opened",
+      (error: unknown) => error,
+    )
+
+    firstAbort.abort()
+
+    const firstError = await firstResult
+    expect(firstError).toBeInstanceOf(DOMException)
+    expect((firstError as DOMException).message).toBe("Run cancelled")
+
+    resolveLaunch(fake.browser)
+
+    expect(await secondResult).toBe("opened")
+    expect(launch.launchCalls()).toBe(1)
+    expect(fake.contexts).toHaveLength(1)
+    expect(fake.contexts[0]?.pages).toHaveLength(1)
+
+    await env.close(second)
 
     expect(fake.contexts[0]?.closeCalls).toBe(1)
     expect(fake.closeCalls()).toBe(1)
