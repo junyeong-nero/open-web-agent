@@ -147,6 +147,7 @@ describe("buildAgentSelectorSections", () => {
             id: "plan-act-agent",
             label: "PlanAct",
             detail: "Plans before acting",
+            detailDisplay: "panel",
             selected: false,
           },
         ],
@@ -159,8 +160,8 @@ describe("buildAgentSelectorSections", () => {
       {
         title: "Favorites",
         options: [
-          { id: "see-act", label: "SeeAct", detail: "Visual grounding agent", selected: true },
-          { id: "plan-act-agent", label: "PlanAct", detail: "Plans before acting", selected: false },
+          { id: "see-act", label: "SeeAct", detail: "Visual grounding agent", detailDisplay: "panel", selected: true },
+          { id: "plan-act-agent", label: "PlanAct", detail: "Plans before acting", detailDisplay: "panel", selected: false },
         ],
       },
     ])
@@ -320,6 +321,47 @@ describe("RuntimeSelector", () => {
 
       expect(toggled).toEqual(["openai", "openrouter-free"])
       expect(setup.captureCharFrame()).toContain("Favorite ctrl+f")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  it("hides panel-only option details until ctrl+i opens the highlighted option info", async () => {
+    const setup = await testRender(
+      () => (
+        <RuntimeSelector
+          title="Select agent"
+          emptyMessage="No matching agents"
+          sections={buildAgentSelectorSections(agents, "see-act", "")}
+          theme={getTheme("opencode")}
+          onQueryChange={() => {}}
+          onSelect={() => {}}
+          onToggleFavorite={() => {}}
+          onCancel={() => {}}
+          detailTitle="Agent info"
+        />
+      ),
+      { width: 96, height: 24, kittyKeyboard: true },
+    )
+
+    try {
+      await setup.flush()
+      const initialFrame = setup.captureCharFrame()
+
+      expect(initialFrame).toContain("● SeeAct")
+      expect(initialFrame).toContain("  PlanAct")
+      expect(initialFrame).not.toContain("Visual grounding agent")
+      expect(initialFrame).not.toContain("Plans before acting")
+      expect(initialFrame).toContain("Info ctrl+i")
+
+      setup.mockInput.pressKey("i", { ctrl: true })
+      await setup.flush()
+
+      const infoFrame = setup.captureCharFrame()
+      expect(infoFrame).toContain("Agent info")
+      expect(infoFrame).toContain("Name SeeAct")
+      expect(infoFrame).toContain("ID see-act")
+      expect(infoFrame).toContain("Visual grounding agent")
     } finally {
       setup.renderer.destroy()
     }

@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { For, createMemo, createSignal } from "solid-js"
-import type { InputRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/core"
-import { useKeyboard } from "@opentui/solid"
+import type { BoxRenderable, InputRenderable, KeyEvent, ScrollBoxRenderable, TextRenderable } from "@opentui/core"
+import { useKeyboard, useRenderer } from "@opentui/solid"
 import type { AgentSummary, EnvironmentSummary, ModelSummary } from "../state/types"
 import type { TuiTheme } from "../theme/themes"
 
@@ -9,6 +9,7 @@ export interface RuntimeSelectorOption {
   id: string
   label: string
   detail: string
+  detailDisplay?: "inline" | "panel"
   selected: boolean
 }
 
@@ -33,6 +34,7 @@ interface ModelSelectorGroup {
 export interface RuntimeSelectorProps {
   title: string
   emptyMessage: string
+  detailTitle?: string
   sections: RuntimeSelectorSection[]
   theme: TuiTheme
   onQueryChange(query: string): void
@@ -42,19 +44,29 @@ export interface RuntimeSelectorProps {
 }
 
 export function RuntimeSelector(props: RuntimeSelectorProps) {
+  const renderer = useRenderer()
   const attachedSearchInputs = new WeakSet<InputRenderable>()
   let optionsScroll: ScrollBoxRenderable | undefined
+  let infoBox: BoxRenderable | undefined
+  let infoTitleText: TextRenderable | undefined
+  let infoNameText: TextRenderable | undefined
+  let infoIdText: TextRenderable | undefined
+  let infoDetailText: TextRenderable | undefined
+  let infoVisible = false
   const [query, setQuery] = createSignal("")
   const [highlightIndex, setHighlightIndex] = createSignal(0)
   const options = createMemo(() => props.sections.flatMap((section) => section.options))
   const rows = createMemo(() => buildRuntimeSelectorRows(props.sections))
   const boundedHighlightIndex = () => clamp(highlightIndex(), 0, Math.max(0, options().length - 1))
   const highlightedOption = () => options()[boundedHighlightIndex()]
+  const hasPanelDetails = createMemo(() => options().some((option) => option.detailDisplay === "panel"))
 
   const updateQuery = (value: string) => {
     setQuery(value)
     props.onQueryChange(value)
     setHighlightIndex(0)
+    infoVisible = false
+    renderInfoPanel()
     optionsScroll?.scrollTo(0)
   }
   const moveHighlight = (delta: number) => {
@@ -65,6 +77,7 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
       nextIndex = (index + delta + count) % count
       return nextIndex
     })
+    renderInfoPanel()
     scrollOptionIntoView(nextIndex)
   }
 
@@ -93,6 +106,32 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
     const option = highlightedOption()
     if (option) props.onToggleFavorite?.(option)
   }
+  const toggleHighlightedInfo = () => {
+    const option = highlightedOption()
+    if (option?.detailDisplay !== "panel") return
+
+    infoVisible = !infoVisible
+    renderInfoPanel()
+    renderer.requestRender()
+  }
+  const renderInfoPanel = () => {
+    const option = infoVisible ? highlightedOption() : null
+    const visibleOption = option?.detailDisplay === "panel" ? option : null
+
+    if (infoBox) infoBox.height = visibleOption ? 5 : 0
+    if (infoTitleText) infoTitleText.content = visibleOption ? (props.detailTitle ?? "Info") : ""
+    if (infoNameText) infoNameText.content = visibleOption ? `Name ${visibleOption.label}` : ""
+    if (infoIdText) infoIdText.content = visibleOption ? `ID ${visibleOption.id}` : ""
+    if (infoDetailText) infoDetailText.content = visibleOption?.detail ?? ""
+  }
+  const handleInfoKey = (event: KeyEvent) => {
+    if (!isControlKey(event, "i", "\u0009")) return false
+    if (highlightedOption()?.detailDisplay !== "panel") return false
+    event.preventDefault()
+    event.stopPropagation()
+    toggleHighlightedInfo()
+    return true
+  }
 
   const cancel = (event: KeyEvent) => {
     if (event.name === "escape" || event.name === "esc" || event.sequence === "\u001b") {
@@ -104,7 +143,10 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
     return false
   }
 
-  useKeyboard(cancel)
+  useKeyboard((event) => {
+    if (handleInfoKey(event)) return
+    cancel(event)
+  })
 
   const handleKeyDown = (event: KeyEvent) => {
     if (isControlKey(event, "f", "\u0006")) {
@@ -112,6 +154,7 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
       toggleHighlightedFavorite()
       return
     }
+    if (handleInfoKey(event)) return
     if (cancel(event)) return
 
     if (event.name === "return" || event.name === "enter" || event.name === "linefeed") {
@@ -222,8 +265,10 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
 
               const selected = () => row.optionIndex === boundedHighlightIndex()
               const detail = () => row.option?.detail ?? ""
-              const endDetail = () => (detail() === freeModelBadge ? detail() : "")
+              const detailDisplay = () => row.option?.detailDisplay ?? "inline"
+              const endDetail = () => (detailDisplay() === "inline" && detail() === freeModelBadge ? detail() : "")
               const inlineDetail = () => {
+                if (detailDisplay() !== "inline") return ""
                 const value = detail()
                 return value.length > 0 && value !== freeModelBadge ? ` ${value}` : ""
               }
@@ -246,12 +291,41 @@ export function RuntimeSelector(props: RuntimeSelectorProps) {
             }}
           </For>
         </scrollbox>
+        {hasPanelDetails() ? (
+          <box
+            id="runtime-selector-info"
+            ref={(node) => {
+              infoBox = node as BoxRenderable
+            }}
+            height={0}
+            overflow="hidden"
+            flexDirection="column"
+            paddingX={1}
+            paddingTop={1}
+          >
+            <text ref={(node) => (infoTitleText = node as TextRenderable)} height={1} fg={props.theme.tool} wrapMode="none">
+              {""}
+            </text>
+            <text ref={(node) => (infoNameText = node as TextRenderable)} height={1} fg={props.theme.text} wrapMode="none">
+              {""}
+            </text>
+            <text ref={(node) => (infoIdText = node as TextRenderable)} height={1} fg={props.theme.textMuted} wrapMode="none">
+              {""}
+            </text>
+            <text ref={(node) => (infoDetailText = node as TextRenderable)} height={1} fg={props.theme.textMuted} wrapMode="none">
+              {""}
+            </text>
+          </box>
+        ) : null}
         <box flexDirection="row" gap={2} paddingTop={1}>
           <text fg={props.theme.textMuted} wrapMode="none">
             Select enter
           </text>
           <text visible={Boolean(props.onToggleFavorite)} fg={props.theme.textMuted} wrapMode="none">
             Favorite ctrl+f
+          </text>
+          <text visible={hasPanelDetails()} fg={props.theme.textMuted} wrapMode="none">
+            Info ctrl+i
           </text>
           <text fg={props.theme.textMuted} wrapMode="none">
             Close esc
@@ -326,6 +400,7 @@ export function buildAgentSelectorSections(
       id: agent.id,
       label: displayValue(agent.name, agent.id),
       detail: displayValue(agent.description, agent.id),
+      detailDisplay: "panel",
       selected,
     }),
     searchable: (agent) => [agent.id, agent.name, agent.description],
