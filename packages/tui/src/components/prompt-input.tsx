@@ -72,14 +72,21 @@ export function PromptInput(props: PromptInputProps) {
     setHistoryDraft("")
     props.onChange(value)
   }
-  const handleSubmit = () => {
-    const value = currentValue()
+  const handleSubmit = (submittedValue?: string) => {
+    const value = submittedValue ?? currentValue()
     setHistoryIndex(null)
     setHistoryDraft("")
     reportValue(value)
     textarea?.clear()
     setDraftValue("")
     props.onSubmit(value)
+  }
+  const handleSlashExecution = () => {
+    const suggestion = commandSuggestions()[selectedSuggestionIndex()]
+    if (!suggestion) return false
+
+    handleSubmit(suggestion.name)
+    return true
   }
   const handleSlashCompletion = () => {
     const suggestion = commandSuggestions()[selectedSuggestionIndex()]
@@ -164,6 +171,7 @@ export function PromptInput(props: PromptInputProps) {
 
     if ((event.name === "return" || event.name === "enter" || event.name === "linefeed") && !event.shift) {
       event.preventDefault()
+      if (handleSlashExecution()) return
       handleSubmit()
     }
   }
@@ -193,7 +201,7 @@ export function PromptInput(props: PromptInputProps) {
           placeholderColor={props.theme.textMuted}
           onContentChange={handleContentChange}
           onKeyDown={handleKeyDown}
-          onSubmit={handleSubmit}
+          onSubmit={() => handleSubmit()}
         />
       </box>
       <box

@@ -184,6 +184,40 @@ describe("PromptInput", () => {
     }
   })
 
+  it("submits the highlighted slash command suggestion on enter", async () => {
+    const submitted: string[] = []
+    const setup = await testRender(
+      () => (
+        <PromptInput
+          value="/"
+          agent={null}
+          model={null}
+          modelActivity={idleModelActivity}
+          runStatus="idle"
+          theme={getTheme("opencode")}
+          onChange={() => {}}
+          onSubmit={(value) => submitted.push(value)}
+        />
+      ),
+      { width: 80, height: 12 },
+    )
+
+    try {
+      await setup.flush()
+
+      setup.mockInput.pressArrow("down")
+      setup.mockInput.pressArrow("down")
+      setup.mockInput.pressArrow("down")
+      setup.mockInput.pressArrow("down")
+      setup.mockInput.pressEnter()
+      await setup.flush()
+
+      expect(submitted).toEqual(["/agent"])
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
   it("lets the mouse cursor choose a slash command suggestion", async () => {
     const changes: string[] = []
     const setup = await testRender(
