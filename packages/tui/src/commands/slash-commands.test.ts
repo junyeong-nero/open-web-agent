@@ -19,7 +19,7 @@ describe("parseSlashCommand", () => {
   })
 
   it("recognizes agent command with an id", () => {
-    expect(parseSlashCommand("/agent plan-act-agent")).toEqual({ kind: "agent", agentId: "plan-act-agent" })
+    expect(parseSlashCommand("/agent plan-act")).toEqual({ kind: "agent", agentId: "plan-act" })
   })
 
   it("recognizes model command with and without an id", () => {

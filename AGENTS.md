@@ -72,7 +72,7 @@ Every runtime boundary is a Zod schema with an inferred TypeScript type — `eve
 
 `AgentPlugin`, `ModelPlugin`, and `BrowserEnvironment` (`contracts/plugin.ts`) are registered by string `id` in a `PluginRegistry`. `startDefaultRuntime` (`packages/server/src/default-runtime.ts`) is the composition root — it wires which concrete plugins exist:
 
-- Agents: `simple-react-agent`, `see-act`, `plan-act-agent`
+- Agents: `simple-react-agent`, `see-act`
 - Environments: `playwright-browser`
 - Models: `OpenAIModel` / `OpenRouterModel` are registered **only if** the corresponding API key is present in config. With no key, model-backed agents fail at run time.
 

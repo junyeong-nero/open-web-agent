@@ -340,7 +340,7 @@ describe("PromptInput", () => {
       () => (
         <PromptInput
           value=""
-          agent={{ id: "plan-act-agent", name: "PlanAct Agent", description: "Plans before acting." }}
+          agent={{ id: "plan-act", name: "PlanAct Agent", description: "Plans before acting." }}
           model={{
             id: "openai",
             name: "OpenAI",
@@ -377,7 +377,7 @@ describe("PromptInput", () => {
       () => (
         <PromptInput
           value=""
-          agent={{ id: "plan-act-agent", name: "PlanAct Agent", description: "Plans before acting." }}
+          agent={{ id: "plan-act", name: "PlanAct Agent", description: "Plans before acting." }}
           model={{
             id: "openai",
             name: "OpenAI",

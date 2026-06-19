@@ -60,7 +60,7 @@ describe("createServerClient", () => {
         const url = new URL(request.url)
         if (url.pathname === "/config/agent" && request.method === "PATCH") {
           requests.push({ path: url.pathname, body: await request.json() })
-          return Response.json({ agentId: "plan-act-agent" })
+          return Response.json({ agentId: "plan-act" })
         }
         if (url.pathname === "/config/browser" && request.method === "PATCH") {
           requests.push({ path: url.pathname, body: await request.json() })
@@ -72,11 +72,11 @@ describe("createServerClient", () => {
     servers.push(server)
 
     const client = createServerClient(`http://${server.hostname}:${server.port}`)
-    expect(await client.selectAgent("plan-act-agent")).toEqual({ agentId: "plan-act-agent" })
+    expect(await client.selectAgent("plan-act")).toEqual({ agentId: "plan-act" })
     expect(await client.selectBrowser("playwright-browser")).toEqual({ browserId: "playwright-browser" })
 
     expect(requests).toEqual([
-      { path: "/config/agent", body: { agentId: "plan-act-agent" } },
+      { path: "/config/agent", body: { agentId: "plan-act" } },
       { path: "/config/browser", body: { browserId: "playwright-browser" } },
     ])
   })
