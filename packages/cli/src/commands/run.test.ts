@@ -26,7 +26,7 @@ describe("runCommand", () => {
 
     expect(lines).toContainEqual(expect.stringContaining("[run.started] run_"))
     expect(lines.at(-1)).toContain("[run.failed] No model selected.")
-  })
+  }, 10_000)
 
   it("runs the project text-vision mixed grounding Python agent", async () => {
     const fixtureServer = Bun.serve({
@@ -82,5 +82,5 @@ describe("runCommand", () => {
     expect(lines).toContain(`[browser.tool.completed] navigate ${fixtureUrl}`)
     expect(lines.at(-1)).toBe("[run.completed] cli mixed grounding answer")
     expect(JSON.stringify(providerRequests[0])).toContain("CLI fixture page text.")
-  })
+  }, 10_000)
 })

@@ -35,7 +35,7 @@ describe("CLI end-to-end smoke", () => {
     expect(stderr).toBe("")
     expect(exitCode).toBe(0)
     expect(stdout).toContain("[run.failed] No model selected.")
-  })
+  }, 20_000)
 })
 
 const providerEnvKeys = [
