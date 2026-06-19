@@ -1,5 +1,6 @@
 import type { ModelRequest, ModelResponse } from "@open-web-agent/core"
 import { ModelProviderHttpError, retryModelCall } from "./retry"
+import { shouldRetryWithoutTemperature, withoutTemperatureParameter } from "./temperature-fallback"
 
 export type FetchLike = (url: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
@@ -30,18 +31,17 @@ export class OpenAICompatibleClient {
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
     const startedAt = performance.now()
+    let requestForAttempt = request
     const raw = await retryModelCall(async () => {
-      const response = await this.fetchImpl(`${trimTrailingSlash(this.options.baseUrl)}/chat/completions`, {
-        method: "POST",
-        headers: this.headers(),
-        body: JSON.stringify(toChatCompletionsBody(request)),
-      })
-
-      if (!response.ok) {
-        throw new ModelProviderHttpError(response.status, await response.text())
+      try {
+        return await this.fetchCompletion(requestForAttempt)
+      } catch (error) {
+        if (shouldRetryWithoutTemperature(requestForAttempt, error)) {
+          requestForAttempt = withoutTemperatureParameter(requestForAttempt)
+          return await this.fetchCompletion(requestForAttempt)
+        }
+        throw error
       }
-
-      return (await response.json()) as ChatCompletionResponse
     }, { maxRetry: this.options.maxRetry })
     const usage = raw.usage
 
@@ -66,6 +66,20 @@ export class OpenAICompatibleClient {
       ...(this.options.apiKey ? { authorization: `Bearer ${this.options.apiKey}` } : {}),
       ...(this.options.defaultHeaders ?? {}),
     }
+  }
+
+  private async fetchCompletion(request: ModelRequest): Promise<ChatCompletionResponse> {
+    const response = await this.fetchImpl(`${trimTrailingSlash(this.options.baseUrl)}/chat/completions`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify(toChatCompletionsBody(request)),
+    })
+
+    if (!response.ok) {
+      throw new ModelProviderHttpError(response.status, await response.text())
+    }
+
+    return (await response.json()) as ChatCompletionResponse
   }
 }
 

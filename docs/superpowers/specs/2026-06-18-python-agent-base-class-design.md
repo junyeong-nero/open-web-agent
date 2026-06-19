@@ -66,8 +66,8 @@ if __name__ == "__main__":
 `ModelClient` methods:
 
 - `complete(request, command_id=None)` sends a raw model request.
-- `complete_text(system, user, temperature=0, **kwargs)` returns model text.
-- `complete_json(system, user, temperature=0, **kwargs)` requests JSON and parses the returned text as an object.
+- `complete_text(system, user, temperature=None, **kwargs)` returns model text.
+- `complete_json(system, user, temperature=None, **kwargs)` requests JSON and parses the returned text as an object.
 
 Decision helpers:
 

@@ -172,13 +172,59 @@ if __name__ == "__main__":
 
     expect(model.requests).toHaveLength(1)
     expect(model.requests[0]).toMatchObject({
-      temperature: 0,
       responseFormat: "json",
       messages: [
         { role: "system", content: "Return JSON." },
         { role: "user" },
       ],
     })
+    expect(model.requests[0]).not.toHaveProperty("temperature")
+    expect(decision).toMatchObject({ type: "final_answer", finalAnswer: "model json answer" })
+  })
+
+  it("lets BaseAgent model helpers explicitly request temperature", async () => {
+    class JsonModel extends FakeModel {
+      override async complete(request: ModelRequest): Promise<ModelResponse> {
+        this.requests.push(request)
+        return {
+          id: "json-response",
+          text: JSON.stringify({ answer: "model json answer" }),
+          raw: { ok: true },
+          usage: null,
+          latencyMs: 0,
+        }
+      }
+    }
+    const script = await writePythonScript(`
+${commonImportPrelude}
+from _common.agent import BaseAgent
+
+class FixtureAgent(BaseAgent):
+    def step(self, ctx):
+        parsed = ctx.model.complete_json(
+            system="Return JSON.",
+            user=ctx.observation_text(),
+            temperature=0,
+        )
+        return ctx.final_answer(parsed["answer"], thought="json")
+
+if __name__ == "__main__":
+    FixtureAgent().run()
+`)
+    const model = new JsonModel()
+    const agent = new PythonAgentAdapter({
+      id: "python-base-model-agent",
+      name: "Python Base Model Agent",
+      description: "Uses BaseAgent model helpers",
+      command: [python, script],
+      protocol: "jsonl",
+      model,
+    })
+
+    const decision = await agent.step(state(), ctx())
+
+    expect(model.requests).toHaveLength(1)
+    expect(model.requests[0]).toMatchObject({ temperature: 0, responseFormat: "json" })
     expect(decision).toMatchObject({ type: "final_answer", finalAnswer: "model json answer" })
   })
 

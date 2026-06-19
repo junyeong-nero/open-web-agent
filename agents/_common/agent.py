@@ -206,24 +206,25 @@ class ModelClient:
     def complete(self, request, command_id=None):
         return call_model(request, command_id or f"model_{next(self._ids)}")
 
-    def complete_text(self, system, user, temperature=0, command_id=None, **kwargs):
+    def complete_text(self, system, user, temperature=None, command_id=None, **kwargs):
         response = self.complete(self._request(system, user, "text", temperature, **kwargs), command_id=command_id)
         return response.get("text") or ""
 
-    def complete_json(self, system, user, temperature=0, command_id=None, **kwargs):
+    def complete_json(self, system, user, temperature=None, command_id=None, **kwargs):
         response = self.complete(self._request(system, user, "json", temperature, **kwargs), command_id=command_id)
         return parse_json_object(response.get("text") or "", "model response")
 
     def _request(self, system, user, response_format, temperature, **kwargs):
         request = {
             "model": kwargs.pop("model", ""),
-            "temperature": temperature,
             "responseFormat": response_format,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
         }
+        if temperature is not None:
+            request["temperature"] = temperature
         request.update(kwargs)
         return request
 

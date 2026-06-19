@@ -66,7 +66,6 @@ def build_plan_request(ctx, reason):
 
     return {
         "model": "",
-        "temperature": 0,
         "responseFormat": "json",
         "messages": [
             {
@@ -99,7 +98,6 @@ def build_decision_request(ctx, last_error, last_raw):
 
     return {
         "model": "",
-        "temperature": 0,
         "responseFormat": "json",
         "messages": [
             {
