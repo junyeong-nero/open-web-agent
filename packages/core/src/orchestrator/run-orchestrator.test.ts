@@ -110,10 +110,97 @@ class TestBrowserToolAdapter implements ToolAdapter {
   environmentId = "test-browser"
   calls: BrowserToolCall[] = []
 
-  constructor(private readonly environment: TestEnvironment) {}
+  constructor(protected readonly environment: TestEnvironment) {}
 
   async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
     this.calls.push(call)
+    return this.environment.applyBrowserTool(call, ctx)
+  }
+}
+
+class RecoveringAgent implements AgentPlugin {
+  id = "recovering-agent"
+  name = "Recovering Agent"
+  description = "Retries after a failed browser action."
+  failedResultsSeen: number[] = []
+
+  async initialize(): Promise<void> {}
+
+  async step(state: AgentState): Promise<AgentDecision> {
+    this.failedResultsSeen.push(state.steps.flatMap((step) => step.actionResults).filter((result) => !result.ok).length)
+
+    if (state.steps.length === 0) {
+      return {
+        type: "browser_actions",
+        thought: "Try the brittle selector first.",
+        actions: [
+          {
+            id: "action_brittle",
+            kind: "click_brittle_result",
+            reason: null,
+            requiresApproval: false,
+            toolCalls: [{ id: "tool_brittle", type: "click", target: target("#missing-result") }],
+          },
+        ],
+      }
+    }
+
+    if (state.steps.length === 1) {
+      return {
+        type: "browser_actions",
+        thought: "Retry with a stable navigation.",
+        actions: [
+          {
+            id: "action_retry",
+            kind: "navigate_directly",
+            reason: null,
+            requiresApproval: false,
+            toolCalls: [{ id: "tool_retry", type: "navigate", url: "https://example.com" }],
+          },
+        ],
+      }
+    }
+
+    return { type: "final_answer", thought: null, finalAnswer, confidence: 1 }
+  }
+
+  async finalize(state: AgentState): Promise<string> {
+    return state.finalAnswer ?? finalAnswer
+  }
+}
+
+function target(selector: string): Extract<BrowserToolCall, { type: "click" | "type" }>["target"] {
+  return {
+    elementId: null,
+    selector,
+    text: null,
+    role: null,
+    name: null,
+    coordinates: null,
+  }
+}
+
+class ThrowingBrowserToolAdapter extends TestBrowserToolAdapter {
+  async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
+    this.calls.push(call)
+    if (call.type === "click") {
+      throw new Error("locator.click: Timeout 30000ms exceeded")
+    }
+    return this.environment.applyBrowserTool(call, ctx)
+  }
+}
+
+class FailedResultBrowserToolAdapter extends TestBrowserToolAdapter {
+  async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
+    this.calls.push(call)
+    if (call.type === "click") {
+      return {
+        ok: false,
+        message: "No matching click target found",
+        observation: await this.environment.observe(),
+        metadata: {},
+      }
+    }
     return this.environment.applyBrowserTool(call, ctx)
   }
 }
@@ -180,6 +267,39 @@ async function orchestrator(delayMs = 0): Promise<{
   }
 }
 
+async function orchestratorWith(agent: AgentPlugin, environment: TestEnvironment, toolAdapter: ToolAdapter): Promise<{
+  orchestrator: RunOrchestrator
+  observedEvents: RunEvent[]
+  home: string
+}> {
+  const eventBus = new EventBus()
+  const observedEvents: RunEvent[] = []
+  eventBus.subscribe((event) => {
+    observedEvents.push(event)
+  })
+
+  const registry = new PluginRegistry()
+  registry.registerAgent(agent)
+  registry.registerEnvironment(environment)
+  registry.registerToolAdapter(toolAdapter)
+
+  const home = await mkdtemp(join(tmpdir(), "owa-orchestrator-"))
+
+  return {
+    orchestrator: new RunOrchestrator({
+      home,
+      eventBus,
+      registry,
+      agentId: agent.id,
+      environmentId: environment.id,
+      maxSteps: 4,
+      now: () => new Date("2026-06-17T00:00:00.000Z"),
+    }),
+    observedEvents,
+    home,
+  }
+}
+
 describe("RunOrchestrator", () => {
   it("completes the deterministic Example Domain test run", async () => {
     const setup = await orchestrator()
@@ -233,5 +353,51 @@ describe("RunOrchestrator", () => {
     const result = await started.result
     expect(result.status).toBe("cancelled")
     expect(setup.observedEvents.map((event) => event.type)).toContain("run.cancelled")
+  })
+
+  it("continues to the next agent step after a browser tool throws", async () => {
+    const environment = new TestEnvironment()
+    const agent = new RecoveringAgent()
+    const toolAdapter = new ThrowingBrowserToolAdapter(environment)
+    const setup = await orchestratorWith(agent, environment, toolAdapter)
+    const started = setup.orchestrator.startRun({
+      session: session(),
+      prompt: "retry after the first click fails",
+    })
+
+    const result = await started.result
+
+    expect(result.status).toBe("completed")
+    expect(result.finalAnswer).toBe(finalAnswer)
+    expect(agent.failedResultsSeen).toEqual([0, 1, 1])
+    expect(toolAdapter.calls.map((call) => call.type)).toEqual(["click", "navigate"])
+    expect(setup.observedEvents.map((event) => event.type)).not.toContain("run.failed")
+    expect(setup.observedEvents.map((event) => event.type)).toContain("run.completed")
+    const failedToolEvent = setup.observedEvents.find((event) => {
+      return event.type === "browser.tool.completed" && (event.payload.result as ActionResult | undefined)?.ok === false
+    })
+    expect(failedToolEvent?.payload.result).toMatchObject({
+      ok: false,
+      message: "locator.click: Timeout 30000ms exceeded",
+    })
+  })
+
+  it("continues to the next agent step after a browser tool returns a failed result", async () => {
+    const environment = new TestEnvironment()
+    const agent = new RecoveringAgent()
+    const toolAdapter = new FailedResultBrowserToolAdapter(environment)
+    const setup = await orchestratorWith(agent, environment, toolAdapter)
+    const started = setup.orchestrator.startRun({
+      session: session(),
+      prompt: "retry after the first click returns a failed result",
+    })
+
+    const result = await started.result
+
+    expect(result.status).toBe("completed")
+    expect(result.finalAnswer).toBe(finalAnswer)
+    expect(agent.failedResultsSeen).toEqual([0, 1, 1])
+    expect(toolAdapter.calls.map((call) => call.type)).toEqual(["click", "navigate"])
+    expect(setup.observedEvents.map((event) => event.type)).not.toContain("run.failed")
   })
 })

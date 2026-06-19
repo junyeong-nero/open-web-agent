@@ -1,6 +1,7 @@
 import type { AgentDecision } from "../contracts/agent"
-import type { ActionResult } from "../contracts/browser"
+import type { ActionResult, BrowserToolCall } from "../contracts/browser"
 import type { RunEvent, RunEventType } from "../contracts/event"
+import type { BrowserEnvironment, ToolAdapter } from "../contracts/plugin"
 import type { EventBus } from "../events/event-bus"
 import { makeEventId, makeRunId, makeStepId } from "../ids/ids"
 import type { PluginRegistry } from "../registry/plugin-registry"
@@ -156,7 +157,7 @@ export class RunOrchestrator {
           return { runId, status: "completed", finalAnswer }
         }
 
-        await this.executeBrowserActions(decision, stepId, step.actionResults, ctx)
+        await this.executeBrowserActions(decision, stepId, step.actionResults, ctx, environment)
         state.lastObservation = await environment.observe(ctx)
         step.observation = state.lastObservation
         await emit("observation.captured", { observation: state.lastObservation })
@@ -180,26 +181,61 @@ export class RunOrchestrator {
     stepId: string,
     actionResults: ActionResult[],
     ctx: RuntimeContext,
+    environment: BrowserEnvironment,
   ): Promise<void> {
     const toolAdapter = this.options.registry.getToolAdapterForEnvironment(ctx.environmentId ?? this.options.environmentId)
 
     for (const action of decision.actions) {
       await ctx.emit("browser.action.started", { action }, stepId)
+      let actionFailed = false
 
       for (const toolCall of action.toolCalls) {
         throwIfAborted(ctx.abortSignal)
         await ctx.emit("browser.tool.started", { actionId: action.id, toolCall }, stepId)
-        const result = await toolAdapter.execute(toolCall, ctx)
+        const result = await executeBrowserTool(toolAdapter, toolCall, ctx, environment)
         actionResults.push(result)
         await ctx.emit("browser.tool.completed", { actionId: action.id, toolCall, result }, stepId)
 
         if (!result.ok) {
-          throw new Error(result.message ?? `Browser tool failed: ${toolCall.type}`)
+          actionFailed = true
+          break
         }
       }
 
       await ctx.emit("browser.action.completed", { action, actionResults }, stepId)
+      if (actionFailed) break
     }
+  }
+}
+
+async function executeBrowserTool(
+  toolAdapter: ToolAdapter,
+  toolCall: BrowserToolCall,
+  ctx: RuntimeContext,
+  environment: BrowserEnvironment,
+): Promise<ActionResult> {
+  try {
+    return await toolAdapter.execute(toolCall, ctx)
+  } catch (error) {
+    if (isAbortError(error)) throw error
+
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error),
+      observation: await observeAfterToolFailure(environment, ctx),
+      metadata: {
+        errorName: error instanceof Error ? error.name : null,
+      },
+    }
+  }
+}
+
+async function observeAfterToolFailure(environment: BrowserEnvironment, ctx: RuntimeContext): Promise<ActionResult["observation"]> {
+  try {
+    return await environment.observe(ctx)
+  } catch (error) {
+    if (isAbortError(error)) throw error
+    return null
   }
 }
 
