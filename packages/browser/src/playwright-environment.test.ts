@@ -6,15 +6,15 @@ import { EventBus, type RuntimeContext } from "@open-web-agent/core"
 import * as playwrightEnvironment from "./playwright-environment"
 import { PlaywrightBrowserToolAdapter, PlaywrightEnvironment } from "./playwright-environment"
 
-async function context(): Promise<RuntimeContext> {
+async function context(sessionId = "ses_1", runId = "run_1"): Promise<RuntimeContext> {
   return {
     session: {
-      id: "ses_1",
+      id: sessionId,
       projectPath: "/tmp/project",
       projectHash: "hash",
       createdAt: "2026-06-17T00:00:00.000Z",
     },
-    runId: "run_1",
+    runId,
     runDir: await mkdtemp(join(tmpdir(), "owa-playwright-env-")),
     eventBus: new EventBus(),
     abortSignal: new AbortController().signal,
@@ -48,6 +48,87 @@ function fixtureUrl(): string {
   return `data:text/html,${encodeURIComponent(html)}`
 }
 
+interface FakePage {
+  bringToFrontCalls: number
+  closeCalls: number
+  bringToFront(): Promise<void>
+  close(): Promise<void>
+}
+
+interface FakeContext {
+  pages: FakePage[]
+  closeCalls: number
+  newPage(): Promise<FakePage>
+  close(): Promise<void>
+}
+
+function createFakePage(): FakePage {
+  return {
+    bringToFrontCalls: 0,
+    closeCalls: 0,
+    async bringToFront() {
+      this.bringToFrontCalls += 1
+    },
+    async close() {
+      this.closeCalls += 1
+    },
+  }
+}
+
+function createFakeContext(): FakeContext {
+  return {
+    pages: [],
+    closeCalls: 0,
+    async newPage() {
+      const page = createFakePage()
+      this.pages.push(page)
+      return page
+    },
+    async close() {
+      this.closeCalls += 1
+      await Promise.all(this.pages.map((page) => page.close()))
+    },
+  }
+}
+
+function createFakeBrowser() {
+  let closeCalls = 0
+  let connected = true
+  const contexts: FakeContext[] = []
+  const browser = {
+    isConnected() {
+      return connected
+    },
+    async newContext() {
+      const context = createFakeContext()
+      contexts.push(context)
+      return context
+    },
+    async close() {
+      closeCalls += 1
+      connected = false
+    },
+  }
+
+  return {
+    browser,
+    contexts,
+    closeCalls: () => closeCalls,
+    disconnect: () => {
+      connected = false
+    },
+  }
+}
+
+function stubBrowserLaunch(env: PlaywrightEnvironment, browser: unknown | Promise<unknown>): { launchCalls: () => number } {
+  let launchCalls = 0
+  ;(env as unknown as { launchBrowser(): Promise<unknown> }).launchBrowser = async () => {
+    launchCalls += 1
+    return await browser
+  }
+  return { launchCalls: () => launchCalls }
+}
+
 describe("PlaywrightEnvironment", () => {
   it("uses headed browser launches by default", () => {
     expect("resolvePlaywrightHeadless" in playwrightEnvironment).toBe(true)
@@ -78,23 +159,86 @@ describe("PlaywrightEnvironment", () => {
 
   it("does not bring an existing page to the front when browser focus prevention is enabled", async () => {
     const env = new PlaywrightEnvironment({ preventFocus: true })
+    const fake = createFakeBrowser()
+    stubBrowserLaunch(env, fake.browser)
     const ctx = await context()
-    let bringToFrontCalls = 0
-    ;(env as unknown as { runs: Map<string, unknown> }).runs.set(ctx.session.id, {
-      browser: {},
-      context: {},
-      page: {
-        async bringToFront() {
-          bringToFrontCalls += 1
-        },
-      },
-      lastScreenshotPath: null,
-      screenshotCount: 0,
-    })
 
     await env.attachSession(ctx)
 
-    expect(bringToFrontCalls).toBe(0)
+    expect(fake.contexts[0]?.pages[0]?.bringToFrontCalls).toBe(0)
+  })
+
+  it("launches one shared browser while keeping separate session contexts", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const fake = createFakeBrowser()
+    const launch = stubBrowserLaunch(env, fake.browser)
+    const first = await context("ses_1", "run_1")
+    const second = await context("ses_2", "run_2")
+
+    await env.reset(first)
+    await env.reset(second)
+
+    expect(launch.launchCalls()).toBe(1)
+    expect(fake.contexts).toHaveLength(2)
+    expect(fake.contexts[0]?.pages).toHaveLength(1)
+    expect(fake.contexts[1]?.pages).toHaveLength(1)
+    expect(fake.contexts[0]?.pages[0]).not.toBe(fake.contexts[1]?.pages[0])
+  })
+
+  it("reattaches the same session without creating a new context or page", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const fake = createFakeBrowser()
+    const launch = stubBrowserLaunch(env, fake.browser)
+    const ctx = await context("ses_1", "run_1")
+
+    await env.openSession(ctx)
+    await env.attachSession(ctx)
+
+    expect(launch.launchCalls()).toBe(1)
+    expect(fake.contexts).toHaveLength(1)
+    expect(fake.contexts[0]?.pages).toHaveLength(1)
+    expect(fake.contexts[0]?.pages[0]?.bringToFrontCalls).toBe(1)
+  })
+
+  it("keeps the shared browser open until the final session closes", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const fake = createFakeBrowser()
+    stubBrowserLaunch(env, fake.browser)
+    const first = await context("ses_1", "run_1")
+    const second = await context("ses_2", "run_2")
+
+    await env.reset(first)
+    await env.reset(second)
+    await env.close(first)
+
+    expect(fake.contexts[0]?.closeCalls).toBe(1)
+    expect(fake.contexts[1]?.closeCalls).toBe(0)
+    expect(fake.closeCalls()).toBe(0)
+
+    await env.close(second)
+
+    expect(fake.contexts[1]?.closeCalls).toBe(1)
+    expect(fake.closeCalls()).toBe(1)
+  })
+
+  it("coalesces concurrent session opens into one browser launch", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const fake = createFakeBrowser()
+    let resolveLaunch!: (browser: unknown) => void
+    const pendingLaunch = new Promise<unknown>((resolve) => {
+      resolveLaunch = resolve
+    })
+    const launch = stubBrowserLaunch(env, pendingLaunch)
+    const first = await context("ses_1", "run_1")
+    const second = await context("ses_2", "run_2")
+
+    const firstOpen = env.reset(first)
+    const secondOpen = env.reset(second)
+    resolveLaunch(fake.browser)
+    await Promise.all([firstOpen, secondOpen])
+
+    expect(launch.launchCalls()).toBe(1)
+    expect(fake.contexts).toHaveLength(2)
   })
 
   it("navigates, interacts with a fixture page, observes text, and captures a screenshot", async () => {
