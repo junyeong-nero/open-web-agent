@@ -49,10 +49,10 @@ export interface StartedDefaultRuntime {
 }
 
 export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = {}): Promise<StartedDefaultRuntime> {
-  const home = options.home ?? resolveOwaHome()
+  const env = options.env ?? process.env
+  const home = options.home ?? resolveOwaHome(env)
   const eventBus = new EventBus()
   const registry = new PluginRegistry()
-  const env = options.env ?? process.env
   const modelConfig = readModelConfig(env, { configPath: options.configPath })
   const modelCallTimeoutMs = readModelCallTimeoutMs(env)
 
@@ -188,6 +188,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     storage,
     browserSessions,
     modelConfigPath: options.configPath,
+    modelConfigEnv: env,
     runtimeDefaults: {
       agentId: defaultAgentId,
       modelId: modelConfig.defaultModelProvider ? defaultModelId : null,
