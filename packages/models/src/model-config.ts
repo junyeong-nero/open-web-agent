@@ -96,12 +96,29 @@ export function readModelConfig(env: NodeJS.ProcessEnv = process.env, options: R
   }
 }
 
-export function resolveProviderDefaultModel(provider: ModelProvider, defaultModel: string): string {
+export function resolveProviderDefaultModel(provider: ModelProvider, defaultModel: string, defaultModelProvider?: string | null): string {
+  const selectedProvider = parseModelProviderId(defaultModelProvider)
+  if (selectedProvider && selectedProvider !== provider) return providerBuiltInDefaultModel(provider)
   if (provider === "openai" && defaultModel === defaultOpenRouterModel) return defaultOpenAIModel
   if (provider === "gemini" && defaultModel === defaultOpenRouterModel) return defaultGeminiModel
   if (provider === "claude" && defaultModel === defaultOpenRouterModel) return defaultClaudeModel
   return defaultModel
 }
+
+function parseModelProviderId(modelProvider: string | null | undefined): string | null {
+  const provider = modelProvider?.split(":", 1)[0]?.trim().toLowerCase()
+  if (!provider) return null
+  return knownRuntimeModelProviders.has(provider) ? provider : null
+}
+
+function providerBuiltInDefaultModel(provider: ModelProvider): string {
+  if (provider === "openai") return defaultOpenAIModel
+  if (provider === "gemini") return defaultGeminiModel
+  if (provider === "claude") return defaultClaudeModel
+  return defaultOpenRouterModel
+}
+
+const knownRuntimeModelProviders = new Set(["openai", "openrouter", "gemini", "claude", "codex-oauth"])
 
 export async function writeModelSelectionConfig(
   selection: ModelSelectionConfig,

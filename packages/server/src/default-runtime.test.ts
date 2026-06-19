@@ -140,6 +140,41 @@ describe("startDefaultRuntime", () => {
     }
   })
 
+  it("does not reuse a persisted OpenAI model name for direct non-OpenAI providers", async () => {
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const configPath = join(home, ".config.yaml")
+    await writeFile(configPath, ['model: "gpt-5.4-mini"', 'model_provider: "openai:gpt-5.4-mini"', ""].join("\n"))
+
+    const runtime = await startDefaultRuntime({
+      home,
+      configPath,
+      env: isolatedEnv(home, {
+        OPENAI_API_KEY: "test-openai-key",
+        GEMINI_API_KEY: "test-gemini-key",
+        ANTHROPIC_API_KEY: "test-anthropic-key",
+      }),
+    })
+
+    try {
+      const plugins = await fetchPlugins(runtime.url)
+
+      expect(plugins.models.find((model) => model.id === "openai:gpt-5.4-mini")).toMatchObject({
+        provider: "openai",
+        modelName: "gpt-5.4-mini",
+      })
+      expect(plugins.models.find((model) => model.id === "gemini")).toMatchObject({
+        provider: "gemini",
+        modelName: "gemini-3.5-flash",
+      })
+      expect(plugins.models.find((model) => model.id === "claude")).toMatchObject({
+        provider: "claude",
+        modelName: "claude-sonnet-4-6",
+      })
+    } finally {
+      await runtime.stop()
+    }
+  })
+
   it("registers Codex OAuth as a selectable model provider when Codex auth is available", async () => {
     const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
     const codexAuthPath = join(home, "codex-auth.json")
