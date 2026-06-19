@@ -75,6 +75,7 @@ export function App(props: AppProps) {
       return {
         title: "Select agent",
         emptyMessage: "No matching agents",
+        detailTitle: "Agent info",
         sections: buildAgentSelectorSections(current.availableAgents, current.selectedAgentId, query, current.runtimeFavoriteIds.agent),
       }
     }
@@ -768,6 +769,7 @@ export function App(props: AppProps) {
         <RuntimeSelector
           title={runtimeSelectorConfig().title}
           emptyMessage={runtimeSelectorConfig().emptyMessage}
+          detailTitle={runtimeSelectorConfig().detailTitle}
           sections={runtimeSelectorConfig().sections}
           theme={currentTheme()}
           onQueryChange={(query) => setState((current) => ({ ...current, runtimeSelectorQuery: query }))}
