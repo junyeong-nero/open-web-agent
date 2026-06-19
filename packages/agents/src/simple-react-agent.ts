@@ -59,6 +59,8 @@ export class SimpleReActAgent implements AgentPlugin {
   }
 
   private buildRequest(state: AgentState, lastError: string | null, lastRaw: string): ModelRequest {
+    const failedResults = formatFailedBrowserResults(state)
+
     return {
       model: this.options.modelName,
       responseFormat: "json",
@@ -84,6 +86,14 @@ export class SimpleReActAgent implements AgentPlugin {
             formatObservationForPrompt(state.lastObservation),
             "",
             `Completed steps: ${state.steps.length}`,
+            ...(failedResults
+              ? [
+                  "",
+                  "Failed browser results:",
+                  failedResults,
+                  "Choose a different target or recovery action instead of repeating the same failed tool call.",
+                ]
+              : []),
             ...(lastError
               ? [
                   "",
@@ -98,6 +108,17 @@ export class SimpleReActAgent implements AgentPlugin {
       ],
     }
   }
+}
+
+function formatFailedBrowserResults(state: AgentState): string {
+  return state.steps
+    .flatMap((step, stepIndex) =>
+      step.actionResults
+        .filter((result) => !result.ok)
+        .map((result) => `Step ${stepIndex + 1}: ${result.message ?? "Browser tool failed"}`),
+    )
+    .slice(-5)
+    .join("\n")
 }
 
 export function formatObservationForPrompt(observation: Observation | null): string {

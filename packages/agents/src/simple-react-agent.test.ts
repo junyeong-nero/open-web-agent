@@ -142,6 +142,32 @@ describe("SimpleReActAgent", () => {
     expect(model.requests[0]).not.toHaveProperty("temperature")
   })
 
+  it("includes failed browser results in the model prompt", async () => {
+    const failedState = state()
+    failedState.steps.push({
+      id: "step_1",
+      decision: null,
+      observation: failedState.lastObservation,
+      actionResults: [
+        {
+          ok: false,
+          message: "locator.click: Timeout 30000ms exceeded",
+          observation: failedState.lastObservation,
+          metadata: {},
+        },
+      ],
+    })
+    const model = new FakeModel([
+      JSON.stringify({ type: "final_answer", thought: null, finalAnswer: "done", confidence: 1 }),
+    ])
+
+    await new SimpleReActAgent({ model, modelName: "fake" }).step(failedState, ctx())
+
+    const prompt = model.requests[0]?.messages.at(-1)?.content
+    expect(prompt).toContain("Failed browser results:")
+    expect(prompt).toContain("locator.click: Timeout 30000ms exceeded")
+  })
+
   it("describes concrete click and type target shapes in the model prompt", async () => {
     const model = new FakeModel([JSON.stringify({ type: "final_answer", thought: null, finalAnswer: "done", confidence: 1 })])
 
