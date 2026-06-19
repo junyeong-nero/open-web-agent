@@ -33,6 +33,15 @@ describe("readModelConfig", () => {
     expect(resolveProviderDefaultModel("gemini", "custom-model")).toBe("custom-model")
   })
 
+  it("uses a persisted model name only for the selected runtime provider", () => {
+    expect(resolveProviderDefaultModel("openai", "gpt-5.4-mini", "openai:gpt-5.4-mini")).toBe("gpt-5.4-mini")
+    expect(resolveProviderDefaultModel("gemini", "gpt-5.4-mini", "openai:gpt-5.4-mini")).toBe("gemini-3.5-flash")
+    expect(resolveProviderDefaultModel("claude", "gpt-5.4-mini", "openai:gpt-5.4-mini")).toBe("claude-sonnet-4-6")
+    expect(resolveProviderDefaultModel("openrouter", "gpt-5.4-mini", "openai:gpt-5.4-mini")).toBe(
+      "nvidia/nemotron-3-super-120b-a12b:free",
+    )
+  })
+
   it("reads provider keys and default model from env", async () => {
     const dir = await mkdtemp(join(tmpdir(), "owa-model-config-"))
     expect(

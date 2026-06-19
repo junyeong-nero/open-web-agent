@@ -69,7 +69,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     models.push(
       new OpenRouterModel({
         apiKey: modelConfig.openrouterApiKey,
-        defaultModel: resolveProviderDefaultModel("openrouter", modelConfig.defaultModel),
+        defaultModel: resolveProviderDefaultModel("openrouter", modelConfig.defaultModel, modelConfig.defaultModelProvider),
         defaultParameters: modelConfig.parameters,
         reasoningEffort: modelConfig.reasoningEffort,
         contextWindowTokens: modelConfig.contextWindowTokens,
@@ -87,7 +87,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     models.push(
       new OpenAIModel({
         apiKey: modelConfig.openaiApiKey,
-        defaultModel: resolveProviderDefaultModel("openai", modelConfig.defaultModel),
+        defaultModel: resolveProviderDefaultModel("openai", modelConfig.defaultModel, modelConfig.defaultModelProvider),
         defaultParameters: modelConfig.parameters,
         reasoningEffort: modelConfig.reasoningEffort,
         contextWindowTokens: modelConfig.contextWindowTokens,
@@ -105,7 +105,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     models.push(
       new GeminiModel({
         apiKey: modelConfig.geminiApiKey,
-        defaultModel: resolveProviderDefaultModel("gemini", modelConfig.defaultModel),
+        defaultModel: resolveProviderDefaultModel("gemini", modelConfig.defaultModel, modelConfig.defaultModelProvider),
         defaultParameters: modelConfig.parameters,
         reasoningEffort: modelConfig.reasoningEffort,
         contextWindowTokens: modelConfig.contextWindowTokens,
@@ -117,7 +117,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     models.push(
       new ClaudeModel({
         apiKey: modelConfig.anthropicApiKey,
-        defaultModel: resolveProviderDefaultModel("claude", modelConfig.defaultModel),
+        defaultModel: resolveProviderDefaultModel("claude", modelConfig.defaultModel, modelConfig.defaultModelProvider),
         defaultParameters: modelConfig.parameters,
         reasoningEffort: modelConfig.reasoningEffort,
         contextWindowTokens: modelConfig.contextWindowTokens,
