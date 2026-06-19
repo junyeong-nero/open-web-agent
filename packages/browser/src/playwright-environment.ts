@@ -31,6 +31,7 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
   private browser: Browser | null = null
   private openingBrowser: Promise<Browser> | null = null
   private sessions = new Map<string, PlaywrightSessionState>()
+  private openingSessions = new Map<string, Promise<PlaywrightSessionState>>()
 
   constructor(private readonly options: PlaywrightEnvironmentOptions = {}) {}
 
@@ -54,6 +55,15 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
     const existing = this.sessions.get(key)
     if (existing && this.browser?.isConnected()) return existing
 
+    const opening = this.openingSessions.get(key)
+    if (opening) return withAbort(opening, ctx.abortSignal)
+
+    const openingSession = this.openSessionState(ctx, key)
+    this.openingSessions.set(key, openingSession)
+    return withAbort(openingSession, ctx.abortSignal)
+  }
+
+  private async openSessionState(ctx: RuntimeContext, key: string): Promise<PlaywrightSessionState> {
     const browser = await this.ensureBrowser(ctx)
     const context = await browser.newContext()
     try {
@@ -69,6 +79,8 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
     } catch (error) {
       await context.close().catch(() => {})
       throw error
+    } finally {
+      this.openingSessions.delete(key)
     }
   }
 
@@ -121,13 +133,16 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
 
   async close(ctx: RuntimeContext): Promise<void> {
     const key = this.keyFor(ctx)
-    const state = this.sessions.get(key)
+    const state = this.sessions.get(key) ?? (await this.openingSessions.get(key)?.catch(() => null))
     if (!state) return
 
     this.sessions.delete(key)
     await state.context.close().catch(() => {})
+    await this.closeBrowserIfIdle()
+  }
 
-    if (this.sessions.size === 0 && this.browser) {
+  private async closeBrowserIfIdle(): Promise<void> {
+    if (this.sessions.size === 0 && this.openingSessions.size === 0 && this.browser) {
       const browser = this.browser
       this.browser = null
       await browser.close().catch(() => {})

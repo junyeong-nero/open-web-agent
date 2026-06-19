@@ -129,6 +129,36 @@ function stubBrowserLaunch(env: PlaywrightEnvironment, browser: unknown | Promis
   return { launchCalls: () => launchCalls }
 }
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = () => resolvePromise()
+  })
+  return { promise, resolve }
+}
+
+function gateFakeNewPages(fake: ReturnType<typeof createFakeBrowser>) {
+  const firstPageStarted = deferred()
+  const releasePages = deferred()
+
+  ;(fake.browser as { newContext(): Promise<FakeContext> }).newContext = async () => {
+    const context = createFakeContext()
+    const originalNewPage = context.newPage.bind(context)
+    context.newPage = async () => {
+      firstPageStarted.resolve()
+      await releasePages.promise
+      return originalNewPage()
+    }
+    fake.contexts.push(context)
+    return context
+  }
+
+  return {
+    firstPageStarted: firstPageStarted.promise,
+    releasePages: () => releasePages.resolve(),
+  }
+}
+
 describe("PlaywrightEnvironment", () => {
   it("uses headed browser launches by default", () => {
     expect("resolvePlaywrightHeadless" in playwrightEnvironment).toBe(true)
@@ -239,6 +269,47 @@ describe("PlaywrightEnvironment", () => {
 
     expect(launch.launchCalls()).toBe(1)
     expect(fake.contexts).toHaveLength(2)
+  })
+
+  it("coalesces concurrent opens for the same session", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const fake = createFakeBrowser()
+    const gatedPages = gateFakeNewPages(fake)
+    stubBrowserLaunch(env, fake.browser)
+    const ctx = await context("ses_1", "run_1")
+
+    const firstOpen = env.openSession(ctx)
+    await gatedPages.firstPageStarted
+    const secondOpen = env.openSession(ctx)
+    gatedPages.releasePages()
+    await Promise.all([firstOpen, secondOpen])
+
+    expect(fake.contexts).toHaveLength(1)
+    expect(fake.contexts[0]?.pages).toHaveLength(1)
+
+    await env.close(ctx)
+
+    expect(fake.contexts[0]?.closeCalls).toBe(1)
+    expect(fake.closeCalls()).toBe(1)
+  })
+
+  it("closes a pending same-session open", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const fake = createFakeBrowser()
+    const gatedPages = gateFakeNewPages(fake)
+    stubBrowserLaunch(env, fake.browser)
+    const ctx = await context("ses_1", "run_1")
+
+    const opening = env.openSession(ctx)
+    await gatedPages.firstPageStarted
+    const closing = env.close(ctx)
+    gatedPages.releasePages()
+    await Promise.all([opening, closing])
+
+    expect(fake.contexts).toHaveLength(1)
+    expect(fake.contexts[0]?.closeCalls).toBe(1)
+    expect(fake.closeCalls()).toBe(1)
+    expect(() => env.pageForTools(ctx)).toThrow("PlaywrightEnvironment has not been opened for the session")
   })
 
   it("navigates, interacts with a fixture page, observes text, and captures a screenshot", async () => {
