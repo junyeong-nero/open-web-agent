@@ -427,9 +427,10 @@ export function App(props: AppProps) {
   async function submitPrompt(submittedValue?: string) {
     const value = (submittedValue ?? prompt()).trim()
     if (value.length === 0) return
-    void recordPromptHistory(value)
 
     const command = parseSlashCommand(value)
+    if (command.kind === "prompt") void recordPromptHistory(command.value)
+
     if (command.kind === "quit") {
       exit()
       return

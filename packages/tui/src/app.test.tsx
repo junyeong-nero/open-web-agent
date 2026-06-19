@@ -118,6 +118,58 @@ describe("App", () => {
     }
   })
 
+  it("does not persist runtime slash commands in prompt history", async () => {
+    const appendedHistory: string[] = []
+    const persistedModels: unknown[] = []
+    const persistedAgents: unknown[] = []
+    const persistedBrowsers: unknown[] = []
+    const server = startTuiServer({
+      onPersistModel: (body) => persistedModels.push(body),
+      onPersistAgent: (body) => persistedAgents.push(body),
+      onPersistBrowser: (body) => persistedBrowsers.push(body),
+    })
+    const setup = await testRender(
+      () => (
+        <App
+          serverUrl={server.url}
+          projectPath="/tmp/open-web-agent-test"
+          promptHistory={{
+            load: async () => [],
+            append: async (value) => {
+              appendedHistory.push(value)
+              return [...appendedHistory]
+            },
+          }}
+          onExit={() => {}}
+        />
+      ),
+      { width: 100, height: 24 },
+    )
+
+    try {
+      await setup.flush()
+
+      await setup.mockInput.typeText("/agent test-agent")
+      setup.mockInput.pressEnter()
+      await setup.flush()
+      await eventually(() => expect(persistedAgents).toEqual([{ agentId: "test-agent" }]))
+
+      await setup.mockInput.typeText("/model test-model")
+      setup.mockInput.pressEnter()
+      await setup.flush()
+      await eventually(() => expect(persistedModels).toEqual([{ modelId: "test-model" }]))
+
+      await setup.mockInput.typeText("/browser test-browser")
+      setup.mockInput.pressEnter()
+      await setup.flush()
+      await eventually(() => expect(persistedBrowsers).toEqual([{ browserId: "test-browser" }]))
+
+      expect(appendedHistory).toEqual([])
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
   it("focuses the prompt and inserts printable text when typing from another pane", async () => {
     const server = startTuiServer()
     const setup = await testRender(
