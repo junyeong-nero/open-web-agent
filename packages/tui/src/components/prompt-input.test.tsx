@@ -2,6 +2,7 @@
 import { describe, expect, it } from "bun:test"
 import { BoxRenderable, TextareaRenderable } from "@opentui/core"
 import { testRender } from "@opentui/solid"
+import { createSignal } from "solid-js"
 import type { ModelActivity } from "../state/types"
 import { getTheme } from "../theme/themes"
 import { PromptInput } from "./prompt-input"
@@ -143,6 +144,44 @@ describe("PromptInput", () => {
       await setup.flush()
 
       expect(submitted).toEqual(["/agent"])
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  it("submits a second value after the parent clears the first submission", async () => {
+    const submitted: string[] = []
+    const [value, setValue] = createSignal("")
+    const setup = await testRender(
+      () => (
+        <PromptInput
+          value={value()}
+          agent={null}
+          model={null}
+          modelActivity={idleModelActivity}
+          runStatus="completed"
+          theme={getTheme("opencode")}
+          onChange={setValue}
+          onSubmit={(nextValue) => {
+            submitted.push(nextValue)
+            setValue("")
+          }}
+        />
+      ),
+      { width: 80, height: 12 },
+    )
+
+    try {
+      await setup.flush()
+
+      await setup.mockInput.typeText("first")
+      setup.mockInput.pressEnter()
+      await setup.flush()
+      await setup.mockInput.typeText("second")
+      setup.mockInput.pressEnter()
+      await setup.flush()
+
+      expect(submitted).toEqual(["first", "second"])
     } finally {
       setup.renderer.destroy()
     }
