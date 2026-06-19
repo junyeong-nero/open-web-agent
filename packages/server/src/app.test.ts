@@ -326,7 +326,7 @@ describe("createApp", () => {
     })
   })
 
-  it("POST /sessions opens a browser page bound one-to-one with the session", async () => {
+  it("POST /sessions opens a session-bound browser page", async () => {
     const { request, environment } = await setupSessionLifecycleApp()
 
     const response = await request("/sessions", {
