@@ -494,6 +494,7 @@ describe("startDefaultRuntime", () => {
 
   it("loads the project-local plan-act external agent and emits plan events", async () => {
     const originalFetch = globalThis.fetch
+    const providerRequests: unknown[] = []
     const providerResponses = [
       JSON.stringify({
         items: [
@@ -514,6 +515,7 @@ describe("startDefaultRuntime", () => {
         return originalFetch(input, init)
       }
 
+      providerRequests.push(JSON.parse(String(init?.body ?? "{}")))
       return Response.json({
         id: "chatcmpl_plan_act",
         choices: [{ message: { content: providerResponses.shift() ?? providerResponses.at(-1) ?? "{}" } }],
@@ -573,6 +575,11 @@ describe("startDefaultRuntime", () => {
         type: "run.completed",
         payload: { finalAnswer: "external plan-act answered" },
       })
+      expect(providerRequests).toHaveLength(2)
+      expect(providerRequests).toEqual([
+        expect.not.objectContaining({ temperature: expect.anything() }),
+        expect.not.objectContaining({ temperature: expect.anything() }),
+      ])
     } finally {
       await runtime.stop()
       globalThis.fetch = originalFetch
