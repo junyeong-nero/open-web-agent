@@ -82,6 +82,46 @@ describe("OpenAIResponsesClient", () => {
     expect(body).not.toHaveProperty("temperature")
   })
 
+  it("retries Responses API requests without temperature when the provider rejects it", async () => {
+    const bodies: unknown[] = []
+    const client = new OpenAIResponsesClient({
+      baseUrl: "https://provider.test/v1",
+      accessToken: "oauth-token",
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body ?? "{}")))
+        if (bodies.length === 1) {
+          return new Response(
+            JSON.stringify({
+              error: {
+                message: "Unsupported value: 'temperature' does not support 0 with this model. Only the default (1) value is supported.",
+                type: "invalid_request_error",
+                param: "temperature",
+                code: "unsupported_value",
+              },
+            }),
+            { status: 400 },
+          )
+        }
+        return Response.json({
+          id: "resp_no_temperature_retry",
+          output_text: "after fallback",
+        })
+      },
+    })
+
+    const response = await client.complete({
+      model: "gpt-test",
+      messages: [{ role: "user", content: "Say hello" }],
+      temperature: 0,
+      responseFormat: "text",
+    })
+
+    expect(response.text).toBe("after fallback")
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0]).toMatchObject({ temperature: 0 })
+    expect(bodies[1]).not.toHaveProperty("temperature")
+  })
+
   it("extracts text from output message content when output_text is absent", async () => {
     const client = new OpenAIResponsesClient({
       baseUrl: "https://provider.test/v1",

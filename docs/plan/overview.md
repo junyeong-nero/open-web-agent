@@ -549,7 +549,7 @@ export const ModelMessageSchema = z.object({
 export const ModelRequestSchema = z.object({
   model: z.string(),
   messages: z.array(ModelMessageSchema).min(1),
-  temperature: z.number().min(0).max(2).default(0),
+  temperature: z.number().min(0).max(2).optional(),
   responseFormat: z.enum(["text", "json"]).default("text"),
 })
 

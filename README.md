@@ -170,7 +170,8 @@ gemini_api_key: "..."
 anthropic_api_key: "sk-ant-..."
 
 parameters:
-  temperature: 0
+  # Leave temperature unset unless the selected model supports custom values.
+  # temperature: 1
   # top_p: 1
   # max_tokens: 2048
   # presence_penalty: 0

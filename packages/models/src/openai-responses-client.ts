@@ -1,6 +1,7 @@
 import type { ModelMessage, ModelRequest, ModelResponse } from "@open-web-agent/core"
 import type { FetchLike } from "./openai-compatible-client"
 import { ModelProviderHttpError, retryModelCall } from "./retry"
+import { shouldRetryWithoutTemperature, withoutTemperatureParameter } from "./temperature-fallback"
 
 export interface OpenAIResponsesClientOptions {
   baseUrl: string
@@ -30,18 +31,17 @@ export class OpenAIResponsesClient {
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
     const startedAt = performance.now()
+    let requestForAttempt = request
     const raw = await retryModelCall(async () => {
-      const response = await this.fetchImpl(`${trimTrailingSlash(this.options.baseUrl)}/responses`, {
-        method: "POST",
-        headers: this.headers(),
-        body: JSON.stringify(toResponsesBody(request)),
-      })
-
-      if (!response.ok) {
-        throw new ModelProviderHttpError(response.status, await response.text())
+      try {
+        return await this.fetchResponse(requestForAttempt)
+      } catch (error) {
+        if (shouldRetryWithoutTemperature(requestForAttempt, error)) {
+          requestForAttempt = withoutTemperatureParameter(requestForAttempt)
+          return await this.fetchResponse(requestForAttempt)
+        }
+        throw error
       }
-
-      return (await response.json()) as ResponsesApiResponse
     }, { maxRetry: this.options.maxRetry })
     const usage = raw.usage
 
@@ -66,6 +66,20 @@ export class OpenAIResponsesClient {
       ...(this.options.accessToken ? { authorization: `Bearer ${this.options.accessToken}` } : {}),
       ...(this.options.defaultHeaders ?? {}),
     }
+  }
+
+  private async fetchResponse(request: ModelRequest): Promise<ResponsesApiResponse> {
+    const response = await this.fetchImpl(`${trimTrailingSlash(this.options.baseUrl)}/responses`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify(toResponsesBody(request)),
+    })
+
+    if (!response.ok) {
+      throw new ModelProviderHttpError(response.status, await response.text())
+    }
+
+    return (await response.json()) as ResponsesApiResponse
   }
 }
 
