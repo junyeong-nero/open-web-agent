@@ -12,6 +12,7 @@ export interface RunCommandInput {
 
 export interface RunCommandOptions {
   env?: NodeJS.ProcessEnv
+  configPath?: string
   stdout?: (line: string) => void
 }
 
@@ -21,6 +22,7 @@ export async function runCommand(input: RunCommandInput, options: RunCommandOpti
     home: resolveOwaHome(options.env),
     agentsDir: join(input.projectPath, "agents"),
     env: options.env,
+    configPath: options.configPath,
   })
   let resolveTerminalEvent: (event: RunEvent) => void = () => {}
   const terminalEvent = new Promise<RunEvent>((resolve) => {

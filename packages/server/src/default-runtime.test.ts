@@ -16,9 +16,9 @@ describe("startDefaultRuntime", () => {
     try {
       const plugins = await fetchPlugins(runtime.url)
 
-      expect(plugins.agents.map((agent) => agent.id)).toEqual(["mock-agent", "simple-react-agent", "see-act", "plan-act-agent"])
+      expect(plugins.agents.map((agent) => agent.id)).toEqual(["see-act", "simple-react-agent", "plan-act-agent"])
       expect(plugins.models.map((model) => model.id)).toEqual([])
-      expect(plugins.environments.map((environment) => environment.id)).toEqual(["mock-browser", "playwright-browser"])
+      expect(plugins.environments.map((environment) => environment.id)).toEqual(["playwright-browser"])
     } finally {
       await runtime.stop()
     }
@@ -470,7 +470,7 @@ describe("startDefaultRuntime", () => {
           prompt: "delegate through runtime",
           agentId: "runtime-model-agent",
           modelId: "openai:gpt-5.5",
-          environmentId: "mock-browser",
+          environmentId: "playwright-browser",
         }),
       })
       expect(runResponse.ok).toBe(true)
@@ -561,7 +561,7 @@ describe("startDefaultRuntime", () => {
           prompt: "inspect and answer",
           agentId: "plan-act",
           modelId: "openai",
-          environmentId: "mock-browser",
+          environmentId: "playwright-browser",
         }),
       })
       expect(runResponse.ok).toBe(true)
@@ -581,6 +581,14 @@ describe("startDefaultRuntime", () => {
 
   it("runs text-vision mixed grounding through the runtime model with text and screenshot content", async () => {
     const originalFetch = globalThis.fetch
+    const fixtureServer = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () =>
+        new Response("<!doctype html><title>Fixture Page</title><main>Fixture page text for mixed grounding.</main>", {
+          headers: { "content-type": "text/html" },
+        }),
+    })
     const providerRequests: unknown[] = []
     globalThis.fetch = (async (input, init) => {
       const url = String(input instanceof Request ? input.url : input)
@@ -626,10 +634,10 @@ describe("startDefaultRuntime", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           sessionId: session.sessionId,
-          prompt: "Use mixed grounding on example.com",
+          prompt: `Use mixed grounding on http://127.0.0.1:${fixtureServer.port}/`,
           agentId: "text-vision-mixed-grounding",
           modelId: "openai",
-          environmentId: "mock-browser",
+          environmentId: "playwright-browser",
         }),
       })
       expect(runResponse.ok).toBe(true)
@@ -650,6 +658,7 @@ describe("startDefaultRuntime", () => {
         image_url: { url: expect.stringContaining("data:") },
       })
     } finally {
+      fixtureServer.stop(true)
       await runtime.stop()
       globalThis.fetch = originalFetch
     }
@@ -723,7 +732,7 @@ describe("startDefaultRuntime", () => {
           prompt: "introduce yourself",
           agentId: "simple-react-agent",
           modelId: "openai",
-          environmentId: "mock-browser",
+          environmentId: "playwright-browser",
         }),
       })
       expect(runResponse.ok).toBe(true)
@@ -804,7 +813,7 @@ describe("startDefaultRuntime", () => {
           prompt: "introduce yourself",
           agentId: "simple-react-agent",
           modelId: "openai",
-          environmentId: "mock-browser",
+          environmentId: "playwright-browser",
         }),
       })
       expect(runResponse.ok).toBe(true)

@@ -1,9 +1,7 @@
 import { describe, expect, it } from "bun:test"
-import { readFile, mkdtemp } from "node:fs/promises"
+import { mkdir, readFile, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { MockAgent } from "@open-web-agent/agents"
-import { MockBrowserToolAdapter, MockEnvironment } from "@open-web-agent/browser"
 import {
   EventBus,
   PluginRegistry,
@@ -36,23 +34,23 @@ async function setup(
 ) {
   const eventBus = new EventBus()
   const registry = new PluginRegistry()
-  registry.registerAgent(new MockAgent())
+  registry.registerAgent(new TestAgent())
   if (includeAlternateAgent) registry.registerAgent(new AlternateAgent())
   if (includeRuntimePlugins) {
     registry.registerAgent(new ContextAgent())
     registry.registerModel(new TestModel())
     registry.registerEnvironment(new AlternateEnvironment())
   }
-  const mockEnvironment = new MockEnvironment(delayMs)
-  registry.registerEnvironment(mockEnvironment)
-  registry.registerToolAdapter(new MockBrowserToolAdapter(mockEnvironment))
+  const testEnvironment = new TestEnvironment(delayMs)
+  registry.registerEnvironment(testEnvironment)
+  registry.registerToolAdapter(new TestBrowserToolAdapter(testEnvironment))
 
   const orchestrator = new RunOrchestrator({
     home: await mkdtemp(join(tmpdir(), "owa-server-")),
     eventBus,
     registry,
-    agentId: "mock-agent",
-    environmentId: "mock-browser",
+    agentId: "test-agent",
+    environmentId: "test-browser",
     maxSteps: 4,
     now: () => new Date("2026-06-17T00:00:00.000Z"),
   })
@@ -75,6 +73,47 @@ async function setup(
   }
 }
 
+class TestAgent implements AgentPlugin {
+  id = "test-agent"
+  name = "Test Agent"
+  description = "Deterministic test agent for Example Domain."
+
+  async initialize(): Promise<void> {}
+
+  async step(state: AgentState): Promise<AgentDecision> {
+    if (state.steps.length === 0) {
+      return {
+        type: "browser_actions",
+        thought: "Open Example Domain, capture a screenshot, and extract text.",
+        actions: [
+          {
+            id: "action_0001",
+            kind: "inspect_page_title",
+            reason: "The prompt asks for the page title.",
+            requiresApproval: false,
+            toolCalls: [
+              { id: "tool_0001", type: "navigate", url: "https://example.com" },
+              { id: "tool_0002", type: "screenshot" },
+              { id: "tool_0003", type: "extract_text" },
+            ],
+          },
+        ],
+      }
+    }
+
+    return {
+      type: "final_answer",
+      thought: "The deterministic test observation contains the title.",
+      finalAnswer: '페이지 제목은 "Example Domain"입니다.',
+      confidence: 1,
+    }
+  }
+
+  async finalize(state: AgentState): Promise<string> {
+    return state.finalAnswer ?? '페이지 제목은 "Example Domain"입니다.'
+  }
+}
+
 class AlternateAgent implements AgentPlugin {
   id = "alternate-agent"
   name = "Alternate Agent"
@@ -89,6 +128,109 @@ class AlternateAgent implements AgentPlugin {
   async finalize(state: AgentState): Promise<string> {
     return state.finalAnswer ?? "alternate answer"
   }
+}
+
+class TestEnvironment implements BrowserEnvironment {
+  id = "test-browser"
+  name = "Test Browser"
+  private observations = new Map<string, Observation>()
+
+  constructor(readonly delayMs = 0) {}
+
+  async openSession(ctx: RuntimeContext): Promise<void> {
+    this.ensureObservation(ctx)
+  }
+
+  async attachSession(ctx: RuntimeContext): Promise<void> {
+    this.ensureObservation(ctx)
+  }
+
+  async reset(ctx: RuntimeContext): Promise<void> {
+    this.ensureObservation(ctx)
+  }
+
+  async observe(ctx: RuntimeContext): Promise<Observation> {
+    return this.currentObservation(ctx)
+  }
+
+  currentObservation(ctx: RuntimeContext): Observation {
+    return this.observations.get(ctx.session.id) ?? blankObservation()
+  }
+
+  updateObservation(ctx: RuntimeContext, observation: Observation): void {
+    this.observations.set(ctx.session.id, observation)
+  }
+
+  async close(ctx: RuntimeContext): Promise<void> {
+    this.observations.delete(ctx.session.id)
+  }
+
+  private ensureObservation(ctx: RuntimeContext): void {
+    this.observations.set(ctx.session.id, this.observations.get(ctx.session.id) ?? blankObservation())
+  }
+}
+
+class TestBrowserToolAdapter implements ToolAdapter {
+  id = "test-browser-tools"
+  name = "Test Browser Tools"
+  environmentId = "test-browser"
+
+  constructor(private readonly environment: TestEnvironment) {}
+
+  async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
+    await delay(this.environment.delayMs, ctx.abortSignal)
+
+    if (call.type === "navigate") {
+      const observation: Observation = {
+        url: "https://example.com/",
+        title: "Example Domain",
+        text: "Example Domain\nThis domain is for use in illustrative examples in documents.",
+        screenshotPath: null,
+        interactiveElements: [],
+        metadata: {},
+      }
+      this.environment.updateObservation(ctx, observation)
+      return { ok: true, message: "navigated", observation, metadata: { url: call.url } }
+    }
+
+    if (call.type === "screenshot") {
+      const screenshotDir = join(ctx.runDir, "screenshots")
+      const screenshotPath = join(screenshotDir, "step-0001.txt")
+      await mkdir(screenshotDir, { recursive: true })
+      await writeFile(screenshotPath, "test screenshot for Example Domain\n")
+      const observation = { ...this.environment.currentObservation(ctx), screenshotPath }
+      this.environment.updateObservation(ctx, observation)
+      return { ok: true, message: "screenshot captured", observation, metadata: { screenshotPath } }
+    }
+
+    if (call.type === "extract_text") {
+      const observation = this.environment.currentObservation(ctx)
+      return { ok: true, message: "text extracted", observation, metadata: { text: observation.text } }
+    }
+
+    return {
+      ok: false,
+      message: `Unsupported test tool: ${call.type}`,
+      observation: this.environment.currentObservation(ctx),
+      metadata: {},
+    }
+  }
+}
+
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(new DOMException("Run cancelled", "AbortError"))
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(resolve, ms)
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timeout)
+        reject(new DOMException("Run cancelled", "AbortError"))
+      },
+      { once: true },
+    )
+  })
 }
 
 class ContextAgent implements AgentPlugin {
@@ -395,7 +537,7 @@ describe("createApp", () => {
 
     const body = await json<{ environmentId: string; browser: Observation | null }>(await request("/sessions/ses_legacy"))
 
-    expect(body.environmentId).toBe("mock-browser")
+    expect(body.environmentId).toBe("test-browser")
     expect(body.browser?.url).toBe("about:blank")
     storage.close()
   })
@@ -432,7 +574,7 @@ describe("createApp", () => {
     expect(await runResponse.json()).toEqual({ error: "Unknown session" })
   })
 
-  it("POST /runs starts a mock run", async () => {
+  it("POST /runs starts a deterministic test run", async () => {
     const { request, eventBus } = await setup()
     const sessionId = await createSession(request)
     const completed = waitForEvent(eventBus, "run.completed")
@@ -590,7 +732,7 @@ describe("createApp", () => {
     expect(text).toContain(`data: ${JSON.stringify(event)}`)
   })
 
-  it("GET /plugins lists registered mock plugins", async () => {
+  it("GET /plugins lists registered test plugins", async () => {
     const { request } = await setup()
 
     const body = await json<{
@@ -599,8 +741,8 @@ describe("createApp", () => {
       models: Array<{ id: string; name: string; provider: string }>
     }>(await request("/plugins"))
 
-    expect(body.agents).toEqual([{ id: "mock-agent", name: "Mock Agent", description: "Deterministic Sprint 1 agent for Example Domain." }])
-    expect(body.environments).toEqual([{ id: "mock-browser", name: "Mock Browser" }])
+    expect(body.agents).toEqual([{ id: "test-agent", name: "Test Agent", description: "Deterministic test agent for Example Domain." }])
+    expect(body.environments).toEqual([{ id: "test-browser", name: "Test Browser" }])
     expect(body.models).toEqual([])
   })
 

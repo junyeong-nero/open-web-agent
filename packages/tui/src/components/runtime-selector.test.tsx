@@ -24,8 +24,8 @@ const agents: AgentSummary[] = [
 ]
 
 const browsers: EnvironmentSummary[] = [
-  { id: "mock-browser", name: "Mock Browser" },
   { id: "playwright-browser", name: "Playwright Browser" },
+  { id: "remote-browser", name: "Remote Browser" },
 ]
 
 describe("buildModelSelectorSections", () => {
@@ -170,14 +170,14 @@ describe("buildAgentSelectorSections", () => {
 describe("buildBrowserSelectorSections", () => {
   it("groups the selected browser as a favorite and filters by id or name", () => {
     expect(buildBrowserSelectorSections(browsers, "playwright-browser", "").map((section) => section.title)).toEqual(["Favorites", "Browsers"])
-    expect(buildBrowserSelectorSections(browsers, "playwright-browser", "mock")).toEqual([
+    expect(buildBrowserSelectorSections(browsers, "playwright-browser", "remote")).toEqual([
       {
         title: "Browsers",
         options: [
           {
-            id: "mock-browser",
-            label: "Mock Browser",
-            detail: "mock-browser",
+            id: "remote-browser",
+            label: "Remote Browser",
+            detail: "remote-browser",
             selected: false,
           },
         ],
@@ -186,12 +186,12 @@ describe("buildBrowserSelectorSections", () => {
   })
 
   it("groups registered browser favorites with the selected browser", () => {
-    expect(buildBrowserSelectorSections(browsers, "playwright-browser", "", ["mock-browser"])).toEqual([
+    expect(buildBrowserSelectorSections(browsers, "playwright-browser", "", ["remote-browser"])).toEqual([
       {
         title: "Favorites",
         options: [
           { id: "playwright-browser", label: "Playwright Browser", detail: "playwright-browser", selected: true },
-          { id: "mock-browser", label: "Mock Browser", detail: "mock-browser", selected: false },
+          { id: "remote-browser", label: "Remote Browser", detail: "remote-browser", selected: false },
         ],
       },
     ])

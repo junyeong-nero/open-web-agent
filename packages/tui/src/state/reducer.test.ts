@@ -241,7 +241,7 @@ describe("reduceTuiEvent", () => {
     const loaded = reduceTuiEvent(createInitialState("/tmp/project"), {
       type: "plugins.loaded",
       agents: [
-        { id: "mock-agent", name: "Mock Agent", description: "Deterministic" },
+        { id: "simple-react-agent", name: "Simple ReAct Agent", description: "Model-driven browser control" },
         { id: "see-act", name: "See-Act Agent", description: "Model-driven browser control" },
         { id: "plan-act-agent", name: "PlanAct Agent", description: "Plans first" },
       ],
@@ -256,10 +256,7 @@ describe("reduceTuiEvent", () => {
         },
         { id: "openrouter", name: "OpenRouter", provider: "openrouter", modelName: "openai/gpt-test" },
       ],
-      environments: [
-        { id: "mock-browser", name: "Mock Browser" },
-        { id: "playwright-browser", name: "Playwright Browser" },
-      ],
+      environments: [{ id: "playwright-browser", name: "Playwright Browser" }],
     })
     const selectedAgent = reduceTuiEvent(loaded, { type: "agent.selected", agentId: "plan-act-agent" })
     const selectedModel = reduceTuiEvent(selectedAgent, { type: "model.selected", modelId: "openrouter" })
@@ -271,35 +268,32 @@ describe("reduceTuiEvent", () => {
     expect(selectedBrowser.selectedAgentId).toBe("plan-act-agent")
     expect(selectedBrowser.selectedModelId).toBe("openrouter")
     expect(selectedBrowser.selectedEnvironmentId).toBe("playwright-browser")
-    expect(selectedBrowser.availableAgents.map((agent) => agent.id)).toEqual(["mock-agent", "see-act", "plan-act-agent"])
+    expect(selectedBrowser.availableAgents.map((agent) => agent.id)).toEqual(["simple-react-agent", "see-act", "plan-act-agent"])
     expect(selectedBrowser.availableModels.map((model) => model.id)).toEqual(["openai", "openrouter"])
     expect(selectedBrowser.availableModels[0]).toMatchObject({
       modelName: "gpt-test",
       reasoningEffort: "medium",
       contextWindowTokens: 128000,
     })
-    expect(selectedBrowser.availableEnvironments.map((environment) => environment.id)).toEqual(["mock-browser", "playwright-browser"])
+    expect(selectedBrowser.availableEnvironments.map((environment) => environment.id)).toEqual(["playwright-browser"])
   })
 
   it("uses persisted runtime defaults from loaded plugins when present", () => {
     const loaded = reduceTuiEvent(createInitialState("/tmp/project"), {
       type: "plugins.loaded",
       defaultAgentId: "plan-act-agent",
-      defaultEnvironmentId: "mock-browser",
+      defaultEnvironmentId: "playwright-browser",
       agents: [
-        { id: "mock-agent", name: "Mock Agent", description: "Deterministic" },
+        { id: "simple-react-agent", name: "Simple ReAct Agent", description: "Model-driven browser control" },
         { id: "see-act", name: "See-Act Agent", description: "Model-driven browser control" },
         { id: "plan-act-agent", name: "PlanAct Agent", description: "Plans first" },
       ],
       models: [],
-      environments: [
-        { id: "mock-browser", name: "Mock Browser" },
-        { id: "playwright-browser", name: "Playwright Browser" },
-      ],
+      environments: [{ id: "playwright-browser", name: "Playwright Browser" }],
     })
 
     expect(loaded.selectedAgentId).toBe("plan-act-agent")
-    expect(loaded.selectedEnvironmentId).toBe("mock-browser")
+    expect(loaded.selectedEnvironmentId).toBe("playwright-browser")
   })
 
   it("tracks model inference activity and context usage from model events", () => {

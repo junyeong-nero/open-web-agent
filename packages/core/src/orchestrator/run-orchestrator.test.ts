@@ -181,7 +181,7 @@ async function orchestrator(delayMs = 0): Promise<{
 }
 
 describe("RunOrchestrator", () => {
-  it("completes the deterministic Example Domain mock run", async () => {
+  it("completes the deterministic Example Domain test run", async () => {
     const setup = await orchestrator()
     const runSession = session()
     const started = setup.orchestrator.startRun({
@@ -220,7 +220,7 @@ describe("RunOrchestrator", () => {
     expect(persistedEvents.map((event) => event.type)).toEqual(setup.observedEvents.map((event) => event.type))
   })
 
-  it("cancels an active delayed mock run", async () => {
+  it("cancels an active delayed test run", async () => {
     const setup = await orchestrator(25)
     const started = setup.orchestrator.startRun({
       session: session(),

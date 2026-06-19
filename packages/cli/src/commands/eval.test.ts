@@ -8,6 +8,6 @@ describe("evalCommand", () => {
     evalCommand({ taskIds: ["example-domain-title"] }, { stdout: (line) => lines.push(line) })
 
     expect(lines.join("\n")).toContain("runs: 1")
-    expect(lines.join("\n")).toContain("example-domain-title mock-agent/none/mock-browser success")
+    expect(lines.join("\n")).toContain("example-domain-title simple-react-agent/openrouter/playwright-browser success")
   })
 })

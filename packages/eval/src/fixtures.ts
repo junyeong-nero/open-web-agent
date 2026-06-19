@@ -44,7 +44,7 @@ export const BENCHMARK_TASKS: BenchmarkTaskFixture[] = [
 ]
 
 export const DEFAULT_EVALUATION_COMBINATIONS: ReplayCombination[] = [
-  { agentId: "mock-agent", modelId: "none", environmentId: "mock-browser" },
+  { agentId: "simple-react-agent", modelId: "openrouter", environmentId: "playwright-browser" },
 ]
 
 export function getBenchmarkTask(taskId: string): BenchmarkTaskFixture {

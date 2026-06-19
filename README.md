@@ -1,8 +1,8 @@
 # Open Web Agent
 
-Open Web Agent is a terminal-first web agent runtime. A CLI starts a loopback-only Hono server, the runtime drives a mock or Playwright browser through typed browser actions, events stream to an OpenTUI terminal client over SSE, and each run writes JSONL traces for debugging and replay.
+Open Web Agent is a terminal-first web agent runtime. A CLI starts a loopback-only Hono server, the runtime drives a Playwright browser through typed browser actions, events stream to an OpenTUI terminal client over SSE, and each run writes JSONL traces for debugging and replay.
 
-The project is still early-stage. It ships deterministic mock runtime paths for local development alongside real model-backed agents, a Playwright browser environment, persistent sessions, and project-local Python agent examples.
+The project is still early-stage. It ships model-backed agents, a Playwright browser environment, persistent sessions, and project-local Python agent examples.
 
 ## Quick Start
 
@@ -18,16 +18,17 @@ Run the terminal UI from the current project directory:
 bun run packages/cli/src/index.ts
 ```
 
-Run the deterministic headless mock task:
+Run a model-backed headless task:
 
 ```bash
-bun run packages/cli/src/index.ts run "example.com에 접속해서 페이지 제목을 알려줘"
+OPENAI_API_KEY=sk-... \
+  bun run packages/cli/src/index.ts run "Open example.com and summarize the page"
 ```
 
-Expected final answer:
+Without provider credentials, headless runs report that no model is configured:
 
 ```text
-페이지 제목은 "Example Domain"입니다.
+[run.failed] No model selected.
 ```
 
 Development aliases point at the same TUI entry:
@@ -95,7 +96,6 @@ Built-in agents and repository examples:
 
 | ID | Notes |
 |---|---|
-| `mock-agent` | Deterministic local agent for the Example Domain smoke path. |
 | `simple-react-agent` | Model-backed browser-control agent. |
 | `see-act` | Model-backed visual grounding agent. |
 | `plan-act-agent` | Built-in model-backed planner/actor. |
@@ -106,7 +106,6 @@ Browser environments:
 
 | ID | Notes |
 |---|---|
-| `mock-browser` | Deterministic in-memory Example Domain environment. |
 | `playwright-browser` | Real Playwright browser environment. |
 
 Model-backed agents use the selected runtime model. Models are registered only when the corresponding provider credentials are available through config or environment variables. Supported provider paths are OpenAI, OpenRouter, Gemini, Claude, and Codex OAuth.
@@ -118,7 +117,7 @@ OPENAI_API_KEY=sk-... \
   bun run packages/cli/src/index.ts run --agent plan-act "Open example.com and summarize the page"
 ```
 
-The headless `run` command uses the configured default browser, falling back to `mock-browser`. For real page interaction or screenshot grounding, select `playwright-browser` in config or use the TUI:
+The headless `run` command uses the configured default browser, falling back to `playwright-browser`. For page interaction or screenshot grounding, select `playwright-browser` in config or use the TUI:
 
 ```text
 /browser playwright-browser
@@ -256,7 +255,7 @@ Provide explicit runtime combinations with `agent/model/browser`:
 ```bash
 bun run packages/cli/src/index.ts eval \
   --task example-domain-title \
-  --combo mock-agent/none/mock-browser \
+  --combo simple-react-agent/openrouter/playwright-browser \
   --combo plan-act/openrouter:openai/gpt-5.2-codex/playwright-browser
 ```
 
