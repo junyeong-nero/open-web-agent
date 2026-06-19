@@ -19,7 +19,7 @@ describe("createReplayActionLog", () => {
   it("converts run events into a deterministic replay action log", () => {
     const log = createReplayActionLog({
       taskId: "example-domain-title",
-      combo: { agentId: "mock-agent", modelId: "none", environmentId: "mock-browser" },
+      combo: { agentId: "simple-react-agent", modelId: "openrouter", environmentId: "playwright-browser" },
       events: [
         event(
           "browser.tool.completed",
@@ -49,7 +49,7 @@ describe("createReplayActionLog", () => {
     expect(log).toEqual({
       version: 1,
       taskId: "example-domain-title",
-      combo: { agentId: "mock-agent", modelId: "none", environmentId: "mock-browser" },
+      combo: { agentId: "simple-react-agent", modelId: "openrouter", environmentId: "playwright-browser" },
       entries: [
         {
           sequence: 3,

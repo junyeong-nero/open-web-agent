@@ -7,8 +7,8 @@ describe("runFixtureComparison", () => {
     const comparison = runFixtureComparison({
       taskIds: ["example-domain-title"],
       combinations: [
-        { agentId: "mock-agent", modelId: "none", environmentId: "mock-browser" },
-        { agentId: "broken-agent", modelId: "none", environmentId: "mock-browser" },
+        { agentId: "simple-react-agent", modelId: "openrouter", environmentId: "playwright-browser" },
+        { agentId: "broken-agent", modelId: "openrouter", environmentId: "playwright-browser" },
       ],
     })
 
@@ -22,7 +22,7 @@ describe("runFixtureComparison", () => {
       totalCostUsd: 0.001,
     })
     expect(comparison.results.map((result) => [result.combo.agentId, result.status])).toEqual([
-      ["mock-agent", "success"],
+      ["simple-react-agent", "success"],
       ["broken-agent", "failure"],
     ])
   })
@@ -31,7 +31,7 @@ describe("runFixtureComparison", () => {
     const report = formatComparisonSummary(
       runFixtureComparison({
         taskIds: ["example-domain-title"],
-        combinations: [{ agentId: "mock-agent", modelId: "none", environmentId: "mock-browser" }],
+        combinations: [{ agentId: "simple-react-agent", modelId: "openrouter", environmentId: "playwright-browser" }],
       }),
     )
 
@@ -39,6 +39,6 @@ describe("runFixtureComparison", () => {
     expect(report).toContain("success: 1")
     expect(report).toContain("latency_ms: 63")
     expect(report).toContain("cost_usd: 0.001")
-    expect(report).toContain("example-domain-title mock-agent/none/mock-browser success")
+    expect(report).toContain("example-domain-title simple-react-agent/openrouter/playwright-browser success")
   })
 })

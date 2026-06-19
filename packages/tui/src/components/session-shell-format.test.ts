@@ -14,9 +14,9 @@ import {
 function stateWithLog(): TuiState {
   return {
     ...createInitialState("/work/open-web-agent"),
-    selectedAgentId: "mock-agent",
+    selectedAgentId: "simple-react-agent",
     selectedModelId: null,
-    selectedEnvironmentId: "mock-browser",
+    selectedEnvironmentId: "playwright-browser",
     runStatus: "completed",
     runLog: [
       {
@@ -51,7 +51,7 @@ describe("session shell formatting", () => {
   })
 
   it("formats compact session metadata", () => {
-    expect(sessionMeta(stateWithLog())).toBe("completed · mock-agent · mock-browser")
+    expect(sessionMeta(stateWithLog())).toBe("completed · simple-react-agent · playwright-browser")
   })
 
   it("resolves the selected agent display name with id fallback", () => {

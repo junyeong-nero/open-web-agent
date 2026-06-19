@@ -4,7 +4,7 @@ Guidance for AI coding agents working in this repository. (Claude Code reads `CL
 
 ## What this is
 
-Open Web Agent is a terminal-first web agent runtime. A CLI starts an in-process local Hono server (loopback only), the runtime drives a (mock or Playwright) browser through typed tool calls, streams every run event over SSE to an OpenTUI terminal client, and persists JSONL traces for debugging/replay. It is an early-stage project; the default runtime still ships a deterministic mock agent + mock browser alongside the real Playwright/LLM paths.
+Open Web Agent is a terminal-first web agent runtime. A CLI starts an in-process local Hono server (loopback only), the runtime drives a Playwright browser through typed tool calls, streams every run event over SSE to an OpenTUI terminal client, and persists JSONL traces for debugging/replay. It is an early-stage project; the default runtime uses model-backed agents and real browser automation.
 
 ## Commands
 
@@ -72,8 +72,8 @@ Every runtime boundary is a Zod schema with an inferred TypeScript type — `eve
 
 `AgentPlugin`, `ModelPlugin`, and `BrowserEnvironment` (`contracts/plugin.ts`) are registered by string `id` in a `PluginRegistry`. `startDefaultRuntime` (`packages/server/src/default-runtime.ts`) is the composition root — it wires which concrete plugins exist:
 
-- Agents: `mock-agent`, `simple-react-agent`, `see-act`, `plan-act-agent`
-- Environments: `mock-browser`, `playwright-browser`
+- Agents: `simple-react-agent`, `see-act`, `plan-act-agent`
+- Environments: `playwright-browser`
 - Models: `OpenAIModel` / `OpenRouterModel` are registered **only if** the corresponding API key is present in config. With no key, model-backed agents fail at run time.
 
 Real agents don't hold a model directly — they call a `RuntimeSelectedModel` shim that dispatches to `ctx.modelId` (selected per-run, e.g. via `/model`) and emits `model.called`/`model.completed` around the real provider call. `OpenAIModel` and `OpenRouterModel` share an internal OpenAI-compatible chat-completions client.
@@ -86,8 +86,8 @@ Real agents don't hold a model directly — they call a `RuntimeSelectedModel` s
 | `server` | Hono app factory + routes + SSE; `startDefaultRuntime` composition root |
 | `cli` | arg parsing + the `default`/`run`/`serve`/`connect`/`eval` commands |
 | `tui` | OpenTUI + SolidJS terminal client (talks to the server only over HTTP/SSE) |
-| `browser` | `MockEnvironment`, `PlaywrightEnvironment` |
-| `agents` | mock + ReAct/SeeAct/PlanAct agents |
+| `browser` | `PlaywrightEnvironment` |
+| `agents` | ReAct/SeeAct/PlanAct agents |
 | `models` | provider adapters + YAML/env config loader |
 | `storage` | SQLite metadata store + artifact store |
 

@@ -1,15 +1,16 @@
 import { describe, expect, it } from "bun:test"
 import { mkdtemp } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 describe("CLI end-to-end smoke", () => {
-  it("runs the headless Example Domain task", async () => {
+  it("reports a missing model for the headless command without provider credentials", async () => {
     const home = await mkdtemp(join(tmpdir(), "owa-e2e-home-"))
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       HOME: home,
       OWA_HOME: home,
+      PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH ?? defaultPlaywrightBrowsersPath(),
       OPEN_WEB_AGENT_CODEX_AUTH_PATH: join(home, "missing-codex-auth.json"),
     }
     for (const key of providerEnvKeys) {
@@ -33,8 +34,7 @@ describe("CLI end-to-end smoke", () => {
 
     expect(stderr).toBe("")
     expect(exitCode).toBe(0)
-    expect(stdout).toContain('[run.completed] 페이지 제목은 "Example Domain"입니다.')
-    expect(stdout).toContain('페이지 제목은 "Example Domain"입니다.')
+    expect(stdout).toContain("[run.failed] No model selected.")
   })
 })
 
@@ -48,3 +48,11 @@ const providerEnvKeys = [
   "OPEN_WEB_AGENT_CODEX_ACCESS_TOKEN",
   "CODEX_ACCESS_TOKEN",
 ]
+
+function defaultPlaywrightBrowsersPath(): string {
+  if (process.platform === "darwin") return join(homedir(), "Library", "Caches", "ms-playwright")
+  if (process.platform === "win32") {
+    return join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "ms-playwright")
+  }
+  return join(homedir(), ".cache", "ms-playwright")
+}

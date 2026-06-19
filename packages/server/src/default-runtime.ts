@@ -1,10 +1,5 @@
-import { loadPythonAgentManifests, MockAgent, PlanActAgent, SeeActAgent, SimpleReActAgent } from "@open-web-agent/agents"
-import {
-  MockBrowserToolAdapter,
-  MockEnvironment,
-  PlaywrightBrowserToolAdapter,
-  PlaywrightEnvironment,
-} from "@open-web-agent/browser"
+import { loadPythonAgentManifests, PlanActAgent, SeeActAgent, SimpleReActAgent } from "@open-web-agent/agents"
+import { PlaywrightBrowserToolAdapter, PlaywrightEnvironment } from "@open-web-agent/browser"
 import {
   EventBus,
   PluginRegistry,
@@ -38,7 +33,6 @@ export interface StartDefaultRuntimeOptions {
   home?: string
   hostname?: string
   port?: number
-  environmentDelayMs?: number
   env?: NodeJS.ProcessEnv
   configPath?: string
   agentsDir?: string
@@ -62,7 +56,6 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   const modelConfig = readModelConfig(env, { configPath: options.configPath })
   const modelCallTimeoutMs = readModelCallTimeoutMs(env)
 
-  registry.registerAgent(new MockAgent())
   const models: ModelPlugin[] = []
 
   if (modelConfig.openrouterApiKey) {
@@ -158,23 +151,18 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   for (const agent of await loadPythonAgentManifests(options.agentsDir ?? join(home, "agents"), { model: selectedModel })) {
     registry.registerAgent(agent)
   }
-  const configuredDefaultAgentId = resolveRegisteredId(
-    registry.listAgents().map((agent) => agent.id),
-    modelConfig.defaultAgentId,
-  )
-  const defaultAgentId = configuredDefaultAgentId ?? "mock-agent"
+  const registeredAgentIds = registry.listAgents().map((agent) => agent.id)
+  const configuredDefaultAgentId = resolveRegisteredId(registeredAgentIds, modelConfig.defaultAgentId)
+  const defaultAgentId = configuredDefaultAgentId ?? resolveRegisteredId(registeredAgentIds, "see-act") ?? registeredAgentIds[0]
+  if (!defaultAgentId) throw new Error("No agents registered")
 
-  const mockEnvironment = new MockEnvironment(options.environmentDelayMs)
   const playwrightEnvironment = new PlaywrightEnvironment({ preventFocus: modelConfig.browserPreventFocus })
-  registry.registerEnvironment(mockEnvironment)
-  registry.registerToolAdapter(new MockBrowserToolAdapter(mockEnvironment))
   registry.registerEnvironment(playwrightEnvironment)
   registry.registerToolAdapter(new PlaywrightBrowserToolAdapter(playwrightEnvironment))
-  const configuredDefaultEnvironmentId = resolveRegisteredId(
-    registry.listEnvironments().map((environment) => environment.id),
-    modelConfig.defaultBrowserId,
-  )
-  const defaultEnvironmentId = configuredDefaultEnvironmentId ?? "mock-browser"
+  const registeredEnvironmentIds = registry.listEnvironments().map((environment) => environment.id)
+  const configuredDefaultEnvironmentId = resolveRegisteredId(registeredEnvironmentIds, modelConfig.defaultBrowserId)
+  const defaultEnvironmentId = configuredDefaultEnvironmentId ?? registeredEnvironmentIds[0]
+  if (!defaultEnvironmentId) throw new Error("No browser environments registered")
 
   const sessions = new Map<string, SessionState>()
   const browserSessions = new BrowserSessionManager({
@@ -202,9 +190,9 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     browserSessions,
     modelConfigPath: options.configPath,
     runtimeDefaults: {
-      agentId: configuredDefaultAgentId,
+      agentId: defaultAgentId,
       modelId: modelConfig.defaultModelProvider ? defaultModelId : null,
-      environmentId: configuredDefaultEnvironmentId,
+      environmentId: defaultEnvironmentId,
     },
   })
   const server = await startServer({
