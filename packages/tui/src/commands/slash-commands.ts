@@ -65,6 +65,7 @@ export function completeSlashCommand(input: string): string | null {
 export function parseSlashCommand(input: string): SlashCommand {
   const value = input.trim()
   if (!value.startsWith("/")) return { kind: "prompt", value }
+  if (value === "/") return { kind: "help" }
 
   const command = value.split(/\s+/, 1)[0] ?? value
   const kind = commands.get(command)

@@ -11,6 +11,37 @@ afterEach(() => {
 })
 
 describe("App", () => {
+  it("does not block prompt commands on slow history persistence", async () => {
+    const createdSessions: unknown[] = []
+    const server = startTuiServer({ onCreateSession: (body) => createdSessions.push(body) })
+    const setup = await testRender(
+      () => (
+        <App
+          serverUrl={server.url}
+          projectPath="/tmp/open-web-agent-test"
+          promptHistory={{
+            load: async () => [],
+            append: () => new Promise<string[]>(() => {}),
+          }}
+          onExit={() => {}}
+        />
+      ),
+      { width: 100, height: 24 },
+    )
+
+    try {
+      await setup.flush()
+
+      await setup.mockInput.typeText("/new")
+      setup.mockInput.pressEnter()
+      await setup.flush()
+
+      await eventually(() => expect(createdSessions).toHaveLength(1))
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
   it("lets the focused prompt complete slash commands before tab changes panes", async () => {
     const server = startTuiServer()
     const setup = await testRender(
@@ -208,6 +239,7 @@ describe("App", () => {
 function startTuiServer(
   options: {
     models?: Array<{ id: string; name: string; provider: string; modelName: string; reasoningEffort?: string | null }>
+    onCreateSession?: (body: unknown) => void
     onPersistModel?: (body: unknown) => void
     onPersistAgent?: (body: unknown) => void
     onPersistBrowser?: (body: unknown) => void
@@ -219,7 +251,10 @@ function startTuiServer(
     fetch(request) {
       const url = new URL(request.url)
       if (url.pathname === "/sessions" && request.method === "POST") {
-        return Response.json({ sessionId: sessionSummary.id, session: sessionSummary })
+        return request.json().then((body) => {
+          options.onCreateSession?.(body)
+          return Response.json({ sessionId: sessionSummary.id, session: sessionSummary })
+        })
       }
       if (url.pathname === "/sessions" && request.method === "GET") {
         return Response.json({ sessions: [sessionSummary] })

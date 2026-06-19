@@ -427,7 +427,7 @@ export function App(props: AppProps) {
   async function submitPrompt(submittedValue?: string) {
     const value = (submittedValue ?? prompt()).trim()
     if (value.length === 0) return
-    await recordPromptHistory(value)
+    void recordPromptHistory(value)
 
     const command = parseSlashCommand(value)
     if (command.kind === "quit") {
@@ -591,11 +591,15 @@ export function App(props: AppProps) {
       }),
     )
     setPrompt("")
-    await client.submitRun(activeSessionId, command.value, {
-      agentId: state().selectedAgentId || undefined,
-      modelId: state().selectedModelId,
-      environmentId: state().selectedEnvironmentId || undefined,
-    })
+    try {
+      await client.submitRun(activeSessionId, command.value, {
+        agentId: state().selectedAgentId || undefined,
+        modelId: state().selectedModelId,
+        environmentId: state().selectedEnvironmentId || undefined,
+      })
+    } catch (error) {
+      appendSystemMessage(`Failed to start run: ${formatError(error)}`)
+    }
   }
 
   function openRuntimeSelector(kind: RuntimeSelectorKind) {

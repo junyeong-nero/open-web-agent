@@ -45,6 +45,10 @@ describe("parseSlashCommand", () => {
   it("rejects unknown command", () => {
     expect(parseSlashCommand("/missing")).toEqual({ kind: "unknown", command: "/missing" })
   })
+
+  it("shows help for a bare slash submission", () => {
+    expect(parseSlashCommand("/")).toEqual({ kind: "help" })
+  })
 })
 
 describe("listSlashCommandSuggestions", () => {
