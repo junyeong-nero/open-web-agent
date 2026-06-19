@@ -18,8 +18,7 @@ export interface PlaywrightEnvironmentOptions {
   preventFocus?: boolean
 }
 
-interface PlaywrightRunState {
-  browser: Browser
+interface PlaywrightSessionState {
   context: BrowserContext
   page: Page
   lastScreenshotPath: string | null
@@ -29,7 +28,9 @@ interface PlaywrightRunState {
 export class PlaywrightEnvironment implements BrowserEnvironment {
   id = "playwright-browser"
   name = "Playwright Browser"
-  private runs = new Map<string, PlaywrightRunState>()
+  private browser: Browser | null = null
+  private openingBrowser: Promise<Browser> | null = null
+  private sessions = new Map<string, PlaywrightSessionState>()
 
   constructor(private readonly options: PlaywrightEnvironmentOptions = {}) {}
 
@@ -48,23 +49,55 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
     await this.attachSession(ctx)
   }
 
-  private async ensureState(ctx: RuntimeContext): Promise<PlaywrightRunState> {
+  private async ensureState(ctx: RuntimeContext): Promise<PlaywrightSessionState> {
     const key = this.keyFor(ctx)
-    const existing = this.runs.get(key)
-    if (existing) return existing
+    const existing = this.sessions.get(key)
+    if (existing && this.browser?.isConnected()) return existing
 
-    const browser = await withAbort(this.launchBrowser(), ctx.abortSignal)
+    const browser = await this.ensureBrowser(ctx)
     const context = await browser.newContext()
-    const page = await context.newPage()
-    const state = {
-      browser,
-      context,
-      page,
-      lastScreenshotPath: null,
-      screenshotCount: 0,
+    try {
+      const page = await context.newPage()
+      const state = {
+        context,
+        page,
+        lastScreenshotPath: null,
+        screenshotCount: 0,
+      }
+      this.sessions.set(key, state)
+      return state
+    } catch (error) {
+      await context.close().catch(() => {})
+      throw error
     }
-    this.runs.set(key, state)
-    return state
+  }
+
+  private async ensureBrowser(ctx: RuntimeContext): Promise<Browser> {
+    if (this.browser?.isConnected()) return this.browser
+
+    if (this.browser && !this.browser.isConnected()) {
+      await this.discardSessionStates()
+      this.browser = null
+    }
+
+    if (!this.openingBrowser) {
+      this.openingBrowser = this.launchBrowser()
+        .then((browser) => {
+          this.browser = browser
+          return browser
+        })
+        .finally(() => {
+          this.openingBrowser = null
+        })
+    }
+
+    return withAbort(this.openingBrowser, ctx.abortSignal)
+  }
+
+  private async discardSessionStates(): Promise<void> {
+    const states = [...this.sessions.values()]
+    this.sessions.clear()
+    await Promise.all(states.map((state) => state.context.close().catch(() => {})))
   }
 
   async observe(ctx: RuntimeContext): Promise<Observation> {
@@ -88,11 +121,17 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
 
   async close(ctx: RuntimeContext): Promise<void> {
     const key = this.keyFor(ctx)
-    const state = this.runs.get(key)
+    const state = this.sessions.get(key)
     if (!state) return
-    this.runs.delete(key)
+
+    this.sessions.delete(key)
     await state.context.close().catch(() => {})
-    await state.browser.close().catch(() => {})
+
+    if (this.sessions.size === 0 && this.browser) {
+      const browser = this.browser
+      this.browser = null
+      await browser.close().catch(() => {})
+    }
   }
 
   private async launchBrowser(): Promise<Browser> {
@@ -109,9 +148,11 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
     }
   }
 
-  private requireState(ctx: RuntimeContext): PlaywrightRunState {
-    const state = this.runs.get(this.keyFor(ctx))
-    if (!state) throw new Error("PlaywrightEnvironment has not been opened for the session")
+  private requireState(ctx: RuntimeContext): PlaywrightSessionState {
+    const state = this.sessions.get(this.keyFor(ctx))
+    if (!state || !this.browser?.isConnected()) {
+      throw new Error("PlaywrightEnvironment has not been opened for the session")
+    }
     return state
   }
 
@@ -119,7 +160,7 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
     return ctx.session.id
   }
 
-  private async readObservation(state: PlaywrightRunState): Promise<Observation> {
+  private async readObservation(state: PlaywrightSessionState): Promise<Observation> {
     const { page } = state
     const [title, text, interactiveElements] = await Promise.all([
       page.title().catch(() => null),
