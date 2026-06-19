@@ -20,7 +20,7 @@ const models: ModelSummary[] = [
 
 const agents: AgentSummary[] = [
   { id: "see-act", name: "SeeAct", description: "Visual grounding agent" },
-  { id: "plan-act-agent", name: "PlanAct", description: "Plans before acting" },
+  { id: "plan-act", name: "PlanAct", description: "Plans before acting" },
 ]
 
 const browsers: EnvironmentSummary[] = [
@@ -144,7 +144,7 @@ describe("buildAgentSelectorSections", () => {
         title: "Agents",
         options: [
           {
-            id: "plan-act-agent",
+            id: "plan-act",
             label: "PlanAct",
             detail: "Plans before acting",
             detailDisplay: "panel",
@@ -156,12 +156,12 @@ describe("buildAgentSelectorSections", () => {
   })
 
   it("groups registered agent favorites with the selected agent", () => {
-    expect(buildAgentSelectorSections(agents, "see-act", "", ["plan-act-agent"])).toEqual([
+    expect(buildAgentSelectorSections(agents, "see-act", "", ["plan-act"])).toEqual([
       {
         title: "Favorites",
         options: [
           { id: "see-act", label: "SeeAct", detail: "Visual grounding agent", detailDisplay: "panel", selected: true },
-          { id: "plan-act-agent", label: "PlanAct", detail: "Plans before acting", detailDisplay: "panel", selected: false },
+          { id: "plan-act", label: "PlanAct", detail: "Plans before acting", detailDisplay: "panel", selected: false },
         ],
       },
     ])

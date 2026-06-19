@@ -58,10 +58,10 @@ describe("session shell formatting", () => {
     expect(
       selectedAgentSummary({
         ...stateWithLog(),
-        selectedAgentId: "plan-act-agent",
-        availableAgents: [{ id: "plan-act-agent", name: "PlanAct Agent", description: "Plans before acting." }],
+        selectedAgentId: "plan-act",
+        availableAgents: [{ id: "plan-act", name: "PlanAct Agent", description: "Plans before acting." }],
       }),
-    ).toMatchObject({ id: "plan-act-agent", name: "PlanAct Agent" })
+    ).toMatchObject({ id: "plan-act", name: "PlanAct Agent" })
     expect(selectedAgentSummary({ ...stateWithLog(), selectedAgentId: "see-act", availableAgents: [] })).toMatchObject({
       id: "see-act",
       name: "see-act",
@@ -108,7 +108,7 @@ describe("session shell formatting", () => {
   })
 
   it("formats prompt metadata and hints", () => {
-    const agent = { id: "plan-act-agent", name: "PlanAct Agent", description: "Plans before acting." }
+    const agent = { id: "plan-act", name: "PlanAct Agent", description: "Plans before acting." }
 
     expect(promptMeta(null, null)).toBe("no agent / no model")
     expect(promptMeta({ id: "see-act", name: "see-act", description: "" }, null)).toBe("see-act / no model")

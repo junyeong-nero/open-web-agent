@@ -98,7 +98,6 @@ Built-in agents and repository examples:
 |---|---|
 | `simple-react-agent` | Model-backed browser-control agent. |
 | `see-act` | Model-backed visual grounding agent. |
-| `plan-act-agent` | Built-in model-backed planner/actor. |
 | `plan-act` | Repository example Python `jsonl` agent loaded from `agents/plan-act` when this repo is the active project. |
 | `text-vision-mixed-grounding` | Repository example Python agent that combines extracted text and screenshots. |
 

@@ -291,19 +291,19 @@ describe("readModelConfig", () => {
       ].join("\n"),
     )
 
-    await writeAgentSelectionConfig({ agentId: "plan-act-agent" }, { configPath })
+    await writeAgentSelectionConfig({ agentId: "plan-act" }, { configPath })
     await writeBrowserSelectionConfig({ browserId: "playwright-browser" }, { configPath })
 
     expect(parse(await readFile(configPath, "utf8"))).toMatchObject({
       model: "gpt-5.5",
       model_provider: "codex-oauth",
-      agent: "plan-act-agent",
+      agent: "plan-act",
       browser: "playwright-browser",
       parameters: { temperature: 0.25 },
       unknown_key: "keep-me",
     })
     expect(readModelConfig({}, { configPath })).toMatchObject({
-      defaultAgentId: "plan-act-agent",
+      defaultAgentId: "plan-act",
       defaultBrowserId: "playwright-browser",
     })
   })

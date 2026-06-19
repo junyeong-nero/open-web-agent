@@ -16,7 +16,7 @@ describe("startDefaultRuntime", () => {
     try {
       const plugins = await fetchPlugins(runtime.url)
 
-      expect(plugins.agents.map((agent) => agent.id)).toEqual(["see-act", "simple-react-agent", "plan-act-agent"])
+      expect(plugins.agents.map((agent) => agent.id)).toEqual(["see-act", "simple-react-agent"])
       expect(plugins.models.map((model) => model.id)).toEqual([])
       expect(plugins.environments.map((environment) => environment.id)).toEqual(["playwright-browser"])
     } finally {
@@ -246,7 +246,7 @@ describe("startDefaultRuntime", () => {
   it("uses persisted agent and browser defaults for selectors and new sessions", async () => {
     const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
     const configPath = join(home, ".config.yaml")
-    await writeFile(configPath, ['agent: "plan-act-agent"', 'browser: "playwright-browser"', ""].join("\n"))
+    await writeFile(configPath, ['agent: "simple-react-agent"', 'browser: "playwright-browser"', ""].join("\n"))
 
     const runtime = await startDefaultRuntime({
       home,
@@ -256,7 +256,7 @@ describe("startDefaultRuntime", () => {
 
     try {
       const plugins = await fetchPlugins(runtime.url)
-      expect(plugins.agents[0]?.id).toBe("plan-act-agent")
+      expect(plugins.agents[0]?.id).toBe("simple-react-agent")
       expect(plugins.environments[0]?.id).toBe("playwright-browser")
 
       const response = await fetch(`${runtime.url}/sessions`, {

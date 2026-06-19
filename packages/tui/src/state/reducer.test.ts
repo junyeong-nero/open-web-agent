@@ -243,7 +243,7 @@ describe("reduceTuiEvent", () => {
       agents: [
         { id: "simple-react-agent", name: "Simple ReAct Agent", description: "Model-driven browser control" },
         { id: "see-act", name: "See-Act Agent", description: "Model-driven browser control" },
-        { id: "plan-act-agent", name: "PlanAct Agent", description: "Plans first" },
+        { id: "plan-act", name: "PlanAct Agent", description: "Plans first" },
       ],
       models: [
         {
@@ -258,17 +258,17 @@ describe("reduceTuiEvent", () => {
       ],
       environments: [{ id: "playwright-browser", name: "Playwright Browser" }],
     })
-    const selectedAgent = reduceTuiEvent(loaded, { type: "agent.selected", agentId: "plan-act-agent" })
+    const selectedAgent = reduceTuiEvent(loaded, { type: "agent.selected", agentId: "plan-act" })
     const selectedModel = reduceTuiEvent(selectedAgent, { type: "model.selected", modelId: "openrouter" })
     const selectedBrowser = reduceTuiEvent(selectedModel, { type: "environment.selected", environmentId: "playwright-browser" })
 
     expect(loaded.selectedAgentId).toBe("see-act")
     expect(loaded.selectedModelId).toBe("openai")
     expect(loaded.selectedEnvironmentId).toBe("playwright-browser")
-    expect(selectedBrowser.selectedAgentId).toBe("plan-act-agent")
+    expect(selectedBrowser.selectedAgentId).toBe("plan-act")
     expect(selectedBrowser.selectedModelId).toBe("openrouter")
     expect(selectedBrowser.selectedEnvironmentId).toBe("playwright-browser")
-    expect(selectedBrowser.availableAgents.map((agent) => agent.id)).toEqual(["simple-react-agent", "see-act", "plan-act-agent"])
+    expect(selectedBrowser.availableAgents.map((agent) => agent.id)).toEqual(["simple-react-agent", "see-act", "plan-act"])
     expect(selectedBrowser.availableModels.map((model) => model.id)).toEqual(["openai", "openrouter"])
     expect(selectedBrowser.availableModels[0]).toMatchObject({
       modelName: "gpt-test",
@@ -281,18 +281,18 @@ describe("reduceTuiEvent", () => {
   it("uses persisted runtime defaults from loaded plugins when present", () => {
     const loaded = reduceTuiEvent(createInitialState("/tmp/project"), {
       type: "plugins.loaded",
-      defaultAgentId: "plan-act-agent",
+      defaultAgentId: "plan-act",
       defaultEnvironmentId: "playwright-browser",
       agents: [
         { id: "simple-react-agent", name: "Simple ReAct Agent", description: "Model-driven browser control" },
         { id: "see-act", name: "See-Act Agent", description: "Model-driven browser control" },
-        { id: "plan-act-agent", name: "PlanAct Agent", description: "Plans first" },
+        { id: "plan-act", name: "PlanAct Agent", description: "Plans first" },
       ],
       models: [],
       environments: [{ id: "playwright-browser", name: "Playwright Browser" }],
     })
 
-    expect(loaded.selectedAgentId).toBe("plan-act-agent")
+    expect(loaded.selectedAgentId).toBe("plan-act")
     expect(loaded.selectedEnvironmentId).toBe("playwright-browser")
   })
 
