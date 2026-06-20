@@ -11,6 +11,7 @@ describe("CLI end-to-end smoke", () => {
       HOME: home,
       OWA_HOME: home,
       PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH ?? defaultPlaywrightBrowsersPath(),
+      OPEN_WEB_AGENT_BROWSER_HEADLESS: "true",
       OPEN_WEB_AGENT_CODEX_AUTH_PATH: join(home, "missing-codex-auth.json"),
     }
     for (const key of providerEnvKeys) {

@@ -294,6 +294,27 @@ describe("startDefaultRuntime", () => {
     }
   })
 
+  it("passes the configured browser headless preference to Playwright", async () => {
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const runtime = await startDefaultRuntime({
+      home,
+      configPath: join(home, "missing-config.yaml"),
+      env: isolatedEnv(home, {
+        OPEN_WEB_AGENT_BROWSER_HEADLESS: "true",
+      }),
+    })
+
+    try {
+      const environment = runtime.registry.getEnvironment("playwright-browser") as unknown as {
+        options?: { headless?: boolean }
+      }
+
+      expect(environment.options?.headless).toBe(true)
+    } finally {
+      await runtime.stop()
+    }
+  })
+
   it("registers Python agents from a manifest directory", async () => {
     const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
     const agentsDir = join(home, "agents")
@@ -866,6 +887,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isolatedEnv(home: string, env: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
     OPEN_WEB_AGENT_CODEX_AUTH_PATH: join(home, "missing-codex-auth.json"),
+    OPEN_WEB_AGENT_BROWSER_HEADLESS: "true",
     ...env,
   }
 }

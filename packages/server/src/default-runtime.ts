@@ -55,6 +55,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   const env = options.env ?? process.env
   const modelConfig = readModelConfig(env, { configPath: options.configPath })
   const modelCallTimeoutMs = readModelCallTimeoutMs(env)
+  const browserHeadless = readBrowserHeadless(env)
 
   const models: ModelPlugin[] = []
 
@@ -155,7 +156,10 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   const defaultAgentId = configuredDefaultAgentId ?? resolveRegisteredId(registeredAgentIds, "see-act") ?? registeredAgentIds[0]
   if (!defaultAgentId) throw new Error("No agents registered")
 
-  const playwrightEnvironment = new PlaywrightEnvironment({ preventFocus: modelConfig.browserPreventFocus })
+  const playwrightEnvironment = new PlaywrightEnvironment({
+    headless: browserHeadless,
+    preventFocus: modelConfig.browserPreventFocus,
+  })
   registry.registerEnvironment(playwrightEnvironment)
   registry.registerToolAdapter(new PlaywrightBrowserToolAdapter(playwrightEnvironment))
   const registeredEnvironmentIds = registry.listEnvironments().map((environment) => environment.id)
@@ -236,6 +240,18 @@ function readModelCallTimeoutMs(env: NodeJS.ProcessEnv): number | undefined {
     throw new Error("Invalid OPEN_WEB_AGENT_MODEL_TIMEOUT_MS: must be a positive integer")
   }
   return parsed
+}
+
+function readBrowserHeadless(env: NodeJS.ProcessEnv): boolean | undefined {
+  return readOptionalBooleanEnv(env.OPEN_WEB_AGENT_BROWSER_HEADLESS, "OPEN_WEB_AGENT_BROWSER_HEADLESS")
+}
+
+function readOptionalBooleanEnv(value: string | undefined, name: string): boolean | undefined {
+  if (value == null || value.length === 0) return undefined
+  const normalized = value.toLowerCase()
+  if (["1", "true", "yes", "on"].includes(normalized)) return true
+  if (["0", "false", "no", "off"].includes(normalized)) return false
+  throw new Error(`Invalid ${name}: must be a boolean`)
 }
 
 class RuntimeSelectedModel implements ModelPlugin {

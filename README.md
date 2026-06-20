@@ -191,6 +191,7 @@ OPEN_WEB_AGENT_MODEL_PROVIDER
 OPEN_WEB_AGENT_AGENT
 OPEN_WEB_AGENT_BROWSER
 OPEN_WEB_AGENT_BROWSER_PREVENT_FOCUS
+OPEN_WEB_AGENT_BROWSER_HEADLESS
 OPEN_WEB_AGENT_REASONING_EFFORT
 OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS
 OPEN_WEB_AGENT_MAX_RETRY
@@ -267,9 +268,9 @@ This is a Bun monorepo. Use `bun`, not `npm` or `yarn`.
 
 ```bash
 bun run typecheck
-bun test
-bun test packages/core/src/events/event-bus.test.ts
-bun test -t "publishes events"
+bun run test
+OPEN_WEB_AGENT_BROWSER_HEADLESS=true bun test packages/core/src/events/event-bus.test.ts
+OPEN_WEB_AGENT_BROWSER_HEADLESS=true bun test packages/*/src -t "publishes events"
 ```
 
 Always run `bun run typecheck` after changes. Tests that exercise orchestrator or storage paths should set `OWA_HOME` to a temp directory so local developer data is not touched.
