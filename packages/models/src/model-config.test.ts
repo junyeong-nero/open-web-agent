@@ -55,6 +55,7 @@ describe("readModelConfig", () => {
           OPEN_WEB_AGENT_MODEL_PROVIDER: "codex-oauth",
           OPEN_WEB_AGENT_AGENT: "env-agent",
           OPEN_WEB_AGENT_BROWSER: "env-browser",
+          OPEN_WEB_AGENT_BROWSER_HEADLESS: "true",
           OPEN_WEB_AGENT_BROWSER_PREVENT_FOCUS: "true",
           OPEN_WEB_AGENT_REASONING_EFFORT: "high",
           OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS: "256000",
@@ -68,6 +69,7 @@ describe("readModelConfig", () => {
       defaultModelProvider: "codex-oauth",
       defaultAgentId: "env-agent",
       defaultBrowserId: "env-browser",
+      browserHeadless: true,
       browserPreventFocus: true,
       reasoningEffort: "high",
       contextWindowTokens: 256000,
@@ -81,6 +83,28 @@ describe("readModelConfig", () => {
     })
   })
 
+  it("reads the browser headless preference from env", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-model-config-"))
+
+    expect(
+      readModelConfig(
+        {
+          OPEN_WEB_AGENT_BROWSER_HEADLESS: "true",
+        },
+        { configPath: join(dir, "missing-config.yaml") },
+      ).browserHeadless,
+    ).toBe(true)
+
+    expect(
+      readModelConfig(
+        {
+          OPEN_WEB_AGENT_BROWSER_HEADLESS: "false",
+        },
+        { configPath: join(dir, "missing-config.yaml") },
+      ).browserHeadless,
+    ).toBe(false)
+  })
+
   it("reads provider keys and default model from a YAML config file", async () => {
     const dir = await mkdtemp(join(tmpdir(), "owa-model-config-"))
     const configPath = join(dir, "config.yaml")
@@ -91,6 +115,7 @@ describe("readModelConfig", () => {
         'model_provider: "codex-oauth"',
         'agent: "yaml-agent"',
         'browser: "yaml-browser"',
+        "browser_headless: true",
         "browser_prevent_focus: true",
         'reasoning_effort: "low"',
         "context_window_tokens: 64000",
@@ -109,6 +134,7 @@ describe("readModelConfig", () => {
       defaultModelProvider: "codex-oauth",
       defaultAgentId: "yaml-agent",
       defaultBrowserId: "yaml-browser",
+      browserHeadless: true,
       browserPreventFocus: true,
       reasoningEffort: "low",
       contextWindowTokens: 64000,
@@ -120,6 +146,22 @@ describe("readModelConfig", () => {
       codexAuthPath: "/tmp/yaml-codex-auth.json",
       parameters: {},
     })
+  })
+
+  it("reads the browser headless preference from a YAML config file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-model-config-"))
+    const configPath = join(dir, "config.yaml")
+    await writeFile(configPath, ["browser_headless: true", ""].join("\n"))
+
+    expect(readModelConfig({}, { configPath }).browserHeadless).toBe(true)
+  })
+
+  it("accepts headless as an alias for browser_headless", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-model-config-"))
+    const configPath = join(dir, "config.yaml")
+    await writeFile(configPath, ["headless: true", ""].join("\n"))
+
+    expect(readModelConfig({}, { configPath }).browserHeadless).toBe(true)
   })
 
   it("expands a home-relative Codex auth path from YAML config", async () => {
@@ -157,6 +199,7 @@ describe("readModelConfig", () => {
       defaultModelProvider: null,
       defaultAgentId: null,
       defaultBrowserId: null,
+      browserHeadless: false,
       browserPreventFocus: false,
       reasoningEffort: "medium",
       contextWindowTokens: 128000,
@@ -210,6 +253,7 @@ describe("readModelConfig", () => {
           OPEN_WEB_AGENT_MODEL_PROVIDER: "env-provider",
           OPEN_WEB_AGENT_AGENT: "env-agent",
           OPEN_WEB_AGENT_BROWSER: "env-browser",
+          OPEN_WEB_AGENT_BROWSER_HEADLESS: "true",
           OPEN_WEB_AGENT_BROWSER_PREVENT_FOCUS: "true",
           OPEN_WEB_AGENT_REASONING_EFFORT: "medium",
           OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS: "128000",
@@ -223,6 +267,7 @@ describe("readModelConfig", () => {
       defaultModelProvider: "env-provider",
       defaultAgentId: "env-agent",
       defaultBrowserId: "env-browser",
+      browserHeadless: true,
       browserPreventFocus: true,
       reasoningEffort: "medium",
       contextWindowTokens: 128000,
@@ -241,6 +286,7 @@ describe("readModelConfig", () => {
       defaultModelProvider: null,
       defaultAgentId: null,
       defaultBrowserId: null,
+      browserHeadless: false,
       browserPreventFocus: false,
       reasoningEffort: "medium",
       contextWindowTokens: 128000,
