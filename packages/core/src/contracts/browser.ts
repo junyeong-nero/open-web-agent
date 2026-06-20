@@ -33,6 +33,33 @@ export const ActionTargetSchema = z.object({
     .default(null),
 })
 
+export const BrowserToolTypeSchema = z.enum([
+  "navigate",
+  "click",
+  "type",
+  "scroll",
+  "wait",
+  "press_key",
+  "screenshot",
+  "extract_text",
+  "go_back",
+  "go_forward",
+])
+
+export const BrowserToolParameterSchema = z.object({
+  name: z.string(),
+  type: z.string(),
+  required: z.boolean(),
+  description: z.string(),
+})
+
+export const BrowserToolDefinitionSchema = z.object({
+  type: BrowserToolTypeSchema,
+  description: z.string(),
+  parameters: z.array(BrowserToolParameterSchema),
+  example: z.record(z.string(), z.unknown()),
+})
+
 export const BrowserToolCallSchema = z.discriminatedUnion("type", [
   z.object({ id: z.string(), type: z.literal("navigate"), url: z.string().url() }),
   z.object({ id: z.string(), type: z.literal("click"), target: ActionTargetSchema }),
@@ -71,6 +98,9 @@ export const ActionResultSchema = z.object({
 })
 
 export type BrowserToolCall = z.infer<typeof BrowserToolCallSchema>
+export type BrowserToolType = z.infer<typeof BrowserToolTypeSchema>
+export type BrowserToolParameter = z.infer<typeof BrowserToolParameterSchema>
+export type BrowserToolDefinition = z.infer<typeof BrowserToolDefinitionSchema>
 export type BrowserAction = z.infer<typeof BrowserActionSchema>
 export type Observation = z.infer<typeof ObservationSchema>
 export type ActionResult = z.infer<typeof ActionResultSchema>

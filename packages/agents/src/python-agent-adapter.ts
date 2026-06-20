@@ -33,6 +33,7 @@ interface SerializableRuntimeContext {
   agentId: string | null
   modelId: string | null
   environmentId: string | null
+  browserTools: RuntimeContext["browserTools"]
   now: string
 }
 
@@ -396,6 +397,7 @@ function serializeContext(ctx: RuntimeContext): SerializableRuntimeContext {
     agentId: ctx.agentId ?? null,
     modelId: ctx.modelId ?? null,
     environmentId: ctx.environmentId ?? null,
+    browserTools: ctx.browserTools,
     now: ctx.now().toISOString(),
   }
 }

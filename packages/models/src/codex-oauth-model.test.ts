@@ -27,6 +27,7 @@ describe("CodexOAuthModel", () => {
       runDir: "/tmp/run",
       modelId: "codex-oauth",
       environmentId: "playwright-browser",
+      browserTools: [],
       abortSignal: new AbortController().signal,
       eventBus: new EventBus(),
       now: () => new Date("2026-06-17T00:00:00.000Z"),

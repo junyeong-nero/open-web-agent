@@ -1,5 +1,5 @@
 import type { AgentDecision } from "./agent"
-import type { ActionResult, BrowserToolCall, Observation } from "./browser"
+import type { ActionResult, BrowserToolCall, BrowserToolDefinition, Observation } from "./browser"
 import type { ModelRequest, ModelResponse } from "./model"
 import type { AgentState, RuntimeContext } from "../orchestrator/run-state"
 
@@ -36,5 +36,6 @@ export interface ToolAdapter {
   id: string
   name: string
   environmentId: string
+  listTools(): BrowserToolDefinition[]
   execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult>
 }
