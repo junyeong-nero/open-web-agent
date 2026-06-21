@@ -32,6 +32,7 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
     const session = deps.sessions.get(parsed.data.sessionId) ?? deps.storage?.getSession(parsed.data.sessionId)
     if (!session || session.deletedAt) return c.json({ error: "Unknown session" }, 404)
     deps.sessions.set(session.id, session)
+    if (hasRunningRun(session.id, deps.runs)) return c.json({ error: "Session has a running run" }, 409)
 
     if (parsed.data.agentId && !deps.registry.listAgents().some((agent) => agent.id === parsed.data.agentId)) {
       return c.json({ error: "Unknown agent" }, 400)
@@ -59,15 +60,24 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
         createdAt: runSession.createdAt,
       })
     }
-    await deps.browserSessions.attach(runSession, environmentId)
+    const pendingRunId = `pending_${randomUUID().replaceAll("-", "")}`
+    deps.runs.set(pendingRunId, { runId: pendingRunId, sessionId: runSession.id, status: "running", finalAnswer: null })
 
-    const started = deps.orchestrator.startRun({
-      session: runSession,
-      prompt: parsed.data.prompt,
-      agentId: parsed.data.agentId,
-      modelId: parsed.data.modelId,
-      environmentId,
-    })
+    let started: ReturnType<RunOrchestrator["startRun"]>
+    try {
+      await deps.browserSessions.attach(runSession, environmentId)
+      started = deps.orchestrator.startRun({
+        session: runSession,
+        prompt: parsed.data.prompt,
+        agentId: parsed.data.agentId,
+        modelId: parsed.data.modelId,
+        environmentId,
+      })
+    } catch (error) {
+      deps.runs.delete(pendingRunId)
+      throw error
+    }
+    deps.runs.delete(pendingRunId)
     deps.runs.set(started.runId, { runId: started.runId, sessionId: runSession.id, status: "running", finalAnswer: null })
     const createdAt = new Date().toISOString()
     deps.storage?.upsertRun({
@@ -146,4 +156,11 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
   app.post("/runs/:runId/cancel", (c) => {
     return c.json({ cancelled: deps.orchestrator.cancelRun(c.req.param("runId")) })
   })
+}
+
+function hasRunningRun(sessionId: string, runs: Map<string, RunRecord>): boolean {
+  for (const run of runs.values()) {
+    if (run.sessionId === sessionId && run.status === "running") return true
+  }
+  return false
 }

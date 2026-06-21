@@ -425,6 +425,17 @@ export function App(props: AppProps) {
     props.onExit()
   }
 
+  function submitPromptFromInput(submittedValue: string): boolean {
+    const command = parseSlashCommand(submittedValue.trim())
+    if (command.kind === "prompt" && activeSessionHasRunningRun(state())) {
+      appendSystemMessage("A run is already in progress for this session. Use /stop before starting another run.")
+      return false
+    }
+
+    void submitPrompt(submittedValue)
+    return true
+  }
+
   async function submitPrompt(submittedValue?: string) {
     const value = (submittedValue ?? prompt()).trim()
     if (value.length === 0) return
@@ -761,7 +772,7 @@ export function App(props: AppProps) {
         history={promptHistory()}
         focused={!sessionPaletteOpen() && !runtimeSelectorOpen() && activePane() === "prompt"}
         onChange={setPrompt}
-        onSubmit={submitPrompt}
+        onSubmit={submitPromptFromInput}
         onFocusRequest={() => setActivePane("prompt")}
         onReasoningEffortChange={changeReasoningEffort}
       />
@@ -790,6 +801,14 @@ function activateSessionSummary(state: TuiState, session: SessionSummary): TuiSt
     sessionId: session.id,
   })
   return session.environmentId ? reduceTuiEvent(selected, { type: "environment.selected", environmentId: session.environmentId }) : selected
+}
+
+function activeSessionHasRunningRun(state: TuiState): boolean {
+  if (state.runStatus === "running") return true
+  return Boolean(
+    state.activeSessionId &&
+      state.sessions.some((session) => session.id === state.activeSessionId && session.runStatus === "running"),
+  )
 }
 
 function formatAvailableAgents(agents: AgentSummary[]): string {
