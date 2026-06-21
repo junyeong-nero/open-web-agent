@@ -57,6 +57,38 @@ def format_observation(observation):
     )
 
 
+def format_browser_tools(tools):
+    if not isinstance(tools, list) or not tools:
+        return "Available browser tools:\nNone."
+
+    formatted = [format_browser_tool(tool) for tool in tools if isinstance(tool, dict)]
+    if not formatted:
+        return "Available browser tools:\nNone."
+    return "\n".join(["Available browser tools:", *formatted])
+
+
+def format_browser_tool(tool):
+    parameters = tool.get("parameters")
+    if isinstance(parameters, list) and parameters:
+        parameter_text = "; ".join(format_browser_tool_parameter(parameter) for parameter in parameters if isinstance(parameter, dict))
+    else:
+        parameter_text = "none"
+
+    example = json.dumps(tool.get("example") or {}, ensure_ascii=False, separators=(",", ":"))
+    return "\n".join(
+        [
+            f"- {tool.get('type') or ''}: {tool.get('description') or ''}",
+            f"  Parameters: {parameter_text}",
+            f"  Example: {example}",
+        ]
+    )
+
+
+def format_browser_tool_parameter(parameter):
+    required = "required" if parameter.get("required") else "optional"
+    return f"{parameter.get('name') or ''} ({parameter.get('type') or ''}, {required}) - {parameter.get('description') or ''}"
+
+
 def parse_json_object(text, label):
     try:
         value = json.loads(text)
@@ -95,6 +127,99 @@ def normalize_decision(value):
     result = dict(value)
     result["actions"] = normalized_actions
     return result
+
+
+def repair_decision_targets(value, observation):
+    if not isinstance(value, dict) or value.get("type") != "browser_actions":
+        return value
+    if not isinstance(observation, dict):
+        return value
+
+    actions = value.get("actions")
+    if not isinstance(actions, list):
+        return value
+
+    repaired_actions = []
+    for action in actions:
+        if not isinstance(action, dict):
+            repaired_actions.append(action)
+            continue
+
+        tool_calls = action.get("toolCalls")
+        if not isinstance(tool_calls, list):
+            repaired_actions.append(action)
+            continue
+
+        repaired_action = dict(action)
+        repaired_action["toolCalls"] = [repair_tool_call_target(tool_call, observation) for tool_call in tool_calls]
+        repaired_actions.append(repaired_action)
+
+    repaired = dict(value)
+    repaired["actions"] = repaired_actions
+    return repaired
+
+
+def repair_tool_call_target(tool_call, observation):
+    if not isinstance(tool_call, dict) or tool_call.get("type") not in ("click", "type"):
+        return tool_call
+
+    target = tool_call.get("target")
+    if not isinstance(target, dict):
+        return tool_call
+    if target_has_executable_locator(target):
+        return tool_call
+
+    element_id = target.get("elementId")
+    if not isinstance(element_id, str) or not element_id:
+        return tool_call
+
+    element = find_observed_element(observation, element_id)
+    if not element:
+        return tool_call
+
+    repaired_target = dict(target)
+    selector = element.get("selector")
+    if isinstance(selector, str) and selector:
+        repaired_target["selector"] = selector
+
+    if tool_call.get("type") == "click" and not repaired_target.get("selector") and not repaired_target.get("coordinates"):
+        coordinates = bounding_box_center(element.get("boundingBox"))
+        if coordinates:
+            repaired_target["coordinates"] = coordinates
+
+    for key in ("role", "name", "text"):
+        if not repaired_target.get(key) and isinstance(element.get(key), str) and element.get(key):
+            repaired_target[key] = element[key]
+
+    repaired_tool_call = dict(tool_call)
+    repaired_tool_call["target"] = repaired_target
+    return repaired_tool_call
+
+
+def target_has_executable_locator(target):
+    return any(bool(target.get(key)) for key in ("selector", "text", "role", "name", "coordinates"))
+
+
+def find_observed_element(observation, element_id):
+    elements = observation.get("interactiveElements")
+    if not isinstance(elements, list):
+        return None
+    for element in elements:
+        if isinstance(element, dict) and element.get("id") == element_id:
+            return element
+    return None
+
+
+def bounding_box_center(bounding_box):
+    if not isinstance(bounding_box, dict):
+        return None
+    x = bounding_box.get("x")
+    y = bounding_box.get("y")
+    width = bounding_box.get("width")
+    height = bounding_box.get("height")
+    if not all(_is_number(value) for value in (x, y, width, height)):
+        return None
+    return {"x": x + width / 2, "y": y + height / 2}
 
 
 def validate_agent_decision(value):

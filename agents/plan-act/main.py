@@ -41,7 +41,7 @@ def choose_decision(ctx):
             decision = parse_json_object(last_raw, "decision")
             if decision.get("type") not in ("browser_actions", "final_answer"):
                 raise RuntimeError("Decision type must be browser_actions or final_answer")
-            return ctx.decision.from_model(decision)
+            return ctx.decision.from_model(decision, ctx.last_observation)
         except RuntimeError as error:
             last_error = str(error)
 
@@ -96,6 +96,17 @@ def build_decision_request(ctx, last_error, last_raw):
     if last_error:
         content.extend(["", f"Previous response was invalid: {last_error}", "Raw response:", last_raw, "Return corrected JSON only."])
 
+    failed_results = ctx.failed_action_messages()
+    if failed_results:
+        content.extend(
+            [
+                "",
+                "Failed browser results:",
+                "\n".join(failed_results),
+                "Choose a different target or recovery action instead of repeating the same failed tool call.",
+            ]
+        )
+
     return {
         "model": "",
         "responseFormat": "json",
@@ -109,6 +120,9 @@ def build_decision_request(ctx, last_error, last_raw):
                         '{"type":"browser_actions","thought":string|null,"actions":[{"id":string,"kind":string,"reason":string|null,"requiresApproval":boolean,"toolCalls":[...]}]}',
                         '{"type":"final_answer","thought":string|null,"finalAnswer":string,"confidence":number|null}',
                         "Browser tool calls must be nested under browser_actions.actions[].toolCalls.",
+                        "Use only the browser tool types listed below. If web search is needed, navigate to a search engine page with navigate.",
+                        "Each browser tool call must use a type field, not kind or name.",
+                        ctx.browser_tools_text(),
                     ]
                 ),
             },

@@ -5,6 +5,7 @@ import { join, resolve } from "node:path"
 import {
   EventBus,
   type AgentState,
+  type BrowserToolDefinition,
   type ModelPlugin,
   type ModelRequest,
   type ModelResponse,
@@ -44,9 +45,18 @@ function state(): AgentState {
   }
 }
 
-function ctx(signal = new AbortController().signal): RuntimeContext & { emitted: Array<{ type: RunEventType; payload: Record<string, unknown> }> } {
+function ctx(
+  signalOrOptions:
+    | AbortSignal
+    | {
+        signal?: AbortSignal
+        browserTools?: BrowserToolDefinition[]
+      } = new AbortController().signal,
+): RuntimeContext & { emitted: Array<{ type: RunEventType; payload: Record<string, unknown> }> } {
   const emitted: Array<{ type: RunEventType; payload: Record<string, unknown> }> = []
   const session = state().session
+  const signal = signalOrOptions instanceof AbortSignal ? signalOrOptions : (signalOrOptions.signal ?? new AbortController().signal)
+  const browserTools = signalOrOptions instanceof AbortSignal ? [] : (signalOrOptions.browserTools ?? [])
 
   return {
     session,
@@ -54,7 +64,7 @@ function ctx(signal = new AbortController().signal): RuntimeContext & { emitted:
     runDir: "/tmp/run",
     agentId: "python-test-agent",
     environmentId: "test-browser",
-    browserTools: [],
+    browserTools,
     eventBus: new EventBus(),
     abortSignal: signal,
     now: () => new Date("2026-06-17T00:00:00.000Z"),
@@ -74,6 +84,21 @@ function ctx(signal = new AbortController().signal): RuntimeContext & { emitted:
     },
   }
 }
+
+const defaultBrowserTools: BrowserToolDefinition[] = [
+  {
+    type: "navigate",
+    description: "Open an absolute URL in the current browser page.",
+    parameters: [{ name: "url", type: "string", required: true, description: "Absolute URL to open." }],
+    example: { id: "tool_1", type: "navigate", url: "https://example.com" },
+  },
+  {
+    type: "click",
+    description: "Click an interactive element or coordinate on the current page.",
+    parameters: [{ name: "target", type: "ActionTarget", required: true, description: "Element or coordinates to click." }],
+    example: { id: "tool_2", type: "click", target: { selector: 'button[type="submit"]' } },
+  },
+]
 
 async function writePythonScript(contents: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "owa-python-agent-test-"))
@@ -666,6 +691,105 @@ if __name__ == "__main__":
     expect(model.requests[2]?.messages.at(-1)?.content).toContain("decision.actions[0].toolCalls[0].target")
     expect(model.requests[2]?.messages.at(-1)?.content).toContain("decision.actions[0].toolCalls[1].ms")
     expect(model.requests[2]?.messages.at(-1)?.content).toContain("decision.actions[0].toolCalls[2].type")
+  })
+
+  it("includes runtime browser tool definitions in plan-act decision prompts", async () => {
+    const model = new SequenceModel([
+      JSON.stringify({
+        items: [{ id: "inspect", title: "Inspect the page", status: "active" }],
+      }),
+      JSON.stringify({
+        type: "final_answer",
+        thought: "Tool prompt inspected.",
+        finalAnswer: "done",
+        confidence: 1,
+      }),
+    ])
+    const agent = new PythonAgentAdapter({
+      id: "plan-act",
+      name: "PlanAct",
+      description: "Plans before acting",
+      command: [python, resolve(repoAgentsDir, "plan-act/main.py")],
+      protocol: "jsonl",
+      model,
+    })
+
+    await agent.step(state(), ctx({ browserTools: defaultBrowserTools }))
+
+    const decisionRequest = model.requests.find((request) =>
+      messageText(request.messages.find((message) => message.role === "system")?.content ?? "").includes(
+        "browser-control agent",
+      ),
+    )
+    const systemPrompt = messageText(decisionRequest?.messages.find((message) => message.role === "system")?.content ?? "")
+    expect(systemPrompt).toContain("Available browser tools:")
+    expect(systemPrompt).toContain("- navigate: Open an absolute URL in the current browser page.")
+    expect(systemPrompt).toContain('Example: {"id":"tool_1","type":"navigate","url":"https://example.com"}')
+    expect(systemPrompt).toContain("- click: Click an interactive element or coordinate on the current page.")
+  })
+
+  it("repairs plan-act elementId-only click targets from the current observation", async () => {
+    const model = new SequenceModel([
+      JSON.stringify({
+        items: [{ id: "click_next", title: "Click Next", status: "active" }],
+      }),
+      JSON.stringify({
+        type: "browser_actions",
+        thought: "Click the observed button.",
+        actions: [
+          {
+            id: "click_next",
+            kind: "click",
+            reason: "The observed element id identifies the Next button.",
+            requiresApproval: false,
+            toolCalls: [{ id: "click_next_tool", type: "click", target: { elementId: "element_1" } }],
+          },
+        ],
+      }),
+    ])
+    const observedState = state()
+    observedState.lastObservation = {
+      ...observedState.lastObservation!,
+      interactiveElements: [
+        {
+          id: "element_1",
+          role: "button",
+          name: null,
+          text: "Next",
+          selector: null,
+          xpath: null,
+          boundingBox: { x: 10, y: 20, width: 40, height: 20 },
+          attributes: {},
+        },
+      ],
+    }
+    const agent = new PythonAgentAdapter({
+      id: "plan-act",
+      name: "PlanAct",
+      description: "Plans before acting",
+      command: [python, resolve(repoAgentsDir, "plan-act/main.py")],
+      protocol: "jsonl",
+      model,
+    })
+
+    const decision = await agent.step(observedState, ctx({ browserTools: defaultBrowserTools }))
+
+    expect(decision).toMatchObject({
+      type: "browser_actions",
+      actions: [
+        {
+          toolCalls: [
+            {
+              type: "click",
+              target: {
+                elementId: "element_1",
+                coordinates: { x: 30, y: 30 },
+              },
+            },
+          ],
+        },
+      ],
+    })
   })
 
   it("includes stderr when the process exits non-zero", async () => {

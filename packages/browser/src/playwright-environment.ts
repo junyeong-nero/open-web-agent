@@ -481,15 +481,27 @@ export function resolveChromiumLaunchOptions(
 }
 
 function locatorForTarget(page: Page, target: {
+  elementId: string | null
   selector: string | null
   text: string | null
   role: string | null
   name: string | null
 }) {
   if (target.selector) return page.locator(target.selector).first()
+  if (target.elementId && !isGeneratedElementId(target.elementId)) {
+    return page.locator(`[id="${escapeCssString(target.elementId)}"]`).first()
+  }
   if (target.role) return page.getByRole(target.role as Parameters<Page["getByRole"]>[0], { name: target.name ?? undefined }).first()
   if (target.text) return page.getByText(target.text).first()
   return null
+}
+
+function isGeneratedElementId(elementId: string): boolean {
+  return /^element_\d+$/.test(elementId)
+}
+
+function escapeCssString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
 }
 
 function withAbort<T>(promise: Promise<T>, signal: AbortSignal, onAbort?: () => Promise<void> | void): Promise<T> {
