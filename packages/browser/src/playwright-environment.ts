@@ -122,7 +122,7 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
 
   async observe(ctx: RuntimeContext): Promise<Observation> {
     const state = this.requireState(ctx)
-    return withAbort(this.readObservation(state), ctx.abortSignal)
+    return withAbort(this.readObservation(state), ctx.abortSignal, () => this.close(ctx))
   }
 
   pageForTools(ctx: RuntimeContext): Page {
@@ -284,7 +284,7 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
       }
 
       const page = this.environment.pageForTools(ctx)
-      await withAbort(page.goto(call.url, { waitUntil: "domcontentloaded" }), ctx.abortSignal)
+      await this.withToolAbort(page.goto(call.url, { waitUntil: "domcontentloaded" }), ctx)
       return { ok: true, message: "navigated", observation: await this.environment.observe(ctx), metadata: { url: call.url } }
     }
 
@@ -293,9 +293,9 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
     if (call.type === "click") {
       const locator = locatorForTarget(page, call.target)
       if (locator) {
-        await withAbort(locator.click(), ctx.abortSignal)
+        await this.withToolAbort(locator.click(), ctx)
       } else if (call.target.coordinates) {
-        await withAbort(page.mouse.click(call.target.coordinates.x, call.target.coordinates.y), ctx.abortSignal)
+        await this.withToolAbort(page.mouse.click(call.target.coordinates.x, call.target.coordinates.y), ctx)
       } else {
         return {
           ok: false,
@@ -317,12 +317,12 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
           metadata: {},
         }
       }
-      await withAbort(locator.fill(call.value), ctx.abortSignal)
+      await this.withToolAbort(locator.fill(call.value), ctx)
       return { ok: true, message: "typed", observation: await this.environment.observe(ctx), metadata: { value: REDACTED_VALUE } }
     }
 
     if (call.type === "scroll") {
-      await withAbort(page.mouse.wheel(call.deltaX, call.deltaY), ctx.abortSignal)
+      await this.withToolAbort(page.mouse.wheel(call.deltaX, call.deltaY), ctx)
       return {
         ok: true,
         message: "scrolled",
@@ -332,12 +332,12 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
     }
 
     if (call.type === "wait") {
-      await withAbort(page.waitForTimeout(call.ms), ctx.abortSignal)
+      await this.withToolAbort(page.waitForTimeout(call.ms), ctx)
       return { ok: true, message: "waited", observation: await this.environment.observe(ctx), metadata: { ms: call.ms } }
     }
 
     if (call.type === "press_key") {
-      await withAbort(page.keyboard.press(call.key), ctx.abortSignal)
+      await this.withToolAbort(page.keyboard.press(call.key), ctx)
       return {
         ok: true,
         message: "pressed key",
@@ -349,7 +349,7 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
     if (call.type === "screenshot") {
       const screenshotPath = this.environment.nextScreenshotPath(ctx)
       await mkdir(join(ctx.runDir, "screenshots"), { recursive: true })
-      await withAbort(page.screenshot({ path: screenshotPath, fullPage: true }), ctx.abortSignal)
+      await this.withToolAbort(page.screenshot({ path: screenshotPath, fullPage: true }), ctx)
       this.environment.recordScreenshotPath(ctx, screenshotPath)
       return {
         ok: true,
@@ -365,12 +365,12 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
     }
 
     if (call.type === "go_back") {
-      await withAbort(page.goBack({ waitUntil: "domcontentloaded" }), ctx.abortSignal)
+      await this.withToolAbort(page.goBack({ waitUntil: "domcontentloaded" }), ctx)
       return { ok: true, message: "went back", observation: await this.environment.observe(ctx), metadata: {} }
     }
 
     if (call.type === "go_forward") {
-      await withAbort(page.goForward({ waitUntil: "domcontentloaded" }), ctx.abortSignal)
+      await this.withToolAbort(page.goForward({ waitUntil: "domcontentloaded" }), ctx)
       return { ok: true, message: "went forward", observation: await this.environment.observe(ctx), metadata: {} }
     }
 
@@ -384,6 +384,10 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
 
   private async observeIfAvailable(ctx: RuntimeContext): Promise<Observation | null> {
     return this.environment.observe(ctx).catch(() => null)
+  }
+
+  private withToolAbort<T>(promise: Promise<T>, ctx: RuntimeContext): Promise<T> {
+    return withAbort(promise, ctx.abortSignal, () => this.environment.close(ctx))
   }
 }
 
@@ -484,23 +488,51 @@ function locatorForTarget(page: Page, target: {
   return null
 }
 
-function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(new DOMException("Run cancelled", "AbortError"))
+function withAbort<T>(promise: Promise<T>, signal: AbortSignal, onAbort?: () => Promise<void> | void): Promise<T> {
+  if (signal.aborted) {
+    return runAbortCleanup(onAbort).then(() => Promise.reject(abortErrorFromSignal(signal)))
+  }
 
   return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(new DOMException("Run cancelled", "AbortError"))
-    signal.addEventListener("abort", onAbort, { once: true })
+    let settled = false
+    const settleResolve = (value: T) => {
+      if (settled) return
+      settled = true
+      signal.removeEventListener("abort", onSignalAbort)
+      resolve(value)
+    }
+    const settleReject = (error: unknown) => {
+      if (settled) return
+      settled = true
+      signal.removeEventListener("abort", onSignalAbort)
+      reject(error)
+    }
+    const onSignalAbort = () => {
+      if (settled) return
+      settled = true
+      signal.removeEventListener("abort", onSignalAbort)
+      const error = abortErrorFromSignal(signal)
+      runAbortCleanup(onAbort).then(() => reject(error))
+    }
+
+    signal.addEventListener("abort", onSignalAbort, { once: true })
     promise.then(
-      (value) => {
-        signal.removeEventListener("abort", onAbort)
-        resolve(value)
-      },
-      (error) => {
-        signal.removeEventListener("abort", onAbort)
-        reject(error)
-      },
+      (value) => settleResolve(value),
+      (error) => settleReject(error),
     )
   })
+}
+
+async function runAbortCleanup(onAbort: (() => Promise<void> | void) | undefined): Promise<void> {
+  try {
+    await onAbort?.()
+  } catch {
+  }
+}
+
+function abortErrorFromSignal(signal: AbortSignal): unknown {
+  if (signal.reason instanceof Error && signal.reason.name !== "AbortError") return signal.reason
+  return new DOMException("Run cancelled", "AbortError")
 }
 
 function findCachedChromiumExecutable(): string | null {

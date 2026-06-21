@@ -444,6 +444,38 @@ describe("PlaywrightEnvironment", () => {
     })
   })
 
+  it("closes the session when a browser tool is aborted", async () => {
+    const abort = new AbortController()
+    const ctx = await context("ses_1", "run_1", abort.signal)
+    let closeCalls = 0
+    let wheelStarted!: () => void
+    const wheelStartedPromise = new Promise<void>((resolve) => {
+      wheelStarted = resolve
+    })
+    const environment = {
+      pageForTools: () => ({
+        mouse: {
+          wheel: () =>
+            new Promise<void>(() => {
+              wheelStarted()
+            }),
+        },
+      }),
+      close: async () => {
+        closeCalls += 1
+      },
+      observe: async () => null,
+    }
+    const tools = new PlaywrightBrowserToolAdapter(environment as unknown as PlaywrightEnvironment)
+
+    const result = tools.execute({ id: "tool_1", type: "scroll", deltaX: 0, deltaY: 100 }, ctx)
+    await wheelStartedPromise
+    abort.abort()
+
+    await expect(result).rejects.toThrow("Run cancelled")
+    expect(closeCalls).toBe(1)
+  })
+
   it("navigates, interacts with a fixture page, observes text, and captures a screenshot", async () => {
     const env = new PlaywrightEnvironment({ headless: true })
     const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })

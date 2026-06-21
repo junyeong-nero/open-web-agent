@@ -41,9 +41,10 @@ export class CodexOAuthModel implements ModelPlugin {
     })
   }
 
-  async complete(request: ModelRequest, _ctx: RuntimeContext): Promise<ModelResponse> {
+  async complete(request: ModelRequest, ctx: RuntimeContext): Promise<ModelResponse> {
     return this.client.complete(
       withResponsesReasoningEffort({ ...request, ...this.defaultParameters, model: request.model || this.defaultModel }, this.reasoningEffort),
+      { signal: ctx.abortSignal },
     )
   }
 }
