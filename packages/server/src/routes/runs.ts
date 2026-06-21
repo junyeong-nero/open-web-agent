@@ -29,6 +29,7 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
     const session = deps.sessions.get(parsed.data.sessionId) ?? deps.storage?.getSession(parsed.data.sessionId)
     if (!session || session.deletedAt) return c.json({ error: "Unknown session" }, 404)
     deps.sessions.set(session.id, session)
+    if (hasRunningRun(session.id, deps.runs)) return c.json({ error: "Session has a running run" }, 409)
 
     if (parsed.data.agentId && !deps.registry.listAgents().some((agent) => agent.id === parsed.data.agentId)) {
       return c.json({ error: "Unknown agent" }, 400)
@@ -147,4 +148,11 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
 
 async function readJson(request: { json(): Promise<unknown> }): Promise<unknown> {
   return request.json().catch(() => null)
+}
+
+function hasRunningRun(sessionId: string, runs: Map<string, RunRecord>): boolean {
+  for (const run of runs.values()) {
+    if (run.sessionId === sessionId && run.status === "running") return true
+  }
+  return false
 }

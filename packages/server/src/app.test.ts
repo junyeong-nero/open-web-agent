@@ -598,6 +598,29 @@ describe("createApp", () => {
     expect(event.payload.finalAnswer).toBe('페이지 제목은 "Example Domain"입니다.')
   })
 
+  it("POST /runs rejects a second run while the session already has a running run", async () => {
+    const { request, eventBus } = await setup(50)
+    const sessionId = await createSession(request)
+    const cancelled = waitForEvent(eventBus, "run.cancelled")
+
+    const first = await json<{ runId: string }>(
+      await request("/runs", {
+        method: "POST",
+        body: JSON.stringify({ sessionId, prompt: "example.com에 접속해서 페이지 제목을 알려줘" }),
+      }),
+    )
+    const second = await request("/runs", {
+      method: "POST",
+      body: JSON.stringify({ sessionId, prompt: "do not start concurrently" }),
+    })
+
+    expect(second.status).toBe(409)
+    expect(await second.json()).toEqual({ error: "Session has a running run" })
+
+    await json<{ cancelled: boolean }>(await request(`/runs/${first.runId}/cancel`, { method: "POST" }))
+    await cancelled
+  })
+
   it("POST /runs keeps the session browser open after the run completes", async () => {
     const { request, eventBus, environment } = await setupSessionLifecycleApp()
     const session = await request("/sessions", {

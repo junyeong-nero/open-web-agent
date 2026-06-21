@@ -17,7 +17,7 @@ export interface PromptInputProps {
   focused?: boolean
   history?: string[]
   onChange(value: string): void
-  onSubmit(value: string): void
+  onSubmit(value: string): boolean | void
   onFocusRequest?(): void
   onReasoningEffortChange?(delta: -1 | 1): boolean
 }
@@ -76,10 +76,14 @@ export function PromptInput(props: PromptInputProps) {
     const value = submittedValue ?? currentValue()
     setHistoryIndex(null)
     setHistoryDraft("")
+    const accepted = props.onSubmit(value)
+    if (accepted === false) {
+      reportValue(value)
+      return
+    }
     reportValue(value)
     textarea?.clear()
     setDraftValue("")
-    props.onSubmit(value)
   }
   const handleSlashExecution = () => {
     const suggestion = commandSuggestions()[selectedSuggestionIndex()]

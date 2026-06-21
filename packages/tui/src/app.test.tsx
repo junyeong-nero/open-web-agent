@@ -118,6 +118,41 @@ describe("App", () => {
     }
   })
 
+  it("does not submit a prompt while the active session already has a running run", async () => {
+    const createdSessions: unknown[] = []
+    const submittedRuns: unknown[] = []
+    const server = startTuiServer({
+      sessionRunStatus: "running",
+      onCreateSession: (body) => createdSessions.push(body),
+      onSubmitRun: (body) => submittedRuns.push(body),
+    })
+    const setup = await testRender(
+      () => <App serverUrl={server.url} projectPath="/tmp/open-web-agent-test" onExit={() => {}} />,
+      { width: 100, height: 24 },
+    )
+
+    try {
+      await setup.flush()
+      await setup.mockInput.typeText("/new")
+      setup.mockInput.pressEnter()
+      await setup.flush()
+      await eventually(() => expect(createdSessions).toHaveLength(1))
+      const textarea = setup.renderer.root.findDescendantById("prompt-input-textarea")
+      expect(textarea).toBeInstanceOf(TextareaRenderable)
+
+      await setup.mockInput.typeText("second prompt")
+      setup.mockInput.pressEnter()
+      await setup.flush()
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      await setup.flush()
+
+      expect(submittedRuns).toEqual([])
+      expect((textarea as TextareaRenderable).plainText).toBe("second prompt")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
   it("does not persist runtime slash commands in prompt history", async () => {
     const appendedHistory: string[] = []
     const persistedModels: unknown[] = []
@@ -292,11 +327,14 @@ function startTuiServer(
   options: {
     models?: Array<{ id: string; name: string; provider: string; modelName: string; reasoningEffort?: string | null }>
     onCreateSession?: (body: unknown) => void
+    onSubmitRun?: (body: unknown) => void
     onPersistModel?: (body: unknown) => void
     onPersistAgent?: (body: unknown) => void
     onPersistBrowser?: (body: unknown) => void
+    sessionRunStatus?: "idle" | "running" | "completed" | "failed" | "cancelled"
   } = {},
 ): { url: string } {
+  const session = { ...sessionSummary, runStatus: options.sessionRunStatus ?? sessionSummary.runStatus }
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -305,11 +343,17 @@ function startTuiServer(
       if (url.pathname === "/sessions" && request.method === "POST") {
         return request.json().then((body) => {
           options.onCreateSession?.(body)
-          return Response.json({ sessionId: sessionSummary.id, session: sessionSummary })
+          return Response.json({ sessionId: session.id, session })
         })
       }
       if (url.pathname === "/sessions" && request.method === "GET") {
-        return Response.json({ sessions: [sessionSummary] })
+        return Response.json({ sessions: [session] })
+      }
+      if (url.pathname === "/runs" && request.method === "POST") {
+        return request.json().then((body) => {
+          options.onSubmitRun?.(body)
+          return Response.json({ runId: "run_test" })
+        })
       }
       if (url.pathname === "/plugins" && request.method === "GET") {
         return Response.json({
