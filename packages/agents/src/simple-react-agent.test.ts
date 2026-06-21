@@ -70,11 +70,30 @@ function searchState(): AgentState {
   return next
 }
 
-function ctx(): RuntimeContext {
+const defaultBrowserTools: RuntimeContext["browserTools"] = [
+  {
+    type: "type",
+    description: "Fill text into an editable element.",
+    parameters: [
+      { name: "target", type: "ActionTarget", required: true, description: "Editable element to fill." },
+      { name: "value", type: "string", required: true, description: "Text to enter." },
+    ],
+    example: { id: "tool_1", type: "type", target: { selector: 'input[name="query"]' }, value: "tomorrow weather" },
+  },
+  {
+    type: "click",
+    description: "Click an interactive element.",
+    parameters: [{ name: "target", type: "ActionTarget", required: true, description: "Element to click." }],
+    example: { id: "tool_2", type: "click", target: { selector: 'button[type="submit"]' } },
+  },
+]
+
+function ctx(browserTools: RuntimeContext["browserTools"] = defaultBrowserTools): RuntimeContext {
   return {
     session: state().session,
     runId: "run_1",
     runDir: "/tmp/run",
+    browserTools,
     eventBus: new EventBus(),
     abortSignal: new AbortController().signal,
     now: () => new Date("2026-06-17T00:00:00.000Z"),
@@ -179,6 +198,37 @@ describe("SimpleReActAgent", () => {
     expect(systemPrompt).toContain('"value":"tomorrow weather"')
     expect(systemPrompt).toContain('"type":"click"')
     expect(systemPrompt).toContain('"target":{"selector":"button[type=\\"submit\\"]"}')
+  })
+
+  it("renders runtime browser tool definitions in the model prompt", async () => {
+    const model = new FakeModel([JSON.stringify({ type: "final_answer", thought: null, finalAnswer: "done", confidence: 1 })])
+
+    await new SimpleReActAgent({ model, modelName: "fake" }).step(
+      state(),
+      ctx([
+        {
+          type: "navigate",
+          description: "Open an absolute URL in the current browser page.",
+          parameters: [{ name: "url", type: "string", required: true, description: "Absolute URL to open." }],
+          example: { id: "tool_1", type: "navigate", url: "https://example.com" },
+        },
+        {
+          type: "screenshot",
+          description: "Capture a full-page screenshot for visual inspection.",
+          parameters: [],
+          example: { id: "tool_2", type: "screenshot" },
+        },
+      ]),
+    )
+
+    const systemPrompt = model.requests[0]?.messages.find((message) => message.role === "system")?.content ?? ""
+    expect(systemPrompt).toContain("Available browser tools:")
+    expect(systemPrompt).toContain("- navigate: Open an absolute URL in the current browser page.")
+    expect(systemPrompt).toContain("Parameters: url (string, required) - Absolute URL to open.")
+    expect(systemPrompt).toContain('Example: {"id":"tool_1","type":"navigate","url":"https://example.com"}')
+    expect(systemPrompt).toContain("- screenshot: Capture a full-page screenshot for visual inspection.")
+    expect(systemPrompt).toContain("Parameters: none")
+    expect(systemPrompt).toContain('Example: {"id":"tool_2","type":"screenshot"}')
   })
 
   it("normalizes OpenAI-style tool call arguments in model decisions", async () => {

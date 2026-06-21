@@ -54,6 +54,7 @@ function ctx(signal = new AbortController().signal): RuntimeContext & { emitted:
     runDir: "/tmp/run",
     agentId: "python-test-agent",
     environmentId: "test-browser",
+    browserTools: [],
     eventBus: new EventBus(),
     abortSignal: signal,
     now: () => new Date("2026-06-17T00:00:00.000Z"),

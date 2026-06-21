@@ -5,6 +5,7 @@ import {
   type AgentState,
   type BrowserAction,
   type BrowserToolCall,
+  type BrowserToolDefinition,
   type ModelPlugin,
   type ModelRequest,
   type Observation,
@@ -39,7 +40,7 @@ export class SimpleReActAgent implements AgentPlugin {
     let lastRaw = ""
 
     for (let attempt = 0; attempt <= this.maxParseRetries; attempt += 1) {
-      const request = this.buildRequest(state, lastError, lastRaw)
+      const request = this.buildRequest(state, ctx, lastError, lastRaw)
       const response = await withTimeout(this.options.model.complete(request, ctx), this.timeoutMs, ctx.abortSignal)
       lastRaw = response.text
 
@@ -58,7 +59,7 @@ export class SimpleReActAgent implements AgentPlugin {
     return state.finalAnswer ?? ""
   }
 
-  private buildRequest(state: AgentState, lastError: string | null, lastRaw: string): ModelRequest {
+  private buildRequest(state: AgentState, ctx: RuntimeContext, lastError: string | null, lastRaw: string): ModelRequest {
     const failedResults = formatFailedBrowserResults(state)
 
     return {
@@ -73,8 +74,7 @@ export class SimpleReActAgent implements AgentPlugin {
             '{"type":"browser_actions","thought":string|null,"actions":[{"id":string,"kind":string,"reason":string|null,"requiresApproval":boolean,"toolCalls":[...]}]}',
             '{"type":"final_answer","thought":string|null,"finalAnswer":string,"confidence":number|null}',
             "Browser tool calls must be nested under browser_actions.actions[].toolCalls.",
-            'Type example: {"id":"tool_1","type":"type","target":{"selector":"input[name=\\"query\\"]"},"value":"tomorrow weather"}',
-            'Click example: {"id":"tool_2","type":"click","target":{"selector":"button[type=\\"submit\\"]"}}',
+            formatBrowserToolsForPrompt(ctx.browserTools),
           ].join("\n"),
         },
         {
@@ -108,6 +108,28 @@ export class SimpleReActAgent implements AgentPlugin {
       ],
     }
   }
+}
+
+function formatBrowserToolsForPrompt(tools: BrowserToolDefinition[]): string {
+  if (tools.length === 0) return "Available browser tools:\nNone."
+
+  return ["Available browser tools:", ...tools.map(formatBrowserToolForPrompt)].join("\n")
+}
+
+function formatBrowserToolForPrompt(tool: BrowserToolDefinition): string {
+  const parameters =
+    tool.parameters.length > 0
+      ? tool.parameters
+          .map(
+            (parameter) =>
+              `${parameter.name} (${parameter.type}, ${parameter.required ? "required" : "optional"}) - ${parameter.description}`,
+          )
+          .join("; ")
+      : "none"
+
+  return [`- ${tool.type}: ${tool.description}`, `  Parameters: ${parameters}`, `  Example: ${JSON.stringify(tool.example)}`].join(
+    "\n",
+  )
 }
 
 function formatFailedBrowserResults(state: AgentState): string {

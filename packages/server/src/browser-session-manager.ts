@@ -110,6 +110,7 @@ export class BrowserSessionManager {
       runId,
       runDir: "",
       environmentId,
+      browserTools: this.listBrowserTools(environmentId),
       eventBus: this.options.eventBus,
       abortSignal: new AbortController().signal,
       now: this.now,
@@ -124,5 +125,11 @@ export class BrowserSessionManager {
         createdAt: this.now().toISOString(),
       }),
     }
+  }
+
+  private listBrowserTools(environmentId: string): RuntimeContext["browserTools"] {
+    return (
+      this.options.registry.listToolAdapters().find((adapter) => adapter.environmentId === environmentId)?.listTools() ?? []
+    )
   }
 }

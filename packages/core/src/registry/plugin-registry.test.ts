@@ -38,6 +38,9 @@ const toolAdapter: ToolAdapter = {
   id: "tool-adapter-1",
   name: "Tool Adapter 1",
   environmentId: "env-1",
+  listTools() {
+    return []
+  },
   async execute() {
     return { ok: true, message: "executed", observation: null, metadata: {} }
   },

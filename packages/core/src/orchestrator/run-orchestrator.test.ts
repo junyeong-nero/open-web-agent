@@ -3,7 +3,7 @@ import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { AgentDecision } from "../contracts/agent"
-import type { ActionResult, BrowserToolCall, Observation } from "../contracts/browser"
+import type { ActionResult, BrowserToolCall, BrowserToolDefinition, Observation } from "../contracts/browser"
 import type { RunEvent } from "../contracts/event"
 import type { AgentPlugin, BrowserEnvironment, ToolAdapter } from "../contracts/plugin"
 import { EventBus } from "../events/event-bus"
@@ -110,11 +110,36 @@ class TestBrowserToolAdapter implements ToolAdapter {
   environmentId = "test-browser"
   calls: BrowserToolCall[] = []
 
-  constructor(protected readonly environment: TestEnvironment) {}
+  constructor(
+    protected readonly environment: TestEnvironment,
+    private readonly tools: BrowserToolDefinition[] = [],
+  ) {}
+
+  listTools() {
+    return this.tools
+  }
 
   async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
     this.calls.push(call)
     return this.environment.applyBrowserTool(call, ctx)
+  }
+}
+
+class ToolCatalogAgent implements AgentPlugin {
+  id = "tool-catalog-agent"
+  name = "Tool Catalog Agent"
+  description = "Captures runtime browser tools."
+  browserTools: BrowserToolDefinition[] = []
+
+  async initialize(): Promise<void> {}
+
+  async step(_state: AgentState, ctx: RuntimeContext): Promise<AgentDecision> {
+    this.browserTools = ctx.browserTools
+    return { type: "final_answer", thought: null, finalAnswer: "done", confidence: 1 }
+  }
+
+  async finalize(state: AgentState): Promise<string> {
+    return state.finalAnswer ?? ""
   }
 }
 
@@ -338,6 +363,25 @@ describe("RunOrchestrator", () => {
       eventsPath(setup.home, runSession.projectHash, runSession.id, started.runId),
     ).readAll()
     expect(persistedEvents.map((event) => event.type)).toEqual(setup.observedEvents.map((event) => event.type))
+  })
+
+  it("injects the selected tool adapter catalog into runtime context", async () => {
+    const agent = new ToolCatalogAgent()
+    const environment = new TestEnvironment()
+    const toolDefinitions: BrowserToolDefinition[] = [
+      {
+        type: "navigate",
+        description: "Open an absolute URL.",
+        parameters: [{ name: "url", type: "string", required: true, description: "Absolute URL to open." }],
+        example: { id: "tool_1", type: "navigate", url: "https://example.com" },
+      },
+    ]
+    const setup = await orchestratorWith(agent, environment, new TestBrowserToolAdapter(environment, toolDefinitions))
+
+    const result = await setup.orchestrator.startRun({ session: session(), prompt: "report tools" }).result
+
+    expect(result.status).toBe("completed")
+    expect(agent.browserTools).toEqual(toolDefinitions)
   })
 
   it("cancels an active delayed test run", async () => {
