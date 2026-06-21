@@ -1,5 +1,6 @@
 import {
   AgentDecisionSchema,
+  redactSensitiveData,
   type AgentDecision,
   type AgentPlugin,
   type AgentState,
@@ -145,8 +146,9 @@ function formatFailedBrowserResults(state: AgentState): string {
 
 export function formatObservationForPrompt(observation: Observation | null): string {
   if (!observation) return "No browser observation has been captured yet."
+  const safeObservation = redactSensitiveData(observation)
 
-  const elements = observation.interactiveElements
+  const elements = safeObservation.interactiveElements
     .slice(0, 20)
     .map((element, index) =>
       [
@@ -160,10 +162,10 @@ export function formatObservationForPrompt(observation: Observation | null): str
     .join("\n")
 
   return [
-    `URL: ${observation.url}`,
-    `Title: ${observation.title ?? ""}`,
+    `URL: ${safeObservation.url}`,
+    `Title: ${safeObservation.title ?? ""}`,
     "Text:",
-    observation.text ?? "",
+    safeObservation.text ?? "",
     "Interactive elements:",
     elements || "None",
   ].join("\n")

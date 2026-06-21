@@ -5,6 +5,7 @@ import type { BrowserEnvironment, ToolAdapter } from "../contracts/plugin"
 import type { EventBus } from "../events/event-bus"
 import { makeEventId, makeRunId, makeStepId } from "../ids/ids"
 import type { PluginRegistry } from "../registry/plugin-registry"
+import { redactSensitiveData } from "../redaction/sensitive-data"
 import { JsonlEventStore } from "../storage/jsonl-event-store"
 import { eventsPath, runPath } from "../storage/paths"
 import type { AgentState, RunResult, RuntimeContext, SessionState } from "./run-state"
@@ -91,7 +92,7 @@ export class RunOrchestrator {
         stepId,
         sequence,
         type,
-        payload,
+        payload: redactSensitiveData(payload),
         createdAt: this.now().toISOString(),
       }
       sequence += 1

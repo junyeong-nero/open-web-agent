@@ -129,6 +129,30 @@ describe("formatObservationForPrompt", () => {
     expect(formatObservationForPrompt(state().lastObservation)).toContain("Title: Example Domain")
     expect(formatObservationForPrompt(state().lastObservation)).toContain("#continue")
   })
+
+  it("redacts sensitive interactive element values", () => {
+    const observation = {
+      ...state().lastObservation!,
+      interactiveElements: [
+        {
+          id: "password",
+          role: "input",
+          name: "new-secret",
+          text: "new-secret",
+          selector: "#password",
+          xpath: null,
+          boundingBox: null,
+          attributes: { type: "password", value: "initial-secret" },
+        },
+      ],
+    }
+
+    const prompt = formatObservationForPrompt(observation)
+
+    expect(prompt).toContain("[redacted]")
+    expect(prompt).not.toContain("initial-secret")
+    expect(prompt).not.toContain("new-secret")
+  })
 })
 
 describe("SimpleReActAgent", () => {

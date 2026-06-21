@@ -1,4 +1,4 @@
-import type { RunEvent } from "@open-web-agent/core"
+import { REDACTED_VALUE, redactSensitiveData, type RunEvent } from "@open-web-agent/core"
 import type { ThemeAccent } from "../theme/themes"
 
 export interface RunLogItem {
@@ -58,14 +58,15 @@ function item(event: RunEvent, kind: string, message: string, accent: ThemeAccen
 function formatToolCall(toolType: string, toolCall: Record<string, unknown> | null): string {
   if (toolType === "navigate" && typeof toolCall?.url === "string") return `navigate ${toolCall.url}`
   if (toolType === "wait" && typeof toolCall?.ms === "number") return `wait ${toolCall.ms}ms`
-  if (toolType === "type" && typeof toolCall?.value === "string") return `type ${toolCall.value}`
+  if (toolType === "type" && typeof toolCall?.value === "string") return `type ${REDACTED_VALUE}`
   return toolType
 }
 
 function formatToolCallDetails(toolType: string, toolCall: Record<string, unknown> | null): RunLogToolCall | undefined {
   if (!toolCall) return undefined
 
-  const args = Object.fromEntries(Object.entries(toolCall).filter(([key]) => key !== "id" && key !== "type"))
+  const safeToolCall = redactSensitiveData(toolCall)
+  const args = Object.fromEntries(Object.entries(safeToolCall).filter(([key]) => key !== "id" && key !== "type"))
   return {
     action: toolType,
     argsJson: JSON.stringify(args, null, 2),

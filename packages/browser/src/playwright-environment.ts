@@ -5,6 +5,8 @@ import { join } from "node:path"
 import { chromium, firefox, webkit, type Browser, type BrowserContext, type Page } from "playwright"
 import {
   isAllowedBrowserNavigationUrl,
+  REDACTED_VALUE,
+  redactSensitiveData,
   type ActionResult,
   type BrowserEnvironment,
   type BrowserToolCall,
@@ -245,14 +247,14 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
       }),
     ])
 
-    return {
+    return redactSensitiveData({
       url: page.url(),
       title,
       text,
       screenshotPath: state.lastScreenshotPath,
       interactiveElements,
       metadata: {},
-    }
+    })
   }
 }
 
@@ -316,7 +318,7 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
         }
       }
       await withAbort(locator.fill(call.value), ctx.abortSignal)
-      return { ok: true, message: "typed", observation: await this.environment.observe(ctx), metadata: { value: call.value } }
+      return { ok: true, message: "typed", observation: await this.environment.observe(ctx), metadata: { value: REDACTED_VALUE } }
     }
 
     if (call.type === "scroll") {

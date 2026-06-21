@@ -37,6 +37,7 @@ function fixtureHtml(): string {
       <body>
         <button id="toggle">Reveal</button>
         <input id="name" aria-label="Name" />
+        <input id="password" type="password" value="initial-secret" />
         <input id="hidden-token" type="hidden" name="where" value="nexearch" />
         <button id="hidden-button" style="display: none">Hidden</button>
         <main id="status">Idle</main>
@@ -469,10 +470,21 @@ describe("PlaywrightEnvironment", () => {
         },
         ctx,
       )
-      await tools.execute({ id: "tool_4", type: "wait", ms: 1 }, ctx)
-      const screenshot = await tools.execute({ id: "tool_5", type: "screenshot" }, ctx)
-      const text = await tools.execute({ id: "tool_6", type: "extract_text" }, ctx)
+      const passwordType = await tools.execute(
+        {
+          id: "tool_4",
+          type: "type",
+          target: { selector: "#password", elementId: null, text: null, role: null, name: null, coordinates: null },
+          value: "new-secret",
+        },
+        ctx,
+      )
+      await tools.execute({ id: "tool_5", type: "wait", ms: 1 }, ctx)
+      const screenshot = await tools.execute({ id: "tool_6", type: "screenshot" }, ctx)
+      const text = await tools.execute({ id: "tool_7", type: "extract_text" }, ctx)
       const observation = await env.observe(ctx)
+      const serialized = JSON.stringify(observation)
+      const password = observation.interactiveElements.find((element) => element.selector === "#password")
 
       expect(observation.title).toBe("Playwright Fixture")
       expect(observation.text).toContain("Typed Ada")
@@ -480,6 +492,12 @@ describe("PlaywrightEnvironment", () => {
       expect(observation.interactiveElements.some((element) => element.selector === "#name")).toBe(true)
       expect(observation.interactiveElements.some((element) => element.selector === "#hidden-token")).toBe(false)
       expect(observation.interactiveElements.some((element) => element.selector === "#hidden-button")).toBe(false)
+      expect(password?.name).toBe("[redacted]")
+      expect(password?.attributes.value).toBe("[redacted]")
+      expect(serialized).not.toContain("initial-secret")
+      expect(serialized).not.toContain("new-secret")
+      expect(passwordType.metadata.value).toBe("[redacted]")
+      expect(JSON.stringify(passwordType)).not.toContain("new-secret")
       expect(text.metadata.text).toContain("Typed Ada")
       expect(screenshot.observation?.screenshotPath).toEndWith(".png")
       expect((await stat(screenshot.observation?.screenshotPath ?? "")).isFile()).toBe(true)
