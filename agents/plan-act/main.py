@@ -31,8 +31,8 @@ def create_plan(ctx, reason):
 
 
 def choose_decision(ctx):
-    last_error = None
-    last_raw = ""
+    last_error = ctx.retry_previous_error
+    last_raw = ctx.retry_previous_response_text
 
     for attempt in range(2):
         response = ctx.model.complete(build_decision_request(ctx, last_error, last_raw), command_id=f"decision_{attempt + 1}")
