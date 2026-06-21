@@ -170,6 +170,37 @@ class TestEnvironment implements BrowserEnvironment {
   }
 }
 
+class GatedAttachEnvironment extends TestEnvironment {
+  readonly firstAttachStarted: Promise<void>
+  private attachCount = 0
+  private resolveFirstAttachStarted: () => void = () => {}
+  private releaseFirstAttach: () => void = () => {}
+  private readonly firstAttachRelease: Promise<void>
+
+  constructor(delayMs = 0) {
+    super(delayMs)
+    this.firstAttachStarted = new Promise((resolve) => {
+      this.resolveFirstAttachStarted = resolve
+    })
+    this.firstAttachRelease = new Promise((resolve) => {
+      this.releaseFirstAttach = resolve
+    })
+  }
+
+  async attachSession(ctx: RuntimeContext): Promise<void> {
+    this.attachCount += 1
+    if (this.attachCount === 1) {
+      this.resolveFirstAttachStarted()
+      await this.firstAttachRelease
+    }
+    await super.attachSession(ctx)
+  }
+
+  releaseFirstAttachSession(): void {
+    this.releaseFirstAttach()
+  }
+}
+
 class TestBrowserToolAdapter implements ToolAdapter {
   id = "test-browser-tools"
   name = "Test Browser Tools"
@@ -619,6 +650,56 @@ describe("createApp", () => {
 
     await json<{ cancelled: boolean }>(await request(`/runs/${first.runId}/cancel`, { method: "POST" }))
     await cancelled
+  })
+
+  it("POST /runs rejects a concurrent request while the first run is still attaching the browser", async () => {
+    const eventBus = new EventBus()
+    const registry = new PluginRegistry()
+    const environment = new GatedAttachEnvironment(50)
+    registry.registerAgent(new TestAgent())
+    registry.registerEnvironment(environment)
+    registry.registerToolAdapter(new TestBrowserToolAdapter(environment))
+    const orchestrator = new RunOrchestrator({
+      home: await mkdtemp(join(tmpdir(), "owa-server-")),
+      eventBus,
+      registry,
+      agentId: "test-agent",
+      environmentId: "test-browser",
+      maxSteps: 4,
+      now: () => new Date("2026-06-17T00:00:00.000Z"),
+    })
+    const sessions = new Map<string, SessionState>()
+    const app = createApp({ eventBus, orchestrator, registry, sessions })
+    const request = async (path: string, init?: RequestInit): Promise<Response> => {
+      return await app.fetch(
+        new Request(`http://127.0.0.1${path}`, {
+          ...init,
+          headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+        }),
+      )
+    }
+    const sessionId = await createSession(request)
+
+    const firstRequest = request("/runs", {
+      method: "POST",
+      body: JSON.stringify({ sessionId, prompt: "example.com에 접속해서 페이지 제목을 알려줘" }),
+    })
+    await environment.firstAttachStarted
+    const second = await request("/runs", {
+      method: "POST",
+      body: JSON.stringify({ sessionId, prompt: "do not start concurrently" }),
+    })
+    const secondBody = (await second.json()) as { error?: string; runId?: string }
+
+    environment.releaseFirstAttachSession()
+    const first = await json<{ runId: string }>(await firstRequest)
+    if (secondBody.runId) {
+      await request(`/runs/${secondBody.runId}/cancel`, { method: "POST" })
+    }
+    await request(`/runs/${first.runId}/cancel`, { method: "POST" })
+
+    expect(second.status).toBe(409)
+    expect(secondBody).toEqual({ error: "Session has a running run" })
   })
 
   it("POST /runs keeps the session browser open after the run completes", async () => {

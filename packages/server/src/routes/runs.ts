@@ -57,15 +57,24 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
         createdAt: runSession.createdAt,
       })
     }
-    await deps.browserSessions.attach(runSession, environmentId)
+    const pendingRunId = `pending_${randomUUID().replaceAll("-", "")}`
+    deps.runs.set(pendingRunId, { runId: pendingRunId, sessionId: runSession.id, status: "running", finalAnswer: null })
 
-    const started = deps.orchestrator.startRun({
-      session: runSession,
-      prompt: parsed.data.prompt,
-      agentId: parsed.data.agentId,
-      modelId: parsed.data.modelId,
-      environmentId,
-    })
+    let started: ReturnType<RunOrchestrator["startRun"]>
+    try {
+      await deps.browserSessions.attach(runSession, environmentId)
+      started = deps.orchestrator.startRun({
+        session: runSession,
+        prompt: parsed.data.prompt,
+        agentId: parsed.data.agentId,
+        modelId: parsed.data.modelId,
+        environmentId,
+      })
+    } catch (error) {
+      deps.runs.delete(pendingRunId)
+      throw error
+    }
+    deps.runs.delete(pendingRunId)
     deps.runs.set(started.runId, { runId: started.runId, sessionId: runSession.id, status: "running", finalAnswer: null })
     const createdAt = new Date().toISOString()
     deps.storage?.upsertRun({
