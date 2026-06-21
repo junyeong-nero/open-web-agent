@@ -13,9 +13,9 @@ This is a **Bun** monorepo (not Node/npm). Use `bun`, never `npm`/`yarn`.
 ```bash
 bun install                 # install workspace deps
 bun run typecheck           # tsc -b across all package project references
-bun test                    # run all tests (bun's built-in runner)
-bun test packages/core/src/events/event-bus.test.ts   # single file
-bun test -t "publishes events"                         # by test-name substring
+bun run test                # run all source tests headless
+OPEN_WEB_AGENT_BROWSER_HEADLESS=true bun test packages/core/src/events/event-bus.test.ts   # single file
+OPEN_WEB_AGENT_BROWSER_HEADLESS=true bun test packages/*/src -t "publishes events"          # by test-name substring
 ```
 
 Run the CLI directly from source (no build step — packages resolve via `main: ./src/index.ts`):
@@ -103,9 +103,9 @@ OpenTUI rendered through SolidJS. `tsconfig` uses `jsx: "preserve"` with `jsxImp
 
 ## Configuration & local data
 
-Model settings load from `~/.openwebagents/config.yaml` (note: `.openwebagents`, no hyphen), with **env vars taking precedence**: `OPEN_WEB_AGENT_MODEL`, `OPEN_WEB_AGENT_REASONING_EFFORT`, `OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`. See README for the full YAML shape.
+Model settings load from `$OWA_HOME/config.yaml`, defaulting to `~/.open-web-agent/config.yaml`, with **env vars taking precedence**: `OPEN_WEB_AGENT_MODEL`, `OPEN_WEB_AGENT_REASONING_EFFORT`, `OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`. See README for the full YAML shape.
 
-Run traces and SQLite metadata are written under `OWA_HOME` (note: `.open-web-agent`, **with** hyphen — different dir from the config above), defaulting to `~/.open-web-agent`:
+Run traces and SQLite metadata are written under `OWA_HOME`, defaulting to `~/.open-web-agent`:
 
 ```
 $OWA_HOME/projects/<sha256(absolute project path)>/sessions/<id>/runs/<id>/events.jsonl

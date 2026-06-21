@@ -20,6 +20,7 @@ async function context(
     },
     runId,
     runDir: await mkdtemp(join(tmpdir(), "owa-playwright-env-")),
+    browserTools: [],
     eventBus: new EventBus(),
     abortSignal,
     now: () => new Date("2026-06-17T00:00:00.000Z"),
@@ -185,6 +186,31 @@ function gateFakeNewPages(fake: ReturnType<typeof createFakeBrowser>) {
 }
 
 describe("PlaywrightEnvironment", () => {
+  it("exposes the browser tools it can execute", () => {
+    const tools = new PlaywrightBrowserToolAdapter(new PlaywrightEnvironment({ headless: true })).listTools()
+
+    expect(tools.map((tool) => tool.type)).toEqual([
+      "navigate",
+      "click",
+      "type",
+      "scroll",
+      "wait",
+      "press_key",
+      "screenshot",
+      "extract_text",
+      "go_back",
+      "go_forward",
+    ])
+    expect(tools.find((tool) => tool.type === "navigate")).toMatchObject({
+      description: "Open an absolute URL in the current browser page.",
+      parameters: [{ name: "url", type: "string", required: true, description: "Absolute URL to open." }],
+      example: { id: "tool_1", type: "navigate", url: "https://example.com" },
+    })
+    expect(tools.find((tool) => tool.type === "click")).toMatchObject({
+      parameters: [{ name: "target", type: "ActionTarget", required: true }],
+    })
+  })
+
   it("uses headed browser launches by default", () => {
     expect("resolvePlaywrightHeadless" in playwrightEnvironment).toBe(true)
     expect(

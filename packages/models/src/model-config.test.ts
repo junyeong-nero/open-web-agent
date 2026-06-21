@@ -14,7 +14,26 @@ import {
 
 describe("readModelConfig", () => {
   it("resolves the default user config path", () => {
-    expect(resolveModelConfigPath()).toBe(join(homedir(), ".openwebagents", "config.yaml"))
+    expect(resolveModelConfigPath()).toBe(join(homedir(), ".open-web-agent", "config.yaml"))
+    expect(resolveModelConfigPath({}, "/tmp/owa-home")).toBe("/tmp/owa-home/.open-web-agent/config.yaml")
+    expect(resolveModelConfigPath({ OWA_HOME: "/tmp/owa-custom" }, "/tmp/owa-home")).toBe(
+      "/tmp/owa-custom/config.yaml",
+    )
+  })
+
+  it("reads default config from OWA_HOME config.yaml", async () => {
+    const home = await mkdtemp(join(tmpdir(), "owa-home-config-"))
+    await writeFile(join(home, "config.yaml"), ['model: "owa-home-model"', ""].join("\n"))
+
+    expect(readModelConfig({ OWA_HOME: home }, { homeDir: "/tmp/unused-home" }).defaultModel).toBe("owa-home-model")
+  })
+
+  it("falls back to legacy user config when the unified config does not exist", async () => {
+    const home = await mkdtemp(join(tmpdir(), "owa-legacy-config-"))
+    await mkdir(join(home, ".openwebagents"), { recursive: true })
+    await writeFile(join(home, ".openwebagents", "config.yaml"), ['model: "legacy-model"', ""].join("\n"))
+
+    expect(readModelConfig({}, { homeDir: home }).defaultModel).toBe("legacy-model")
   })
 
   it("uses OpenRouter Nemotron as the built-in default model", () => {
@@ -55,6 +74,7 @@ describe("readModelConfig", () => {
           OPEN_WEB_AGENT_MODEL_PROVIDER: "codex-oauth",
           OPEN_WEB_AGENT_AGENT: "env-agent",
           OPEN_WEB_AGENT_BROWSER: "env-browser",
+          OPEN_WEB_AGENT_BROWSER_HEADLESS: "true",
           OPEN_WEB_AGENT_BROWSER_PREVENT_FOCUS: "true",
           OPEN_WEB_AGENT_REASONING_EFFORT: "high",
           OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS: "256000",
@@ -68,6 +88,7 @@ describe("readModelConfig", () => {
       defaultModelProvider: "codex-oauth",
       defaultAgentId: "env-agent",
       defaultBrowserId: "env-browser",
+      browserHeadless: true,
       browserPreventFocus: true,
       reasoningEffort: "high",
       contextWindowTokens: 256000,
@@ -81,6 +102,28 @@ describe("readModelConfig", () => {
     })
   })
 
+  it("reads the browser headless preference from env", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-model-config-"))
+
+    expect(
+      readModelConfig(
+        {
+          OPEN_WEB_AGENT_BROWSER_HEADLESS: "true",
+        },
+        { configPath: join(dir, "missing-config.yaml") },
+      ).browserHeadless,
+    ).toBe(true)
+
+    expect(
+      readModelConfig(
+        {
+          OPEN_WEB_AGENT_BROWSER_HEADLESS: "false",
+        },
+        { configPath: join(dir, "missing-config.yaml") },
+      ).browserHeadless,
+    ).toBe(false)
+  })
+
   it("reads provider keys and default model from a YAML config file", async () => {
     const dir = await mkdtemp(join(tmpdir(), "owa-model-config-"))
     const configPath = join(dir, "config.yaml")
@@ -91,6 +134,7 @@ describe("readModelConfig", () => {
         'model_provider: "codex-oauth"',
         'agent: "yaml-agent"',
         'browser: "yaml-browser"',
+        "browser_headless: true",
         "browser_prevent_focus: true",
         'reasoning_effort: "low"',
         "context_window_tokens: 64000",
@@ -109,6 +153,7 @@ describe("readModelConfig", () => {
       defaultModelProvider: "codex-oauth",
       defaultAgentId: "yaml-agent",
       defaultBrowserId: "yaml-browser",
+      browserHeadless: true,
       browserPreventFocus: true,
       reasoningEffort: "low",
       contextWindowTokens: 64000,
@@ -120,6 +165,22 @@ describe("readModelConfig", () => {
       codexAuthPath: "/tmp/yaml-codex-auth.json",
       parameters: {},
     })
+  })
+
+  it("reads the browser headless preference from a YAML config file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-model-config-"))
+    const configPath = join(dir, "config.yaml")
+    await writeFile(configPath, ["browser_headless: true", ""].join("\n"))
+
+    expect(readModelConfig({}, { configPath }).browserHeadless).toBe(true)
+  })
+
+  it("accepts headless as an alias for browser_headless", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-model-config-"))
+    const configPath = join(dir, "config.yaml")
+    await writeFile(configPath, ["headless: true", ""].join("\n"))
+
+    expect(readModelConfig({}, { configPath }).browserHeadless).toBe(true)
   })
 
   it("expands a home-relative Codex auth path from YAML config", async () => {
@@ -157,6 +218,7 @@ describe("readModelConfig", () => {
       defaultModelProvider: null,
       defaultAgentId: null,
       defaultBrowserId: null,
+      browserHeadless: false,
       browserPreventFocus: false,
       reasoningEffort: "medium",
       contextWindowTokens: 128000,
@@ -210,6 +272,7 @@ describe("readModelConfig", () => {
           OPEN_WEB_AGENT_MODEL_PROVIDER: "env-provider",
           OPEN_WEB_AGENT_AGENT: "env-agent",
           OPEN_WEB_AGENT_BROWSER: "env-browser",
+          OPEN_WEB_AGENT_BROWSER_HEADLESS: "true",
           OPEN_WEB_AGENT_BROWSER_PREVENT_FOCUS: "true",
           OPEN_WEB_AGENT_REASONING_EFFORT: "medium",
           OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS: "128000",
@@ -223,6 +286,7 @@ describe("readModelConfig", () => {
       defaultModelProvider: "env-provider",
       defaultAgentId: "env-agent",
       defaultBrowserId: "env-browser",
+      browserHeadless: true,
       browserPreventFocus: true,
       reasoningEffort: "medium",
       contextWindowTokens: 128000,
@@ -241,6 +305,7 @@ describe("readModelConfig", () => {
       defaultModelProvider: null,
       defaultAgentId: null,
       defaultBrowserId: null,
+      browserHeadless: false,
       browserPreventFocus: false,
       reasoningEffort: "medium",
       contextWindowTokens: 128000,
@@ -250,8 +315,8 @@ describe("readModelConfig", () => {
 
   it("persists selected model provider and model name while preserving existing config", async () => {
     const dir = await mkdtemp(join(tmpdir(), "owa-model-config-"))
-    const configPath = join(dir, ".openwebagents", "config.yaml")
-    await mkdir(join(dir, ".openwebagents"), { recursive: true })
+    const configPath = join(dir, ".open-web-agent", "config.yaml")
+    await mkdir(join(dir, ".open-web-agent"), { recursive: true })
     await writeFile(
       configPath,
       [
@@ -275,10 +340,41 @@ describe("readModelConfig", () => {
     })
   })
 
+  it("persists selected model provider to the unified config while preserving legacy config", async () => {
+    const home = await mkdtemp(join(tmpdir(), "owa-legacy-write-config-"))
+    const legacyConfigPath = join(home, ".openwebagents", "config.yaml")
+    const configPath = join(home, ".open-web-agent", "config.yaml")
+    await mkdir(join(home, ".openwebagents"), { recursive: true })
+    await writeFile(
+      legacyConfigPath,
+      [
+        'openai_api_key: "yaml-openai-key"',
+        "parameters:",
+        "  temperature: 0.25",
+        "unknown_key: keep-me",
+        "",
+      ].join("\n"),
+    )
+
+    await writeModelSelectionConfig(
+      { modelId: "codex-oauth", modelName: "gpt-5.5", reasoningEffort: "high" },
+      { env: {}, homeDir: home },
+    )
+
+    expect(parse(await readFile(configPath, "utf8"))).toMatchObject({
+      model: "gpt-5.5",
+      model_provider: "codex-oauth",
+      reasoning_effort: "high",
+      openai_api_key: "yaml-openai-key",
+      parameters: { temperature: 0.25 },
+      unknown_key: "keep-me",
+    })
+  })
+
   it("persists selected agent and browser while preserving existing config", async () => {
     const dir = await mkdtemp(join(tmpdir(), "owa-runtime-config-"))
-    const configPath = join(dir, ".openwebagents", "config.yaml")
-    await mkdir(join(dir, ".openwebagents"), { recursive: true })
+    const configPath = join(dir, ".open-web-agent", "config.yaml")
+    await mkdir(join(dir, ".open-web-agent"), { recursive: true })
     await writeFile(
       configPath,
       [

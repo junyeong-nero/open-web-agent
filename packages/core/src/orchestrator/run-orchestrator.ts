@@ -107,6 +107,7 @@ export class RunOrchestrator {
       agentId,
       modelId,
       environmentId,
+      browserTools: listBrowserToolsForEnvironment(this.options.registry, environmentId),
       eventBus: this.options.eventBus,
       abortSignal: abortController.signal,
       now: this.now,
@@ -206,6 +207,10 @@ export class RunOrchestrator {
       if (actionFailed) break
     }
   }
+}
+
+function listBrowserToolsForEnvironment(registry: PluginRegistry, environmentId: string) {
+  return registry.listToolAdapters().find((adapter) => adapter.environmentId === environmentId)?.listTools() ?? []
 }
 
 async function executeBrowserTool(

@@ -177,6 +177,10 @@ class TestBrowserToolAdapter implements ToolAdapter {
 
   constructor(private readonly environment: TestEnvironment) {}
 
+  listTools() {
+    return []
+  }
+
   async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
     await delay(this.environment.delayMs, ctx.abortSignal)
 
@@ -355,6 +359,10 @@ class SessionLifecycleToolAdapter implements ToolAdapter {
   environmentId = "session-browser"
 
   constructor(private readonly environment: SessionLifecycleEnvironment) {}
+
+  listTools() {
+    return []
+  }
 
   async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
     const observation: Observation = {

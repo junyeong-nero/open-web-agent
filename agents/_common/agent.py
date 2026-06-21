@@ -1,3 +1,4 @@
+import json
 import itertools
 import re
 from pathlib import Path
@@ -9,6 +10,7 @@ from .protocol import (
     normalize_decision,
     parse_json_object,
     read_request,
+    validate_agent_decision,
 )
 
 
@@ -50,6 +52,7 @@ class AgentContext:
         self.agent = request.get("agent") or {}
         self.state = request.get("state") or {}
         self.context = request.get("context") or {}
+        self.retry = request.get("retry") if isinstance(request.get("retry"), dict) else None
         self.events = EventRecorder()
         self.model = ModelClient()
         self.tool_calls = ToolCallFactory()
@@ -71,6 +74,33 @@ class AgentContext:
     @property
     def final_answer_text(self):
         return self.state.get("finalAnswer")
+
+    @property
+    def retry_attempt(self):
+        if not self.retry:
+            return 0
+        return self.retry.get("attempt") or 0
+
+    @property
+    def retry_previous_error(self):
+        if not self.retry:
+            return None
+        return self.retry.get("previousError")
+
+    @property
+    def retry_previous_response(self):
+        if not self.retry:
+            return None
+        return self.retry.get("previousResponse")
+
+    @property
+    def retry_previous_response_text(self):
+        value = self.retry_previous_response
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
     @property
     def run_dir(self):
@@ -304,7 +334,7 @@ class ActionFactory:
 
 class DecisionFactory:
     def from_model(self, value):
-        return normalize_decision(value)
+        return validate_agent_decision(normalize_decision(value))
 
 
 def single_tool_decision(action_id, kind, reason, tool_call):

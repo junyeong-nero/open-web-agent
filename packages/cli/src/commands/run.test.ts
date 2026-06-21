@@ -17,6 +17,7 @@ describe("runCommand", () => {
       {
         env: {
           OWA_HOME: home,
+          OPEN_WEB_AGENT_BROWSER_HEADLESS: "true",
           OPEN_WEB_AGENT_CODEX_AUTH_PATH: join(home, "missing-codex-auth.json"),
         },
         configPath: join(home, "missing-config.yaml"),
@@ -26,7 +27,7 @@ describe("runCommand", () => {
 
     expect(lines).toContainEqual(expect.stringContaining("[run.started] run_"))
     expect(lines.at(-1)).toContain("[run.failed] No model selected.")
-  })
+  }, 10_000)
 
   it("runs the project text-vision mixed grounding Python agent", async () => {
     const fixtureServer = Bun.serve({
@@ -69,6 +70,7 @@ describe("runCommand", () => {
             OPENAI_API_KEY: "test-openai-key",
             OPEN_WEB_AGENT_MODEL: "gpt-test",
             OPEN_WEB_AGENT_ALLOW_PRIVATE_NETWORK_NAVIGATION: "true",
+            OPEN_WEB_AGENT_BROWSER_HEADLESS: "true",
             OPEN_WEB_AGENT_CODEX_AUTH_PATH: join(home, "missing-codex-auth.json"),
           },
           configPath: join(home, "missing-config.yaml"),
@@ -83,5 +85,5 @@ describe("runCommand", () => {
     expect(lines).toContain(`[browser.tool.completed] navigate ${fixtureUrl}`)
     expect(lines.at(-1)).toBe("[run.completed] cli mixed grounding answer")
     expect(JSON.stringify(providerRequests[0])).toContain("CLI fixture page text.")
-  })
+  }, 10_000)
 })

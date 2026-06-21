@@ -8,6 +8,7 @@ import {
   type ActionResult,
   type BrowserEnvironment,
   type BrowserToolCall,
+  type BrowserToolDefinition,
   type Observation,
   type RuntimeContext,
   type ToolAdapter,
@@ -265,6 +266,10 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
     private readonly options: PlaywrightBrowserToolAdapterOptions = {},
   ) {}
 
+  listTools(): BrowserToolDefinition[] {
+    return [...PLAYWRIGHT_BROWSER_TOOL_DEFINITIONS]
+  }
+
   async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
     if (call.type === "navigate") {
       if (!isAllowedBrowserNavigationUrl(call.url, this.options)) {
@@ -379,6 +384,77 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
     return this.environment.observe(ctx).catch(() => null)
   }
 }
+
+const PLAYWRIGHT_BROWSER_TOOL_DEFINITIONS: BrowserToolDefinition[] = [
+  {
+    type: "navigate",
+    description: "Open an absolute URL in the current browser page.",
+    parameters: [{ name: "url", type: "string", required: true, description: "Absolute URL to open." }],
+    example: { id: "tool_1", type: "navigate", url: "https://example.com" },
+  },
+  {
+    type: "click",
+    description: "Click an interactive element or coordinate on the current page.",
+    parameters: [
+      { name: "target", type: "ActionTarget", required: true, description: "Element or coordinates to click." },
+    ],
+    example: { id: "tool_2", type: "click", target: { selector: 'button[type="submit"]' } },
+  },
+  {
+    type: "type",
+    description: "Fill text into an editable element on the current page.",
+    parameters: [
+      { name: "target", type: "ActionTarget", required: true, description: "Editable element to fill." },
+      { name: "value", type: "string", required: true, description: "Text to enter." },
+    ],
+    example: { id: "tool_3", type: "type", target: { selector: 'input[name="query"]' }, value: "tomorrow weather" },
+  },
+  {
+    type: "scroll",
+    description: "Scroll the current page by pixel deltas.",
+    parameters: [
+      { name: "deltaX", type: "number", required: false, description: "Horizontal scroll delta in pixels." },
+      { name: "deltaY", type: "number", required: true, description: "Vertical scroll delta in pixels." },
+    ],
+    example: { id: "tool_4", type: "scroll", deltaX: 0, deltaY: 700 },
+  },
+  {
+    type: "wait",
+    description: "Wait for a fixed number of milliseconds.",
+    parameters: [{ name: "ms", type: "positive integer", required: true, description: "Milliseconds to wait." }],
+    example: { id: "tool_5", type: "wait", ms: 1000 },
+  },
+  {
+    type: "press_key",
+    description: "Press a keyboard key in the current page.",
+    parameters: [{ name: "key", type: "string", required: true, description: "Playwright key name to press." }],
+    example: { id: "tool_6", type: "press_key", key: "Enter" },
+  },
+  {
+    type: "screenshot",
+    description: "Capture a full-page screenshot for visual inspection.",
+    parameters: [],
+    example: { id: "tool_7", type: "screenshot" },
+  },
+  {
+    type: "extract_text",
+    description: "Extract visible page text from the current browser observation.",
+    parameters: [],
+    example: { id: "tool_8", type: "extract_text" },
+  },
+  {
+    type: "go_back",
+    description: "Navigate back in browser history.",
+    parameters: [],
+    example: { id: "tool_9", type: "go_back" },
+  },
+  {
+    type: "go_forward",
+    description: "Navigate forward in browser history.",
+    parameters: [],
+    example: { id: "tool_10", type: "go_forward" },
+  },
+]
 
 export function resolvePlaywrightHeadless(options: Pick<PlaywrightEnvironmentOptions, "headless">): boolean {
   return options.headless ?? false

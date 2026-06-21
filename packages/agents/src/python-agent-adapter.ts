@@ -22,9 +22,16 @@ export interface PythonAgentAdapterOptions {
   timeoutMs?: number
   protocol?: "oneshot" | "jsonl"
   model?: ModelPlugin
+  maxStepResponseRetries?: number
 }
 
 type PythonAgentMethod = "initialize" | "step" | "finalize"
+
+interface PythonAgentRetryContext {
+  attempt: number
+  previousError: string
+  previousResponse: unknown
+}
 
 interface SerializableRuntimeContext {
   session: RuntimeContext["session"]
@@ -33,6 +40,7 @@ interface SerializableRuntimeContext {
   agentId: string | null
   modelId: string | null
   environmentId: string | null
+  browserTools: RuntimeContext["browserTools"]
   now: string
 }
 
@@ -73,6 +81,7 @@ export class PythonAgentAdapter implements AgentPlugin {
   private readonly timeoutMs: number
   private readonly protocol: "oneshot" | "jsonl"
   private readonly model: ModelPlugin | undefined
+  private readonly maxStepResponseRetries: number
 
   constructor(options: PythonAgentAdapterOptions) {
     if (options.command.length === 0) throw new Error(`Python agent ${options.id} command must not be empty`)
@@ -86,6 +95,7 @@ export class PythonAgentAdapter implements AgentPlugin {
     this.timeoutMs = options.timeoutMs ?? 30_000
     this.protocol = options.protocol ?? "oneshot"
     this.model = options.model
+    this.maxStepResponseRetries = options.maxStepResponseRetries ?? 1
   }
 
   async initialize(ctx: RuntimeContext): Promise<void> {
@@ -104,20 +114,37 @@ export class PythonAgentAdapter implements AgentPlugin {
   }
 
   async step(state: AgentState, ctx: RuntimeContext): Promise<AgentDecision> {
-    const response = StepResponseSchema.parse(
-      await this.callPython(
+    let retry: PythonAgentRetryContext | undefined
+    let lastError = ""
+
+    for (let attempt = 0; attempt <= this.maxStepResponseRetries; attempt += 1) {
+      const response = await this.callPython(
         "step",
         {
           method: "step",
           agent: this.agentMetadata(),
           state,
           context: serializeContext(ctx),
+          ...(retry ? { retry } : {}),
         },
         ctx,
-      ),
-    )
-    await emitPythonEvents(ctx, response.events)
-    return response.decision
+      )
+      const parsed = StepResponseSchema.safeParse(response)
+      if (parsed.success) {
+        await emitPythonEvents(ctx, parsed.data.events)
+        return parsed.data.decision
+      }
+
+      lastError = parsed.error.message
+      if (attempt >= this.maxStepResponseRetries) break
+      retry = {
+        attempt: attempt + 1,
+        previousError: lastError,
+        previousResponse: response,
+      }
+    }
+
+    throw new Error(`Python agent ${this.id} step returned invalid decision after retry: ${lastError}`)
   }
 
   async finalize(state: AgentState, ctx: RuntimeContext): Promise<string> {
@@ -396,6 +423,7 @@ function serializeContext(ctx: RuntimeContext): SerializableRuntimeContext {
     agentId: ctx.agentId ?? null,
     modelId: ctx.modelId ?? null,
     environmentId: ctx.environmentId ?? null,
+    browserTools: ctx.browserTools,
     now: ctx.now().toISOString(),
   }
 }

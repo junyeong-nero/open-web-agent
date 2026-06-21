@@ -49,10 +49,10 @@ export interface StartedDefaultRuntime {
 }
 
 export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = {}): Promise<StartedDefaultRuntime> {
-  const home = options.home ?? resolveOwaHome()
+  const env = options.env ?? process.env
+  const home = options.home ?? resolveOwaHome(env)
   const eventBus = new EventBus()
   const registry = new PluginRegistry()
-  const env = options.env ?? process.env
   const modelConfig = readModelConfig(env, { configPath: options.configPath })
   const modelCallTimeoutMs = readModelCallTimeoutMs(env)
   const allowPrivateNetworkNavigation =
@@ -158,7 +158,10 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   const defaultAgentId = configuredDefaultAgentId ?? resolveRegisteredId(registeredAgentIds, "see-act") ?? registeredAgentIds[0]
   if (!defaultAgentId) throw new Error("No agents registered")
 
-  const playwrightEnvironment = new PlaywrightEnvironment({ preventFocus: modelConfig.browserPreventFocus })
+  const playwrightEnvironment = new PlaywrightEnvironment({
+    headless: modelConfig.browserHeadless,
+    preventFocus: modelConfig.browserPreventFocus,
+  })
   registry.registerEnvironment(playwrightEnvironment)
   registry.registerToolAdapter(new PlaywrightBrowserToolAdapter(playwrightEnvironment, { allowPrivateNetworkNavigation }))
   const registeredEnvironmentIds = registry.listEnvironments().map((environment) => environment.id)
@@ -191,6 +194,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     storage,
     browserSessions,
     modelConfigPath: options.configPath,
+    modelConfigEnv: env,
     runtimeDefaults: {
       agentId: defaultAgentId,
       modelId: modelConfig.defaultModelProvider ? defaultModelId : null,
@@ -242,11 +246,12 @@ function readModelCallTimeoutMs(env: NodeJS.ProcessEnv): number | undefined {
 }
 
 function readBooleanEnv(value: string | undefined, name: string): boolean | undefined {
-  if (value === undefined || value === "") return undefined
-  if (value === "true" || value === "1") return true
-  if (value === "false" || value === "0") return false
+  if (value == null || value.length === 0) return undefined
+  const normalized = value.toLowerCase()
+  if (["1", "true", "yes", "on"].includes(normalized)) return true
+  if (["0", "false", "no", "off"].includes(normalized)) return false
 
-  throw new Error(`Invalid ${name}: must be true, false, 1, or 0`)
+  throw new Error(`Invalid ${name}: must be a boolean`)
 }
 
 class RuntimeSelectedModel implements ModelPlugin {

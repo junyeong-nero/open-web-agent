@@ -2,8 +2,8 @@ import { createHash } from "node:crypto"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 
-export function resolveOwaHome(env: NodeJS.ProcessEnv = process.env): string {
-  return env.OWA_HOME && env.OWA_HOME.length > 0 ? env.OWA_HOME : join(homedir(), ".open-web-agent")
+export function resolveOwaHome(env: NodeJS.ProcessEnv = process.env, homeDir = homedir()): string {
+  return env.OWA_HOME && env.OWA_HOME.length > 0 ? env.OWA_HOME : join(homeDir, ".open-web-agent")
 }
 
 export function hashProjectPath(projectPath: string): string {

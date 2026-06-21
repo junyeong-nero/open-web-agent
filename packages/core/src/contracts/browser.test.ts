@@ -54,10 +54,16 @@ describe("BrowserToolCallSchema", () => {
   it("classifies local and private network navigation URLs as unsafe by default", () => {
     for (const url of [
       "http://localhost:3000",
+      "http://localhost.",
       "http://app.localhost",
       "http://internal",
+      "http://internal.",
       "http://metadata.google.internal",
       "http://127.0.0.1",
+      "http://2130706433",
+      "http://0177.0.0.1",
+      "http://0x7f.0.0.1",
+      "http://127.1",
       "http://10.0.0.1",
       "http://172.16.0.1",
       "http://172.31.255.255",
@@ -67,6 +73,7 @@ describe("BrowserToolCallSchema", () => {
       "http://[fc00::1]",
       "http://[fe80::1]",
       "http://[::ffff:127.0.0.1]",
+      "http://[::ffff:7f00:1]",
     ]) {
       expect(isAllowedBrowserNavigationUrl(url)).toBe(false)
     }

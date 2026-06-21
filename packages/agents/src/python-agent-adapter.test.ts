@@ -54,6 +54,7 @@ function ctx(signal = new AbortController().signal): RuntimeContext & { emitted:
     runDir: "/tmp/run",
     agentId: "python-test-agent",
     environmentId: "test-browser",
+    browserTools: [],
     eventBus: new EventBus(),
     abortSignal: signal,
     now: () => new Date("2026-06-17T00:00:00.000Z"),
@@ -95,6 +96,27 @@ class FakeModel implements ModelPlugin {
       raw: { ok: true },
       usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
       latencyMs: 4,
+    }
+  }
+}
+
+function messageText(content: ModelRequest["messages"][number]["content"]): string {
+  return typeof content === "string" ? content : JSON.stringify(content)
+}
+
+class SequenceModel extends FakeModel {
+  constructor(private readonly responses: string[]) {
+    super()
+  }
+
+  override async complete(request: ModelRequest): Promise<ModelResponse> {
+    this.requests.push(request)
+    return {
+      id: `fake-response-${this.requests.length}`,
+      text: this.responses.shift() ?? this.responses.at(-1) ?? "",
+      raw: { ok: true },
+      usage: null,
+      latencyMs: 0,
     }
   }
 }
@@ -396,6 +418,254 @@ print(json.dumps({
       finalAnswer: "model delegated answer",
       confidence: 1,
     })
+  })
+
+  it("retries invalid step decisions with validation context", async () => {
+    const logPath = join(await mkdtemp(join(tmpdir(), "owa-python-agent-retry-log-")), "requests.jsonl")
+    const script = await writePythonScript(`
+import json
+import os
+import sys
+
+request = json.load(sys.stdin)
+with open(os.environ["REQUEST_LOG"], "a", encoding="utf-8") as log:
+    log.write(json.dumps(request, sort_keys=True) + "\\n")
+
+if "retry" not in request:
+    print(json.dumps({
+        "decision": {
+            "type": "browser_actions",
+            "thought": "Use a browser operation alias.",
+            "actions": [
+                {
+                    "id": "search",
+                    "kind": "search",
+                    "reason": None,
+                    "requiresApproval": False,
+                    "toolCalls": [
+                        {"id": "search_tool", "type": "open", "url": "https://example.com"}
+                    ]
+                }
+            ]
+        }
+    }))
+else:
+    print(json.dumps({
+        "decision": {
+            "type": "final_answer",
+            "thought": request["retry"]["previousError"],
+            "finalAnswer": request["retry"]["previousResponse"]["decision"]["actions"][0]["toolCalls"][0]["type"],
+            "confidence": 1
+        }
+    }))
+`)
+    const agent = new PythonAgentAdapter({
+      id: "python-retry-agent",
+      name: "Python Retry Agent",
+      description: "Retries invalid decisions",
+      command: [python, script],
+      env: { REQUEST_LOG: logPath },
+    })
+
+    const decision = await agent.step(state(), ctx())
+    const requests = (await readFile(logPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line))
+
+    expect(decision).toMatchObject({
+      type: "final_answer",
+      finalAnswer: "open",
+    })
+    expect(requests).toHaveLength(2)
+    expect(requests[0]).not.toHaveProperty("retry")
+    expect(requests[1].retry).toMatchObject({
+      attempt: 1,
+      previousResponse: {
+        decision: {
+          actions: [
+            {
+              toolCalls: [{ type: "open" }],
+            },
+          ],
+        },
+      },
+    })
+    expect(requests[1].retry.previousError).toContain("decision")
+    expect(requests[1].retry.previousError).toContain("toolCalls")
+  })
+
+  it("exposes retry context to BaseAgent subclasses", async () => {
+    const script = await writePythonScript(`
+${commonImportPrelude}
+from _common.agent import BaseAgent
+
+class FixtureAgent(BaseAgent):
+    def step(self, ctx):
+        if not getattr(ctx, "retry", None):
+            return {
+                "type": "browser_actions",
+                "thought": "Use an invalid browser tool.",
+                "actions": [
+                    {
+                        "id": "invalid",
+                        "kind": "invalid",
+                        "reason": None,
+                        "requiresApproval": False,
+                        "toolCalls": [
+                            {"id": "invalid_tool", "type": "open", "url": "https://example.com"}
+                        ],
+                    }
+                ],
+            }
+        return ctx.final_answer(
+            f"retry {ctx.retry_attempt}: {ctx.retry_previous_response['decision']['actions'][0]['toolCalls'][0]['type']}",
+            thought=ctx.retry_previous_error,
+        )
+
+if __name__ == "__main__":
+    FixtureAgent().run()
+`)
+    const agent = new PythonAgentAdapter({
+      id: "python-base-retry-agent",
+      name: "Python Base Retry Agent",
+      description: "Uses BaseAgent retry context",
+      command: [python, script],
+      protocol: "jsonl",
+    })
+
+    const decision = await agent.step(state(), ctx())
+
+    expect(decision).toMatchObject({
+      type: "final_answer",
+      finalAnswer: "retry 1: open",
+    })
+    expect(decision.thought).toContain("toolCalls")
+  })
+
+  it("lets plan-act correct invalid tool calls from adapter retry context", async () => {
+    class PlanRetryModel extends FakeModel {
+      decisionPrompts: string[] = []
+
+      override async complete(request: ModelRequest): Promise<ModelResponse> {
+        this.requests.push(request)
+        const system = messageText(request.messages.find((message) => message.role === "system")?.content ?? "")
+        const user = messageText(request.messages.find((message) => message.role === "user")?.content ?? "")
+        if (system.includes("planning agent")) {
+          return {
+            id: "plan-response",
+            text: JSON.stringify({
+              items: [{ id: "search", title: "Search for schedule", status: "active" }],
+            }),
+            raw: {},
+            usage: null,
+            latencyMs: 0,
+          }
+        }
+
+        this.decisionPrompts.push(user)
+        if (user.includes("Previous response was invalid") && user.includes("toolCalls")) {
+          return {
+            id: "corrected-decision",
+            text: JSON.stringify({
+              type: "final_answer",
+              thought: "Corrected after retry context.",
+              finalAnswer: "corrected",
+              confidence: 1,
+            }),
+            raw: {},
+            usage: null,
+            latencyMs: 0,
+          }
+        }
+
+        return {
+          id: "invalid-decision",
+          text: JSON.stringify({
+            type: "browser_actions",
+            thought: "Use an invalid browser tool.",
+            actions: [
+              {
+                id: "search",
+                kind: "search",
+                reason: null,
+                requiresApproval: false,
+                toolCalls: [{ id: "search_tool", type: "open", url: "https://example.com" }],
+              },
+            ],
+          }),
+          raw: {},
+          usage: null,
+          latencyMs: 0,
+        }
+      }
+    }
+    const model = new PlanRetryModel()
+    const agent = new PythonAgentAdapter({
+      id: "plan-act",
+      name: "Plan Act",
+      description: "Plan-act fixture",
+      command: [python, resolve(repoAgentsDir, "plan-act/main.py")],
+      protocol: "jsonl",
+      model,
+    })
+
+    const decision = await agent.step(state(), ctx())
+
+    expect(decision).toMatchObject({ type: "final_answer", finalAnswer: "corrected" })
+    expect(model.decisionPrompts).toHaveLength(2)
+    expect(model.decisionPrompts[1]).toContain("Previous response was invalid")
+    expect(model.decisionPrompts[1]).toContain('"type":"open"')
+  })
+
+  it("lets plan-act retry model decisions that fail tool-call schema validation", async () => {
+    const model = new SequenceModel([
+      JSON.stringify({
+        items: [{ id: "inspect", title: "Inspect the page", status: "active" }],
+      }),
+      JSON.stringify({
+        type: "browser_actions",
+        thought: "Wait before inspecting.",
+        actions: [
+          {
+            id: "wait_for_page",
+            kind: "wait",
+            reason: "Give the page time to settle.",
+            requiresApproval: false,
+            toolCalls: [
+              { id: "click_tool", type: "click" },
+              { id: "wait_tool", type: "wait" },
+              { id: "bad_tool", type: "input_text" },
+            ],
+          },
+        ],
+      }),
+      JSON.stringify({
+        type: "final_answer",
+        thought: "Recovered after invalid wait.",
+        finalAnswer: "done after retry",
+        confidence: 1,
+      }),
+    ])
+    const agent = new PythonAgentAdapter({
+      id: "plan-act",
+      name: "PlanAct",
+      description: "Plans before acting",
+      command: [python, resolve(repoAgentsDir, "plan-act/main.py")],
+      protocol: "jsonl",
+      model,
+    })
+
+    const decision = await agent.step(state(), ctx())
+
+    expect(decision).toEqual({
+      type: "final_answer",
+      thought: "Recovered after invalid wait.",
+      finalAnswer: "done after retry",
+      confidence: 1,
+    })
+    expect(model.requests).toHaveLength(3)
+    expect(model.requests[2]?.messages.at(-1)?.content).toContain("Previous response was invalid")
+    expect(model.requests[2]?.messages.at(-1)?.content).toContain("decision.actions[0].toolCalls[0].target")
+    expect(model.requests[2]?.messages.at(-1)?.content).toContain("decision.actions[0].toolCalls[1].ms")
+    expect(model.requests[2]?.messages.at(-1)?.content).toContain("decision.actions[0].toolCalls[2].type")
   })
 
   it("includes stderr when the process exits non-zero", async () => {

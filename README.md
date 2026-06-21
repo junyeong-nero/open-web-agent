@@ -88,7 +88,7 @@ Inside the TUI, slash commands control runtime selection and session state:
 /quit
 ```
 
-Selecting an agent, model, browser, or reasoning effort from the TUI persists the choice to `~/.openwebagents/config.yaml`, so the next TUI session starts with the same defaults.
+Selecting an agent, model, browser, or reasoning effort from the TUI persists the choice to `$OWA_HOME/config.yaml` or `~/.open-web-agent/config.yaml`, so the next TUI session starts with the same defaults.
 
 ## Runtime Options
 
@@ -145,10 +145,10 @@ Shared Python helpers are available in `agents/_common`. The included examples d
 
 ## Configuration
 
-Open Web Agent reads user-level runtime settings from:
+Open Web Agent reads user-level runtime settings from `OWA_HOME` when set, otherwise:
 
 ```text
-~/.openwebagents/config.yaml
+~/.open-web-agent/config.yaml
 ```
 
 Example:
@@ -158,6 +158,7 @@ model: "nvidia/nemotron-3-super-120b-a12b:free"
 model_provider: "openrouter"
 agent: "see-act"
 browser: "playwright-browser"
+browser_headless: false
 browser_prevent_focus: true
 reasoning_effort: "medium"
 context_window_tokens: 128000
@@ -183,6 +184,8 @@ parameters:
   #   reasoning_effort: "low"
 ```
 
+`browser_headless` controls whether the local Playwright browser launches headlessly. The shorter `headless` key is accepted as an alias.
+
 Environment variables take precedence over YAML:
 
 ```text
@@ -190,7 +193,9 @@ OPEN_WEB_AGENT_MODEL
 OPEN_WEB_AGENT_MODEL_PROVIDER
 OPEN_WEB_AGENT_AGENT
 OPEN_WEB_AGENT_BROWSER
+OPEN_WEB_AGENT_BROWSER_HEADLESS
 OPEN_WEB_AGENT_BROWSER_PREVENT_FOCUS
+OPEN_WEB_AGENT_BROWSER_HEADLESS
 OPEN_WEB_AGENT_REASONING_EFFORT
 OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS
 OPEN_WEB_AGENT_MAX_RETRY
@@ -210,7 +215,7 @@ If Codex file-backed ChatGPT auth is available at `codex_auth_path`, or if `CODE
 
 ## Local Data
 
-Runtime data is stored under `OWA_HOME` when set, otherwise:
+Runtime data and user-level config are stored under `OWA_HOME` when set, otherwise:
 
 ```text
 ~/.open-web-agent
@@ -222,7 +227,7 @@ Session metadata is stored in SQLite at `$OWA_HOME/metadata.sqlite`. Run traces 
 $OWA_HOME/projects/<sha256(project-path)>/sessions/<session-id>/runs/<run-id>/events.jsonl
 ```
 
-The config directory (`~/.openwebagents`) and runtime data directory (`~/.open-web-agent`) are intentionally different.
+For compatibility, a legacy config at `~/.openwebagents/config.yaml` is read when the unified config file does not exist. New writes go to `~/.open-web-agent/config.yaml`.
 
 ## Server API
 
@@ -270,9 +275,9 @@ This is a Bun monorepo. Use `bun`, not `npm` or `yarn`.
 
 ```bash
 bun run typecheck
-bun test
-bun test packages/core/src/events/event-bus.test.ts
-bun test -t "publishes events"
+bun run test
+OPEN_WEB_AGENT_BROWSER_HEADLESS=true bun test packages/core/src/events/event-bus.test.ts
+OPEN_WEB_AGENT_BROWSER_HEADLESS=true bun test packages/*/src -t "publishes events"
 ```
 
 Always run `bun run typecheck` after changes. Tests that exercise orchestrator or storage paths should set `OWA_HOME` to a temp directory so local developer data is not touched.

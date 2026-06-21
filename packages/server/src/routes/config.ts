@@ -6,6 +6,7 @@ import { UpdateAgentConfigRequestSchema, UpdateBrowserConfigRequestSchema, Updat
 export interface ConfigRouteDeps {
   registry: PluginRegistry
   modelConfigPath?: string
+  modelConfigEnv?: NodeJS.ProcessEnv
 }
 
 export function registerConfigRoutes(app: Hono, deps: ConfigRouteDeps): void {
@@ -24,7 +25,7 @@ export function registerConfigRoutes(app: Hono, deps: ConfigRouteDeps): void {
 
     await writeModelSelectionConfig(
       { modelId: model.id, modelName: model.modelName ?? null, reasoningEffort },
-      { configPath: deps.modelConfigPath },
+      { configPath: deps.modelConfigPath, env: deps.modelConfigEnv },
     )
 
     return c.json({ modelId: model.id, modelName: model.modelName ?? null, reasoningEffort })
@@ -37,7 +38,7 @@ export function registerConfigRoutes(app: Hono, deps: ConfigRouteDeps): void {
     const agent = deps.registry.listAgents().find((candidate) => candidate.id === parsed.data.agentId)
     if (!agent) return c.json({ error: "Unknown agent" }, 400)
 
-    await writeAgentSelectionConfig({ agentId: agent.id }, { configPath: deps.modelConfigPath })
+    await writeAgentSelectionConfig({ agentId: agent.id }, { configPath: deps.modelConfigPath, env: deps.modelConfigEnv })
 
     return c.json({ agentId: agent.id })
   })
@@ -49,7 +50,7 @@ export function registerConfigRoutes(app: Hono, deps: ConfigRouteDeps): void {
     const browser = deps.registry.listEnvironments().find((candidate) => candidate.id === parsed.data.browserId)
     if (!browser) return c.json({ error: "Unknown browser" }, 400)
 
-    await writeBrowserSelectionConfig({ browserId: browser.id }, { configPath: deps.modelConfigPath })
+    await writeBrowserSelectionConfig({ browserId: browser.id }, { configPath: deps.modelConfigPath, env: deps.modelConfigEnv })
 
     return c.json({ browserId: browser.id })
   })
