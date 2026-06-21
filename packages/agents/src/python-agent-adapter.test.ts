@@ -103,6 +103,23 @@ function messageText(content: ModelRequest["messages"][number]["content"]): stri
   return typeof content === "string" ? content : JSON.stringify(content)
 }
 
+class SequenceModel extends FakeModel {
+  constructor(private readonly responses: string[]) {
+    super()
+  }
+
+  override async complete(request: ModelRequest): Promise<ModelResponse> {
+    this.requests.push(request)
+    return {
+      id: `fake-response-${this.requests.length}`,
+      text: this.responses.shift() ?? this.responses.at(-1) ?? "",
+      raw: { ok: true },
+      usage: null,
+      latencyMs: 0,
+    }
+  }
+}
+
 describe("PythonAgentAdapter", () => {
   it("runs BaseAgent subclasses that return final answers", async () => {
     const script = await writePythonScript(`
@@ -595,6 +612,59 @@ if __name__ == "__main__":
     expect(model.decisionPrompts).toHaveLength(2)
     expect(model.decisionPrompts[1]).toContain("Previous response was invalid")
     expect(model.decisionPrompts[1]).toContain('"type":"open"')
+  })
+
+  it("lets plan-act retry model decisions that fail tool-call schema validation", async () => {
+    const model = new SequenceModel([
+      JSON.stringify({
+        items: [{ id: "inspect", title: "Inspect the page", status: "active" }],
+      }),
+      JSON.stringify({
+        type: "browser_actions",
+        thought: "Wait before inspecting.",
+        actions: [
+          {
+            id: "wait_for_page",
+            kind: "wait",
+            reason: "Give the page time to settle.",
+            requiresApproval: false,
+            toolCalls: [
+              { id: "click_tool", type: "click" },
+              { id: "wait_tool", type: "wait" },
+              { id: "bad_tool", type: "input_text" },
+            ],
+          },
+        ],
+      }),
+      JSON.stringify({
+        type: "final_answer",
+        thought: "Recovered after invalid wait.",
+        finalAnswer: "done after retry",
+        confidence: 1,
+      }),
+    ])
+    const agent = new PythonAgentAdapter({
+      id: "plan-act",
+      name: "PlanAct",
+      description: "Plans before acting",
+      command: [python, resolve(repoAgentsDir, "plan-act/main.py")],
+      protocol: "jsonl",
+      model,
+    })
+
+    const decision = await agent.step(state(), ctx())
+
+    expect(decision).toEqual({
+      type: "final_answer",
+      thought: "Recovered after invalid wait.",
+      finalAnswer: "done after retry",
+      confidence: 1,
+    })
+    expect(model.requests).toHaveLength(3)
+    expect(model.requests[2]?.messages.at(-1)?.content).toContain("Previous response was invalid")
+    expect(model.requests[2]?.messages.at(-1)?.content).toContain("decision.actions[0].toolCalls[0].target")
+    expect(model.requests[2]?.messages.at(-1)?.content).toContain("decision.actions[0].toolCalls[1].ms")
+    expect(model.requests[2]?.messages.at(-1)?.content).toContain("decision.actions[0].toolCalls[2].type")
   })
 
   it("includes stderr when the process exits non-zero", async () => {

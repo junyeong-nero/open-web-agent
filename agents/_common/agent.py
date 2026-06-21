@@ -10,6 +10,7 @@ from .protocol import (
     normalize_decision,
     parse_json_object,
     read_request,
+    validate_agent_decision,
 )
 
 
@@ -333,7 +334,7 @@ class ActionFactory:
 
 class DecisionFactory:
     def from_model(self, value):
-        return normalize_decision(value)
+        return validate_agent_decision(normalize_decision(value))
 
 
 def single_tool_decision(action_id, kind, reason, tool_call):
