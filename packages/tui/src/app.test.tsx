@@ -10,7 +10,7 @@ afterEach(() => {
   for (const server of servers.splice(0)) server.stop(true)
 })
 
-describe("App", () => {
+describe.serial("App", () => {
   it("does not block prompt commands on slow history persistence", async () => {
     const createdSessions: unknown[] = []
     const server = startTuiServer({ onCreateSession: (body) => createdSessions.push(body) })
