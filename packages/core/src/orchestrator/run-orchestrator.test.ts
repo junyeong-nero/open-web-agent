@@ -194,6 +194,47 @@ class RecoveringAgent implements AgentPlugin {
   }
 }
 
+class ApprovalRequiredAgent implements AgentPlugin {
+  id = "approval-required-agent"
+  name = "Approval Required Agent"
+  description = "Requests an approval-gated browser action."
+  failedMessagesSeen: string[][] = []
+
+  async initialize(): Promise<void> {}
+
+  async step(state: AgentState): Promise<AgentDecision> {
+    this.failedMessagesSeen.push(
+      state.steps.flatMap((step) =>
+        step.actionResults
+          .filter((result) => !result.ok)
+          .map((result) => result.message ?? "Browser tool failed"),
+      ),
+    )
+
+    if (state.steps.length === 0) {
+      return {
+        type: "browser_actions",
+        thought: "This navigation requires human approval.",
+        actions: [
+          {
+            id: "action_needs_approval",
+            kind: "sensitive_navigation",
+            reason: "This action is approval-gated.",
+            requiresApproval: true,
+            toolCalls: [{ id: "tool_sensitive", type: "navigate", url: "https://example.com" }],
+          },
+        ],
+      }
+    }
+
+    return { type: "final_answer", thought: null, finalAnswer: "Approval required before continuing.", confidence: 1 }
+  }
+
+  async finalize(state: AgentState): Promise<string> {
+    return state.finalAnswer ?? "Approval required before continuing."
+  }
+}
+
 function target(selector: string): Extract<BrowserToolCall, { type: "click" | "type" }>["target"] {
   return {
     elementId: null,
@@ -443,5 +484,31 @@ describe("RunOrchestrator", () => {
     expect(agent.failedResultsSeen).toEqual([0, 1, 1])
     expect(toolAdapter.calls.map((call) => call.type)).toEqual(["click", "navigate"])
     expect(setup.observedEvents.map((event) => event.type)).not.toContain("run.failed")
+  })
+
+  it("requests human approval and skips browser tools for approval-gated actions", async () => {
+    const environment = new TestEnvironment()
+    const agent = new ApprovalRequiredAgent()
+    const toolAdapter = new TestBrowserToolAdapter(environment)
+    const setup = await orchestratorWith(agent, environment, toolAdapter)
+    const started = setup.orchestrator.startRun({
+      session: session(),
+      prompt: "perform the sensitive browser action",
+    })
+
+    const result = await started.result
+
+    expect(result.status).toBe("completed")
+    expect(toolAdapter.calls).toEqual([])
+    expect(agent.failedMessagesSeen).toEqual([[], ["Browser action requires human approval before execution"]])
+    expect(setup.observedEvents.map((event) => event.type)).toContain("human.approval.requested")
+    expect(setup.observedEvents.map((event) => event.type)).not.toContain("browser.tool.started")
+    const approvalEvent = setup.observedEvents.find((event) => event.type === "human.approval.requested")
+    expect(approvalEvent?.payload).toMatchObject({
+      action: {
+        id: "action_needs_approval",
+        requiresApproval: true,
+      },
+    })
   })
 })

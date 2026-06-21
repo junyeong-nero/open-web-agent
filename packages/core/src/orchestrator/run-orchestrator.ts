@@ -190,16 +190,27 @@ export class RunOrchestrator {
       await ctx.emit("browser.action.started", { action }, stepId)
       let actionFailed = false
 
-      for (const toolCall of action.toolCalls) {
-        throwIfAborted(ctx.abortSignal)
-        await ctx.emit("browser.tool.started", { actionId: action.id, toolCall }, stepId)
-        const result = await executeBrowserTool(toolAdapter, toolCall, ctx, environment)
-        actionResults.push(result)
-        await ctx.emit("browser.tool.completed", { actionId: action.id, toolCall, result }, stepId)
+      if (action.requiresApproval) {
+        await ctx.emit("human.approval.requested", { action }, stepId)
+        actionResults.push({
+          ok: false,
+          message: "Browser action requires human approval before execution",
+          observation: null,
+          metadata: { actionId: action.id, requiresApproval: true },
+        })
+        actionFailed = true
+      } else {
+        for (const toolCall of action.toolCalls) {
+          throwIfAborted(ctx.abortSignal)
+          await ctx.emit("browser.tool.started", { actionId: action.id, toolCall }, stepId)
+          const result = await executeBrowserTool(toolAdapter, toolCall, ctx, environment)
+          actionResults.push(result)
+          await ctx.emit("browser.tool.completed", { actionId: action.id, toolCall, result }, stepId)
 
-        if (!result.ok) {
-          actionFailed = true
-          break
+          if (!result.ok) {
+            actionFailed = true
+            break
+          }
         }
       }
 
