@@ -31,6 +31,7 @@ async function setup(
   includeAlternateAgent = false,
   includeRuntimePlugins = false,
   modelConfigPath?: string,
+  onBrowserHeadlessChanged?: (browserHeadless: boolean) => void | Promise<void>,
 ) {
   const eventBus = new EventBus()
   const registry = new PluginRegistry()
@@ -56,7 +57,7 @@ async function setup(
   })
 
   const sessions = new Map()
-  const app = createApp({ eventBus, orchestrator, registry, sessions, storage, modelConfigPath })
+  const app = createApp({ eventBus, orchestrator, registry, sessions, storage, modelConfigPath, onBrowserHeadlessChanged })
 
   return {
     app,
@@ -854,6 +855,25 @@ describe("createApp", () => {
     expect(readModelConfig({}, { configPath })).toMatchObject({
       defaultBrowserId: "alternate-browser",
     })
+  })
+
+  it("PATCH /config/browser/headless persists and applies the browser headless preference", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-server-config-"))
+    const configPath = join(dir, ".config.yaml")
+    const applied: boolean[] = []
+    const { request } = await setup(0, undefined, false, true, configPath, (browserHeadless) => {
+      applied.push(browserHeadless)
+    })
+
+    const response = await request("/config/browser/headless", {
+      method: "PATCH",
+      body: JSON.stringify({ browserHeadless: true }),
+    })
+    const body = await json<{ browserHeadless: boolean }>(response)
+
+    expect(body).toEqual({ browserHeadless: true })
+    expect(applied).toEqual([true])
+    expect(readModelConfig({}, { configPath }).browserHeadless).toBe(true)
   })
 
   it("PATCH /config/browser rejects an unknown browser", async () => {

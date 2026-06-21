@@ -186,6 +186,12 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   })
   const storage = new SQLiteStore(join(home, "metadata.sqlite"))
   storage.migrate()
+  const runtimeDefaults = {
+    agentId: defaultAgentId,
+    modelId: modelConfig.defaultModelProvider ? defaultModelId : null,
+    environmentId: defaultEnvironmentId,
+    browserHeadless: modelConfig.browserHeadless,
+  }
   const app = createApp({
     eventBus,
     orchestrator,
@@ -195,11 +201,12 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     browserSessions,
     modelConfigPath: options.configPath,
     modelConfigEnv: env,
-    runtimeDefaults: {
-      agentId: defaultAgentId,
-      modelId: modelConfig.defaultModelProvider ? defaultModelId : null,
-      environmentId: defaultEnvironmentId,
+    onBrowserHeadlessChanged: async (browserHeadless) => {
+      playwrightEnvironment.setHeadless(browserHeadless)
+      runtimeDefaults.browserHeadless = browserHeadless
+      await browserSessions.closeAll()
     },
+    runtimeDefaults,
   })
   const server = await startServer({
     app,

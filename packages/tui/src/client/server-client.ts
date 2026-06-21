@@ -24,6 +24,7 @@ export interface PluginList {
     agentId?: string | null
     modelId?: string | null
     environmentId?: string | null
+    browserHeadless?: boolean | null
   }
 }
 
@@ -98,6 +99,12 @@ export function createServerClient(baseUrl: string) {
       return request(`${baseUrl}/config/browser`, {
         method: "PATCH",
         body: JSON.stringify({ browserId }),
+      })
+    },
+    async setBrowserHeadless(browserHeadless: boolean): Promise<{ browserHeadless: boolean }> {
+      return request(`${baseUrl}/config/browser/headless`, {
+        method: "PATCH",
+        body: JSON.stringify({ browserHeadless }),
       })
     },
   }

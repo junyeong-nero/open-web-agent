@@ -32,7 +32,7 @@ export function sessionTitle(state: TuiState): string {
 }
 
 export function sessionMeta(state: TuiState): string {
-  return `${state.runStatus} · ${state.selectedAgentId} · ${state.selectedEnvironmentId}`
+  return `${state.runStatus} · ${state.selectedAgentId} · ${state.selectedEnvironmentId} · ${state.browserHeadless ? "headless" : "headed"}`
 }
 
 export function toTranscriptViewItem(item: RunLogItem): TranscriptViewItem {

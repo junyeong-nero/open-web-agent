@@ -41,6 +41,10 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
 
   constructor(private readonly options: PlaywrightEnvironmentOptions = {}) {}
 
+  setHeadless(headless: boolean): void {
+    this.options.headless = headless
+  }
+
   async openSession(ctx: RuntimeContext): Promise<void> {
     await this.ensureState(ctx)
   }

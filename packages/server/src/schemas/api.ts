@@ -36,9 +36,14 @@ export const UpdateBrowserConfigRequestSchema = z.object({
   browserId: z.string().min(1),
 })
 
+export const UpdateBrowserHeadlessConfigRequestSchema = z.object({
+  browserHeadless: z.boolean(),
+})
+
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequestSchema>
 export type UpdateSessionRequest = z.infer<typeof UpdateSessionRequestSchema>
 export type CreateRunRequest = z.infer<typeof CreateRunRequestSchema>
 export type UpdateModelConfigRequest = z.infer<typeof UpdateModelConfigRequestSchema>
 export type UpdateAgentConfigRequest = z.infer<typeof UpdateAgentConfigRequestSchema>
 export type UpdateBrowserConfigRequest = z.infer<typeof UpdateBrowserConfigRequestSchema>
+export type UpdateBrowserHeadlessConfigRequest = z.infer<typeof UpdateBrowserHeadlessConfigRequestSchema>

@@ -51,7 +51,8 @@ describe("session shell formatting", () => {
   })
 
   it("formats compact session metadata", () => {
-    expect(sessionMeta(stateWithLog())).toBe("completed · simple-react-agent · playwright-browser")
+    expect(sessionMeta(stateWithLog())).toBe("completed · simple-react-agent · playwright-browser · headed")
+    expect(sessionMeta({ ...stateWithLog(), browserHeadless: true })).toBe("completed · simple-react-agent · playwright-browser · headless")
   })
 
   it("resolves the selected agent display name with id fallback", () => {
