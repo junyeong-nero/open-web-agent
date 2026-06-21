@@ -17,6 +17,7 @@ describe("runCommand", () => {
       {
         env: {
           OWA_HOME: home,
+          OPEN_WEB_AGENT_BROWSER_HEADLESS: "true",
           OPEN_WEB_AGENT_CODEX_AUTH_PATH: join(home, "missing-codex-auth.json"),
         },
         configPath: join(home, "missing-config.yaml"),
@@ -68,6 +69,7 @@ describe("runCommand", () => {
             OWA_HOME: home,
             OPENAI_API_KEY: "test-openai-key",
             OPEN_WEB_AGENT_MODEL: "gpt-test",
+            OPEN_WEB_AGENT_BROWSER_HEADLESS: "true",
             OPEN_WEB_AGENT_CODEX_AUTH_PATH: join(home, "missing-codex-auth.json"),
           },
           configPath: join(home, "missing-config.yaml"),

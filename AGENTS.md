@@ -13,9 +13,9 @@ This is a **Bun** monorepo (not Node/npm). Use `bun`, never `npm`/`yarn`.
 ```bash
 bun install                 # install workspace deps
 bun run typecheck           # tsc -b across all package project references
-bun test                    # run all tests (bun's built-in runner)
-bun test packages/core/src/events/event-bus.test.ts   # single file
-bun test -t "publishes events"                         # by test-name substring
+bun run test                # run all source tests headless
+OPEN_WEB_AGENT_BROWSER_HEADLESS=true bun test packages/core/src/events/event-bus.test.ts   # single file
+OPEN_WEB_AGENT_BROWSER_HEADLESS=true bun test packages/*/src -t "publishes events"          # by test-name substring
 ```
 
 Run the CLI directly from source (no build step — packages resolve via `main: ./src/index.ts`):
