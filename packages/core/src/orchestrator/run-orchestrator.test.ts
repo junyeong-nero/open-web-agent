@@ -194,6 +194,41 @@ class RecoveringAgent implements AgentPlugin {
   }
 }
 
+class ApprovalRequiredAgent implements AgentPlugin {
+  id = "approval-required-agent"
+  name = "Approval Required Agent"
+  description = "Requests an approval-gated browser action."
+  failedResultsSeen: number[] = []
+
+  async initialize(): Promise<void> {}
+
+  async step(state: AgentState): Promise<AgentDecision> {
+    this.failedResultsSeen.push(state.steps.flatMap((step) => step.actionResults).filter((result) => !result.ok).length)
+
+    if (state.steps.length === 0) {
+      return {
+        type: "browser_actions",
+        thought: "Navigate only after human approval.",
+        actions: [
+          {
+            id: "action_requires_approval",
+            kind: "navigate_sensitive_page",
+            reason: "Sensitive action requires explicit approval.",
+            requiresApproval: true,
+            toolCalls: [{ id: "tool_sensitive_nav", type: "navigate", url: "https://example.com" }],
+          },
+        ],
+      }
+    }
+
+    return { type: "final_answer", thought: null, finalAnswer: "approval requested", confidence: 1 }
+  }
+
+  async finalize(state: AgentState): Promise<string> {
+    return state.finalAnswer ?? "approval requested"
+  }
+}
+
 function target(selector: string): Extract<BrowserToolCall, { type: "click" | "type" }>["target"] {
   return {
     elementId: null,
@@ -443,5 +478,42 @@ describe("RunOrchestrator", () => {
     expect(agent.failedResultsSeen).toEqual([0, 1, 1])
     expect(toolAdapter.calls.map((call) => call.type)).toEqual(["click", "navigate"])
     expect(setup.observedEvents.map((event) => event.type)).not.toContain("run.failed")
+  })
+
+  it("requests human approval and skips browser tools for approval-gated actions", async () => {
+    const environment = new TestEnvironment()
+    const agent = new ApprovalRequiredAgent()
+    const toolAdapter = new TestBrowserToolAdapter(environment)
+    const setup = await orchestratorWith(agent, environment, toolAdapter)
+    const started = setup.orchestrator.startRun({
+      session: session(),
+      prompt: "navigate only after approval",
+    })
+
+    const result = await started.result
+
+    expect(result.status).toBe("completed")
+    expect(result.finalAnswer).toBe("approval requested")
+    expect(agent.failedResultsSeen).toEqual([0, 1])
+    expect(toolAdapter.calls).toEqual([])
+
+    const eventTypes = setup.observedEvents.map((event) => event.type)
+    expect(eventTypes).toContain("human.approval.requested")
+    expect(eventTypes).not.toContain("browser.tool.started")
+    expect(eventTypes).not.toContain("browser.tool.completed")
+
+    const approvalEvent = setup.observedEvents.find((event) => event.type === "human.approval.requested")
+    expect(approvalEvent?.payload.action).toMatchObject({
+      id: "action_requires_approval",
+      requiresApproval: true,
+    })
+
+    const actionCompletedEvent = setup.observedEvents.find((event) => event.type === "browser.action.completed")
+    expect(actionCompletedEvent?.payload.actionResults).toMatchObject([
+      {
+        ok: false,
+        message: "Browser action requires human approval before tools can run.",
+      },
+    ])
   })
 })

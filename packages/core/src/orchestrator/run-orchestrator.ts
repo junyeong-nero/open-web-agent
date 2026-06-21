@@ -33,6 +33,8 @@ export interface StartedRun {
   result: Promise<RunResult>
 }
 
+const APPROVAL_REQUIRED_MESSAGE = "Browser action requires human approval before tools can run."
+
 export class RunOrchestrator {
   private readonly activeRuns = new Map<string, AbortController>()
   private readonly now: () => Date
@@ -190,16 +192,32 @@ export class RunOrchestrator {
       await ctx.emit("browser.action.started", { action }, stepId)
       let actionFailed = false
 
-      for (const toolCall of action.toolCalls) {
-        throwIfAborted(ctx.abortSignal)
-        await ctx.emit("browser.tool.started", { actionId: action.id, toolCall }, stepId)
-        const result = await executeBrowserTool(toolAdapter, toolCall, ctx, environment)
+      throwIfAborted(ctx.abortSignal)
+      if (action.requiresApproval) {
+        await ctx.emit("human.approval.requested", { action }, stepId)
+        const result: ActionResult = {
+          ok: false,
+          message: APPROVAL_REQUIRED_MESSAGE,
+          observation: await observeSafely(environment, ctx),
+          metadata: {
+            approvalRequired: true,
+            actionId: action.id,
+          },
+        }
         actionResults.push(result)
-        await ctx.emit("browser.tool.completed", { actionId: action.id, toolCall, result }, stepId)
+        actionFailed = true
+      } else {
+        for (const toolCall of action.toolCalls) {
+          throwIfAborted(ctx.abortSignal)
+          await ctx.emit("browser.tool.started", { actionId: action.id, toolCall }, stepId)
+          const result = await executeBrowserTool(toolAdapter, toolCall, ctx, environment)
+          actionResults.push(result)
+          await ctx.emit("browser.tool.completed", { actionId: action.id, toolCall, result }, stepId)
 
-        if (!result.ok) {
-          actionFailed = true
-          break
+          if (!result.ok) {
+            actionFailed = true
+            break
+          }
         }
       }
 
@@ -227,7 +245,7 @@ async function executeBrowserTool(
     return {
       ok: false,
       message: error instanceof Error ? error.message : String(error),
-      observation: await observeAfterToolFailure(environment, ctx),
+      observation: await observeSafely(environment, ctx),
       metadata: {
         errorName: error instanceof Error ? error.name : null,
       },
@@ -235,7 +253,7 @@ async function executeBrowserTool(
   }
 }
 
-async function observeAfterToolFailure(environment: BrowserEnvironment, ctx: RuntimeContext): Promise<ActionResult["observation"]> {
+async function observeSafely(environment: BrowserEnvironment, ctx: RuntimeContext): Promise<ActionResult["observation"]> {
   try {
     return await environment.observe(ctx)
   } catch (error) {
