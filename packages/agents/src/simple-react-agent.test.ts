@@ -129,6 +129,30 @@ describe("formatObservationForPrompt", () => {
     expect(formatObservationForPrompt(state().lastObservation)).toContain("Title: Example Domain")
     expect(formatObservationForPrompt(state().lastObservation)).toContain("#continue")
   })
+
+  it("redacts sensitive interactive element values", () => {
+    const observation = {
+      ...state().lastObservation!,
+      interactiveElements: [
+        {
+          id: "password",
+          role: "input",
+          name: "new-secret",
+          text: "new-secret",
+          selector: "#password",
+          xpath: null,
+          boundingBox: null,
+          attributes: { type: "password", value: "initial-secret" },
+        },
+      ],
+    }
+
+    const prompt = formatObservationForPrompt(observation)
+
+    expect(prompt).toContain("[redacted]")
+    expect(prompt).not.toContain("initial-secret")
+    expect(prompt).not.toContain("new-secret")
+  })
 })
 
 describe("SimpleReActAgent", () => {
@@ -669,5 +693,35 @@ describe("SimpleReActAgent", () => {
     await expect(new SimpleReActAgent({ model, modelName: "fake", timeoutMs: 5 }).step(state(), ctx())).rejects.toThrow(
       "timed out",
     )
+  })
+
+  it("aborts timed out model calls", async () => {
+    let aborted = false
+    const modelSignals: AbortSignal[] = []
+    const model: ModelPlugin = {
+      id: "slow",
+      name: "Slow",
+      provider: "test",
+      complete: (_request, modelCtx) => {
+        modelSignals.push(modelCtx.abortSignal)
+        return new Promise((_resolve, reject) => {
+          modelCtx.abortSignal.addEventListener(
+            "abort",
+            () => {
+              aborted = true
+              reject(modelCtx.abortSignal.reason)
+            },
+            { once: true },
+          )
+        })
+      },
+    }
+
+    await expect(new SimpleReActAgent({ model, modelName: "fake", timeoutMs: 5 }).step(state(), ctx())).rejects.toThrow(
+      "timed out",
+    )
+
+    expect(aborted).toBe(true)
+    expect(modelSignals[0]?.aborted).toBe(true)
   })
 })

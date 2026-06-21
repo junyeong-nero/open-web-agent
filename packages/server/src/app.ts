@@ -8,6 +8,7 @@ import { registerHealthRoutes } from "./routes/health"
 import { registerPluginRoutes } from "./routes/plugins"
 import { registerRunRoutes, type RunRecord } from "./routes/runs"
 import { registerSessionRoutes } from "./routes/sessions"
+import { rejectUntrustedLocalRequest } from "./request-guard"
 
 export interface CreateAppDeps {
   eventBus: EventBus
@@ -37,6 +38,12 @@ export function createApp(deps: CreateAppDeps): Hono {
       registry: deps.registry,
       defaultEnvironmentId: deps.orchestrator.defaultEnvironmentId,
     })
+
+  app.use("*", async (c, next) => {
+    const rejection = rejectUntrustedLocalRequest(c.req.raw)
+    if (rejection) return c.json({ error: rejection.error }, rejection.status)
+    await next()
+  })
 
   registerHealthRoutes(app)
   registerEventRoutes(app, { eventBus: deps.eventBus })

@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto"
 import type { SQLiteStore } from "@open-web-agent/storage"
 import { CreateRunRequestSchema } from "../schemas/api"
 import type { BrowserSessionManager } from "../browser-session-manager"
+import { readJsonBody } from "./json-body"
 
 export interface RunRecord {
   runId: string
@@ -23,12 +24,15 @@ export interface RunRouteDeps {
 
 export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
   app.post("/runs", async (c) => {
-    const parsed = CreateRunRequestSchema.safeParse(await readJson(c.req))
+    const body = await readJsonBody(c.req)
+    if (!body.ok) return c.json({ error: body.error }, body.status)
+    const parsed = CreateRunRequestSchema.safeParse(body.value)
     if (!parsed.success) return c.json({ error: "Invalid run request" }, 400)
 
     const session = deps.sessions.get(parsed.data.sessionId) ?? deps.storage?.getSession(parsed.data.sessionId)
     if (!session || session.deletedAt) return c.json({ error: "Unknown session" }, 404)
     deps.sessions.set(session.id, session)
+    if (hasRunningRun(session.id, deps.runs)) return c.json({ error: "Session has a running run" }, 409)
 
     if (parsed.data.agentId && !deps.registry.listAgents().some((agent) => agent.id === parsed.data.agentId)) {
       return c.json({ error: "Unknown agent" }, 400)
@@ -56,15 +60,24 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
         createdAt: runSession.createdAt,
       })
     }
-    await deps.browserSessions.attach(runSession, environmentId)
+    const pendingRunId = `pending_${randomUUID().replaceAll("-", "")}`
+    deps.runs.set(pendingRunId, { runId: pendingRunId, sessionId: runSession.id, status: "running", finalAnswer: null })
 
-    const started = deps.orchestrator.startRun({
-      session: runSession,
-      prompt: parsed.data.prompt,
-      agentId: parsed.data.agentId,
-      modelId: parsed.data.modelId,
-      environmentId,
-    })
+    let started: ReturnType<RunOrchestrator["startRun"]>
+    try {
+      await deps.browserSessions.attach(runSession, environmentId)
+      started = deps.orchestrator.startRun({
+        session: runSession,
+        prompt: parsed.data.prompt,
+        agentId: parsed.data.agentId,
+        modelId: parsed.data.modelId,
+        environmentId,
+      })
+    } catch (error) {
+      deps.runs.delete(pendingRunId)
+      throw error
+    }
+    deps.runs.delete(pendingRunId)
     deps.runs.set(started.runId, { runId: started.runId, sessionId: runSession.id, status: "running", finalAnswer: null })
     const createdAt = new Date().toISOString()
     deps.storage?.upsertRun({
@@ -145,6 +158,9 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
   })
 }
 
-async function readJson(request: { json(): Promise<unknown> }): Promise<unknown> {
-  return request.json().catch(() => null)
+function hasRunningRun(sessionId: string, runs: Map<string, RunRecord>): boolean {
+  for (const run of runs.values()) {
+    if (run.sessionId === sessionId && run.status === "running") return true
+  }
+  return false
 }

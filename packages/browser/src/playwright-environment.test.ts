@@ -37,6 +37,7 @@ function fixtureHtml(): string {
       <body>
         <button id="toggle">Reveal</button>
         <input id="name" aria-label="Name" />
+        <input id="password" type="password" value="initial-secret" />
         <input id="hidden-token" type="hidden" name="where" value="nexearch" />
         <button id="hidden-button" style="display: none">Hidden</button>
         <main id="status">Idle</main>
@@ -443,6 +444,38 @@ describe("PlaywrightEnvironment", () => {
     })
   })
 
+  it("closes the session when a browser tool is aborted", async () => {
+    const abort = new AbortController()
+    const ctx = await context("ses_1", "run_1", abort.signal)
+    let closeCalls = 0
+    let wheelStarted!: () => void
+    const wheelStartedPromise = new Promise<void>((resolve) => {
+      wheelStarted = resolve
+    })
+    const environment = {
+      pageForTools: () => ({
+        mouse: {
+          wheel: () =>
+            new Promise<void>(() => {
+              wheelStarted()
+            }),
+        },
+      }),
+      close: async () => {
+        closeCalls += 1
+      },
+      observe: async () => null,
+    }
+    const tools = new PlaywrightBrowserToolAdapter(environment as unknown as PlaywrightEnvironment)
+
+    const result = tools.execute({ id: "tool_1", type: "scroll", deltaX: 0, deltaY: 100 }, ctx)
+    await wheelStartedPromise
+    abort.abort()
+
+    await expect(result).rejects.toThrow("Run cancelled")
+    expect(closeCalls).toBe(1)
+  })
+
   it("navigates, interacts with a fixture page, observes text, and captures a screenshot", async () => {
     const env = new PlaywrightEnvironment({ headless: true })
     const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
@@ -469,10 +502,21 @@ describe("PlaywrightEnvironment", () => {
         },
         ctx,
       )
-      await tools.execute({ id: "tool_4", type: "wait", ms: 1 }, ctx)
-      const screenshot = await tools.execute({ id: "tool_5", type: "screenshot" }, ctx)
-      const text = await tools.execute({ id: "tool_6", type: "extract_text" }, ctx)
+      const passwordType = await tools.execute(
+        {
+          id: "tool_4",
+          type: "type",
+          target: { selector: "#password", elementId: null, text: null, role: null, name: null, coordinates: null },
+          value: "new-secret",
+        },
+        ctx,
+      )
+      await tools.execute({ id: "tool_5", type: "wait", ms: 1 }, ctx)
+      const screenshot = await tools.execute({ id: "tool_6", type: "screenshot" }, ctx)
+      const text = await tools.execute({ id: "tool_7", type: "extract_text" }, ctx)
       const observation = await env.observe(ctx)
+      const serialized = JSON.stringify(observation)
+      const password = observation.interactiveElements.find((element) => element.selector === "#password")
 
       expect(observation.title).toBe("Playwright Fixture")
       expect(observation.text).toContain("Typed Ada")
@@ -480,6 +524,12 @@ describe("PlaywrightEnvironment", () => {
       expect(observation.interactiveElements.some((element) => element.selector === "#name")).toBe(true)
       expect(observation.interactiveElements.some((element) => element.selector === "#hidden-token")).toBe(false)
       expect(observation.interactiveElements.some((element) => element.selector === "#hidden-button")).toBe(false)
+      expect(password?.name).toBe("[redacted]")
+      expect(password?.attributes.value).toBe("[redacted]")
+      expect(serialized).not.toContain("initial-secret")
+      expect(serialized).not.toContain("new-secret")
+      expect(passwordType.metadata.value).toBe("[redacted]")
+      expect(JSON.stringify(passwordType)).not.toContain("new-secret")
       expect(text.metadata.text).toContain("Typed Ada")
       expect(screenshot.observation?.screenshotPath).toEndWith(".png")
       expect((await stat(screenshot.observation?.screenshotPath ?? "")).isFile()).toBe(true)

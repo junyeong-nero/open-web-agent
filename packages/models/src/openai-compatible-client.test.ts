@@ -212,4 +212,36 @@ describe("OpenAICompatibleClient", () => {
     expect(response.text).toBe("after retry")
     expect(statuses).toEqual([])
   })
+
+  it("passes abort signals to chat completion fetches without retrying aborts", async () => {
+    const controller = new AbortController()
+    let attempts = 0
+    const client = new OpenAICompatibleClient({
+      baseUrl: "https://provider.test/v1",
+      apiKey: "key_123",
+      maxRetry: 3,
+      fetch: async (_url, init) => {
+        attempts += 1
+        if (init?.signal !== controller.signal) {
+          throw new Error("signal not forwarded")
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true })
+        })
+      },
+    })
+
+    const response = client.complete(
+      {
+        model: "test-model",
+        messages: [{ role: "user", content: "abort" }],
+        responseFormat: "text",
+      },
+      { signal: controller.signal },
+    )
+    controller.abort(new DOMException("cancelled", "AbortError"))
+
+    await expect(response).rejects.toThrow("cancelled")
+    expect(attempts).toBe(1)
+  })
 })

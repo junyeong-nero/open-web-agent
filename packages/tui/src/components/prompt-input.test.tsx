@@ -131,7 +131,9 @@ describe("PromptInput", () => {
           runStatus="idle"
           theme={getTheme("opencode")}
           onChange={() => {}}
-          onSubmit={(value) => submitted.push(value)}
+          onSubmit={(value) => {
+            submitted.push(value)
+          }}
         />
       ),
       { width: 80, height: 12 },
@@ -235,7 +237,9 @@ describe("PromptInput", () => {
           runStatus="idle"
           theme={getTheme("opencode")}
           onChange={() => {}}
-          onSubmit={(value) => submitted.push(value)}
+          onSubmit={(value) => {
+            submitted.push(value)
+          }}
         />
       ),
       { width: 80, height: 12 },

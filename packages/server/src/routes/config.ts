@@ -12,6 +12,7 @@ import {
   UpdateBrowserHeadlessConfigRequestSchema,
   UpdateModelConfigRequestSchema,
 } from "../schemas/api"
+import { readJsonBody } from "./json-body"
 
 export interface ConfigRouteDeps {
   registry: PluginRegistry
@@ -22,7 +23,9 @@ export interface ConfigRouteDeps {
 
 export function registerConfigRoutes(app: Hono, deps: ConfigRouteDeps): void {
   app.patch("/config/model", async (c) => {
-    const parsed = UpdateModelConfigRequestSchema.safeParse(await readJson(c.req))
+    const body = await readJsonBody(c.req)
+    if (!body.ok) return c.json({ error: body.error }, body.status)
+    const parsed = UpdateModelConfigRequestSchema.safeParse(body.value)
     if (!parsed.success) return c.json({ error: "Invalid model config request" }, 400)
 
     const model = deps.registry.listModels().find((candidate) => candidate.id === parsed.data.modelId)
@@ -43,7 +46,9 @@ export function registerConfigRoutes(app: Hono, deps: ConfigRouteDeps): void {
   })
 
   app.patch("/config/agent", async (c) => {
-    const parsed = UpdateAgentConfigRequestSchema.safeParse(await readJson(c.req))
+    const body = await readJsonBody(c.req)
+    if (!body.ok) return c.json({ error: body.error }, body.status)
+    const parsed = UpdateAgentConfigRequestSchema.safeParse(body.value)
     if (!parsed.success) return c.json({ error: "Invalid agent config request" }, 400)
 
     const agent = deps.registry.listAgents().find((candidate) => candidate.id === parsed.data.agentId)
@@ -55,7 +60,9 @@ export function registerConfigRoutes(app: Hono, deps: ConfigRouteDeps): void {
   })
 
   app.patch("/config/browser", async (c) => {
-    const parsed = UpdateBrowserConfigRequestSchema.safeParse(await readJson(c.req))
+    const body = await readJsonBody(c.req)
+    if (!body.ok) return c.json({ error: body.error }, body.status)
+    const parsed = UpdateBrowserConfigRequestSchema.safeParse(body.value)
     if (!parsed.success) return c.json({ error: "Invalid browser config request" }, 400)
 
     const browser = deps.registry.listEnvironments().find((candidate) => candidate.id === parsed.data.browserId)
@@ -67,7 +74,9 @@ export function registerConfigRoutes(app: Hono, deps: ConfigRouteDeps): void {
   })
 
   app.patch("/config/browser/headless", async (c) => {
-    const parsed = UpdateBrowserHeadlessConfigRequestSchema.safeParse(await readJson(c.req))
+    const body = await readJsonBody(c.req)
+    if (!body.ok) return c.json({ error: body.error }, body.status)
+    const parsed = UpdateBrowserHeadlessConfigRequestSchema.safeParse(body.value)
     if (!parsed.success) return c.json({ error: "Invalid browser headless config request" }, 400)
 
     await writeBrowserHeadlessConfig(
@@ -78,8 +87,4 @@ export function registerConfigRoutes(app: Hono, deps: ConfigRouteDeps): void {
 
     return c.json({ browserHeadless: parsed.data.browserHeadless })
   })
-}
-
-async function readJson(request: { json(): Promise<unknown> }): Promise<unknown> {
-  return request.json().catch(() => null)
 }

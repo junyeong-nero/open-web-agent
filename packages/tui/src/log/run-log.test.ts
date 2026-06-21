@@ -37,11 +37,11 @@ describe("toRunLogItem", () => {
       ),
     ).toMatchObject({
       kind: "tool.call",
-      message: "type today weather",
+      message: "type [redacted]",
       accent: "tool",
       toolCall: {
         action: "type",
-        argsJson: '{\n  "target": {\n    "selector": "#query"\n  },\n  "value": "today weather"\n}',
+        argsJson: '{\n  "target": {\n    "selector": "#query"\n  },\n  "value": "[redacted]"\n}',
       },
     })
     expect(

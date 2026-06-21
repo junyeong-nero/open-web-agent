@@ -1,5 +1,6 @@
 import {
   AgentDecisionSchema,
+  redactSensitiveData,
   type AgentDecision,
   type AgentPlugin,
   type AgentState,
@@ -41,7 +42,11 @@ export class SimpleReActAgent implements AgentPlugin {
 
     for (let attempt = 0; attempt <= this.maxParseRetries; attempt += 1) {
       const request = this.buildRequest(state, ctx, lastError, lastRaw)
-      const response = await withTimeout(this.options.model.complete(request, ctx), this.timeoutMs, ctx.abortSignal)
+      const response = await withTimeout(
+        (abortSignal) => this.options.model.complete(request, { ...ctx, abortSignal }),
+        this.timeoutMs,
+        ctx.abortSignal,
+      )
       lastRaw = response.text
 
       try {
@@ -145,8 +150,9 @@ function formatFailedBrowserResults(state: AgentState): string {
 
 export function formatObservationForPrompt(observation: Observation | null): string {
   if (!observation) return "No browser observation has been captured yet."
+  const safeObservation = redactSensitiveData(observation)
 
-  const elements = observation.interactiveElements
+  const elements = safeObservation.interactiveElements
     .slice(0, 20)
     .map((element, index) =>
       [
@@ -160,10 +166,10 @@ export function formatObservationForPrompt(observation: Observation | null): str
     .join("\n")
 
   return [
-    `URL: ${observation.url}`,
-    `Title: ${observation.title ?? ""}`,
+    `URL: ${safeObservation.url}`,
+    `Title: ${safeObservation.title ?? ""}`,
     "Text:",
-    observation.text ?? "",
+    safeObservation.text ?? "",
     "Interactive elements:",
     elements || "None",
   ].join("\n")
@@ -358,25 +364,54 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(new DOMException("Run cancelled", "AbortError"))
+function withTimeout<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<T> {
+  if (signal.aborted) return Promise.reject(abortErrorFromSignal(signal))
+
+  const operationAbort = new AbortController()
 
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error(`Model call timed out after ${timeoutMs}ms`)), timeoutMs)
-    const onAbort = () => reject(new DOMException("Run cancelled", "AbortError"))
+    let settled = false
+    const cleanup = () => {
+      clearTimeout(timeout)
+      signal.removeEventListener("abort", onAbort)
+    }
+    const settleResolve = (value: T) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(value)
+    }
+    const settleReject = (error: unknown) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(error)
+    }
+    const timeout = setTimeout(() => {
+      const error = new Error(`Model call timed out after ${timeoutMs}ms`)
+      operationAbort.abort(error)
+      settleReject(error)
+    }, timeoutMs)
+    const onAbort = () => {
+      const error = abortErrorFromSignal(signal)
+      operationAbort.abort(error)
+      settleReject(error)
+    }
 
     signal.addEventListener("abort", onAbort, { once: true })
-    promise.then(
-      (value) => {
-        clearTimeout(timeout)
-        signal.removeEventListener("abort", onAbort)
-        resolve(value)
-      },
-      (error) => {
-        clearTimeout(timeout)
-        signal.removeEventListener("abort", onAbort)
-        reject(error)
-      },
-    )
+    try {
+      operation(operationAbort.signal).then(settleResolve, settleReject)
+    } catch (error) {
+      settleReject(error)
+    }
   })
+}
+
+function abortErrorFromSignal(signal: AbortSignal): unknown {
+  if (signal.reason instanceof Error && signal.reason.name !== "AbortError") return signal.reason
+  return new DOMException("Run cancelled", "AbortError")
 }
