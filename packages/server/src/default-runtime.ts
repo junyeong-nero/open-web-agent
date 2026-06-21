@@ -55,6 +55,9 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   const registry = new PluginRegistry()
   const modelConfig = readModelConfig(env, { configPath: options.configPath })
   const modelCallTimeoutMs = readModelCallTimeoutMs(env)
+  const allowPrivateNetworkNavigation =
+    readBooleanEnv(env.OPEN_WEB_AGENT_ALLOW_PRIVATE_NETWORK_NAVIGATION, "OPEN_WEB_AGENT_ALLOW_PRIVATE_NETWORK_NAVIGATION") ??
+    false
 
   const models: ModelPlugin[] = []
 
@@ -160,7 +163,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     preventFocus: modelConfig.browserPreventFocus,
   })
   registry.registerEnvironment(playwrightEnvironment)
-  registry.registerToolAdapter(new PlaywrightBrowserToolAdapter(playwrightEnvironment))
+  registry.registerToolAdapter(new PlaywrightBrowserToolAdapter(playwrightEnvironment, { allowPrivateNetworkNavigation }))
   const registeredEnvironmentIds = registry.listEnvironments().map((environment) => environment.id)
   const configuredDefaultEnvironmentId = resolveRegisteredId(registeredEnvironmentIds, modelConfig.defaultBrowserId)
   const defaultEnvironmentId = configuredDefaultEnvironmentId ?? registeredEnvironmentIds[0]
@@ -240,6 +243,15 @@ function readModelCallTimeoutMs(env: NodeJS.ProcessEnv): number | undefined {
     throw new Error("Invalid OPEN_WEB_AGENT_MODEL_TIMEOUT_MS: must be a positive integer")
   }
   return parsed
+}
+
+function readBooleanEnv(value: string | undefined, name: string): boolean | undefined {
+  if (value == null || value.length === 0) return undefined
+  const normalized = value.toLowerCase()
+  if (["1", "true", "yes", "on"].includes(normalized)) return true
+  if (["0", "false", "no", "off"].includes(normalized)) return false
+
+  throw new Error(`Invalid ${name}: must be a boolean`)
 }
 
 class RuntimeSelectedModel implements ModelPlugin {

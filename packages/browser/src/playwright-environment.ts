@@ -3,20 +3,25 @@ import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { chromium, firefox, webkit, type Browser, type BrowserContext, type Page } from "playwright"
-import type {
-  ActionResult,
-  BrowserEnvironment,
-  BrowserToolCall,
-  BrowserToolDefinition,
-  Observation,
-  RuntimeContext,
-  ToolAdapter,
+import {
+  isAllowedBrowserNavigationUrl,
+  type ActionResult,
+  type BrowserEnvironment,
+  type BrowserToolCall,
+  type BrowserToolDefinition,
+  type Observation,
+  type RuntimeContext,
+  type ToolAdapter,
 } from "@open-web-agent/core"
 
 export interface PlaywrightEnvironmentOptions {
   browserName?: "chromium" | "firefox" | "webkit"
   headless?: boolean
   preventFocus?: boolean
+}
+
+export interface PlaywrightBrowserToolAdapterOptions {
+  allowPrivateNetworkNavigation?: boolean
 }
 
 interface PlaywrightSessionState {
@@ -256,19 +261,32 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
   name = "Playwright Browser Tools"
   environmentId = "playwright-browser"
 
-  constructor(private readonly environment: PlaywrightEnvironment) {}
+  constructor(
+    private readonly environment: PlaywrightEnvironment,
+    private readonly options: PlaywrightBrowserToolAdapterOptions = {},
+  ) {}
 
   listTools(): BrowserToolDefinition[] {
     return [...PLAYWRIGHT_BROWSER_TOOL_DEFINITIONS]
   }
 
   async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
-    const page = this.environment.pageForTools(ctx)
-
     if (call.type === "navigate") {
+      if (!isAllowedBrowserNavigationUrl(call.url, this.options)) {
+        return {
+          ok: false,
+          message: "Blocked unsafe navigation URL",
+          observation: await this.observeIfAvailable(ctx),
+          metadata: { url: call.url },
+        }
+      }
+
+      const page = this.environment.pageForTools(ctx)
       await withAbort(page.goto(call.url, { waitUntil: "domcontentloaded" }), ctx.abortSignal)
       return { ok: true, message: "navigated", observation: await this.environment.observe(ctx), metadata: { url: call.url } }
     }
+
+    const page = this.environment.pageForTools(ctx)
 
     if (call.type === "click") {
       const locator = locatorForTarget(page, call.target)
@@ -360,6 +378,10 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
       observation: await this.environment.observe(ctx),
       metadata: {},
     }
+  }
+
+  private async observeIfAvailable(ctx: RuntimeContext): Promise<Observation | null> {
+    return this.environment.observe(ctx).catch(() => null)
   }
 }
 

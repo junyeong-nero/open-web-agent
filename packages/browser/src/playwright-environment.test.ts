@@ -30,8 +30,8 @@ async function context(
   }
 }
 
-function fixtureUrl(): string {
-  const html = `<!doctype html>
+function fixtureHtml(): string {
+  return `<!doctype html>
     <html>
       <head><title>Playwright Fixture</title></head>
       <body>
@@ -50,7 +50,19 @@ function fixtureUrl(): string {
         </script>
       </body>
     </html>`
-  return `data:text/html,${encodeURIComponent(html)}`
+}
+
+function startFixtureServer(): { url: string; stop(): void } {
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: () => new Response(fixtureHtml(), { headers: { "content-type": "text/html" } }),
+  })
+
+  return {
+    url: `http://127.0.0.1:${server.port}/`,
+    stop: () => server.stop(true),
+  }
 }
 
 interface FakePage {
@@ -417,14 +429,29 @@ describe("PlaywrightEnvironment", () => {
     expect(() => env.pageForTools(ctx)).toThrow("PlaywrightEnvironment has not been opened for the session")
   })
 
-  it("navigates, interacts with a fixture page, observes text, and captures a screenshot", async () => {
+  it("blocks local and private network navigation by default", async () => {
     const env = new PlaywrightEnvironment({ headless: true })
     const tools = new PlaywrightBrowserToolAdapter(env)
     const ctx = await context()
 
+    const result = await tools.execute({ id: "tool_1", type: "navigate", url: "http://127.0.0.1/" }, ctx)
+
+    expect(result).toMatchObject({
+      ok: false,
+      message: "Blocked unsafe navigation URL",
+      metadata: { url: "http://127.0.0.1/" },
+    })
+  })
+
+  it("navigates, interacts with a fixture page, observes text, and captures a screenshot", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
     try {
       await env.reset(ctx)
-      await tools.execute({ id: "tool_1", type: "navigate", url: fixtureUrl() }, ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
       await tools.execute(
         {
           id: "tool_2",
@@ -457,6 +484,7 @@ describe("PlaywrightEnvironment", () => {
       expect(screenshot.observation?.screenshotPath).toEndWith(".png")
       expect((await stat(screenshot.observation?.screenshotPath ?? "")).isFile()).toBe(true)
     } finally {
+      fixture.stop()
       await env.close(ctx)
     }
   })

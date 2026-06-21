@@ -200,6 +200,7 @@ OPEN_WEB_AGENT_REASONING_EFFORT
 OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS
 OPEN_WEB_AGENT_MAX_RETRY
 OPEN_WEB_AGENT_MODEL_TIMEOUT_MS
+OPEN_WEB_AGENT_ALLOW_PRIVATE_NETWORK_NAVIGATION
 OPEN_WEB_AGENT_CODEX_AUTH_PATH
 OPENAI_API_KEY
 OPENROUTER_API_KEY
@@ -207,6 +208,8 @@ GEMINI_API_KEY
 ANTHROPIC_API_KEY
 CODEX_ACCESS_TOKEN
 ```
+
+`OPEN_WEB_AGENT_ALLOW_PRIVATE_NETWORK_NAVIGATION` defaults to false. Set it only for trusted local development or tests that intentionally navigate to loopback/private network fixtures.
 
 If Codex file-backed ChatGPT auth is available at `codex_auth_path`, or if `CODEX_ACCESS_TOKEN` is set, the runtime registers the `codex-oauth` model provider.
 
