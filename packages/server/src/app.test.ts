@@ -476,6 +476,68 @@ describe("createApp", () => {
     })
   })
 
+  it("POST /sessions rejects cross-origin simple requests", async () => {
+    const { app, sessions } = await setup()
+
+    const response = await app.fetch(
+      new Request("http://127.0.0.1/sessions", {
+        method: "POST",
+        headers: { origin: "https://attacker.example", "content-type": "text/plain" },
+        body: JSON.stringify({ projectPath: "/tmp/open-web-agent-drive-by" }),
+      }),
+    )
+
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: "Forbidden origin" })
+    expect(sessions.size).toBe(0)
+  })
+
+  it("POST /sessions rejects loopback requests from a different browser origin", async () => {
+    const { app, sessions } = await setup()
+
+    const response = await app.fetch(
+      new Request("http://127.0.0.1:4096/sessions", {
+        method: "POST",
+        headers: { origin: "http://127.0.0.1:3000", "content-type": "text/plain" },
+        body: JSON.stringify({ projectPath: "/tmp/open-web-agent-drive-by" }),
+      }),
+    )
+
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: "Forbidden origin" })
+    expect(sessions.size).toBe(0)
+  })
+
+  it("POST /sessions rejects non-loopback hosts", async () => {
+    const { app, sessions } = await setup()
+
+    const response = await app.fetch(
+      new Request("http://attacker.example/sessions", {
+        method: "POST",
+        headers: { origin: "http://attacker.example", "content-type": "application/json" },
+        body: JSON.stringify({ projectPath: "/tmp/open-web-agent-drive-by" }),
+      }),
+    )
+
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: "Forbidden host" })
+    expect(sessions.size).toBe(0)
+  })
+
+  it("POST /sessions requires a JSON content type", async () => {
+    const { request, sessions } = await setup()
+
+    const response = await request("/sessions", {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: JSON.stringify({ projectPath: "/tmp/open-web-agent-drive-by" }),
+    })
+
+    expect(response.status).toBe(415)
+    expect(await response.json()).toEqual({ error: "Expected application/json" })
+    expect(sessions.size).toBe(0)
+  })
+
   it("POST /sessions opens a session-bound browser page", async () => {
     const { request, environment } = await setupSessionLifecycleApp()
 
@@ -596,6 +658,28 @@ describe("createApp", () => {
 
     expect(body.runId).toStartWith("run_")
     expect(event.payload.finalAnswer).toBe('페이지 제목은 "Example Domain"입니다.')
+  })
+
+  it("POST /runs rejects cross-origin simple requests before starting a run", async () => {
+    const { app, request, eventBus } = await setup()
+    const sessionId = await createSession(request)
+    const events: RunEvent["type"][] = []
+    const unsubscribe = eventBus.subscribe((event) => {
+      events.push(event.type)
+    })
+
+    const response = await app.fetch(
+      new Request("http://127.0.0.1/runs", {
+        method: "POST",
+        headers: { origin: "https://attacker.example", "content-type": "text/plain" },
+        body: JSON.stringify({ sessionId, prompt: "drive-by run" }),
+      }),
+    )
+    unsubscribe()
+
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({ error: "Forbidden origin" })
+    expect(events).not.toContain("run.started")
   })
 
   it("POST /runs keeps the session browser open after the run completes", async () => {

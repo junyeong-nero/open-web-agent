@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto"
 import type { SQLiteStore } from "@open-web-agent/storage"
 import { CreateRunRequestSchema } from "../schemas/api"
 import type { BrowserSessionManager } from "../browser-session-manager"
+import { readJsonBody } from "./json-body"
 
 export interface RunRecord {
   runId: string
@@ -23,7 +24,9 @@ export interface RunRouteDeps {
 
 export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
   app.post("/runs", async (c) => {
-    const parsed = CreateRunRequestSchema.safeParse(await readJson(c.req))
+    const body = await readJsonBody(c.req)
+    if (!body.ok) return c.json({ error: body.error }, body.status)
+    const parsed = CreateRunRequestSchema.safeParse(body.value)
     if (!parsed.success) return c.json({ error: "Invalid run request" }, 400)
 
     const session = deps.sessions.get(parsed.data.sessionId) ?? deps.storage?.getSession(parsed.data.sessionId)
@@ -143,8 +146,4 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
   app.post("/runs/:runId/cancel", (c) => {
     return c.json({ cancelled: deps.orchestrator.cancelRun(c.req.param("runId")) })
   })
-}
-
-async function readJson(request: { json(): Promise<unknown> }): Promise<unknown> {
-  return request.json().catch(() => null)
 }

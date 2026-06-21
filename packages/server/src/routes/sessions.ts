@@ -5,6 +5,7 @@ import type { SQLiteStore, StoredSession } from "@open-web-agent/storage"
 import type { RunRecord } from "./runs"
 import { CreateSessionRequestSchema, UpdateSessionRequestSchema } from "../schemas/api"
 import type { BrowserSessionManager } from "../browser-session-manager"
+import { readJsonBody } from "./json-body"
 
 export interface SessionRouteDeps {
   sessions: Map<string, SessionState>
@@ -24,7 +25,9 @@ export function registerSessionRoutes(app: Hono, deps: SessionRouteDeps): void {
   })
 
   app.post("/sessions", async (c) => {
-    const parsed = CreateSessionRequestSchema.safeParse(await readJson(c.req))
+    const body = await readJsonBody(c.req)
+    if (!body.ok) return c.json({ error: body.error }, body.status)
+    const parsed = CreateSessionRequestSchema.safeParse(body.value)
     if (!parsed.success) return c.json({ error: "Invalid session request" }, 400)
     const environmentId = parsed.data.environmentId ?? deps.browserSessions.defaultEnvironmentId
     if (!deps.registry.listEnvironments().some((environment) => environment.id === environmentId)) {
@@ -62,7 +65,9 @@ export function registerSessionRoutes(app: Hono, deps: SessionRouteDeps): void {
   })
 
   app.patch("/sessions/:sessionId", async (c) => {
-    const parsed = UpdateSessionRequestSchema.safeParse(await readJson(c.req))
+    const body = await readJsonBody(c.req)
+    if (!body.ok) return c.json({ error: body.error }, body.status)
+    const parsed = UpdateSessionRequestSchema.safeParse(body.value)
     if (!parsed.success) return c.json({ error: "Invalid session request" }, 400)
 
     const sessionId = c.req.param("sessionId")
@@ -134,8 +139,4 @@ function readSessionRunStatus(sessionId: string, runs?: Map<string, RunRecord>) 
 
 function isSessionRunning(sessionId: string, runs?: Map<string, RunRecord>): boolean {
   return readSessionRunStatus(sessionId, runs) === "running"
-}
-
-async function readJson(request: { json(): Promise<unknown> }): Promise<unknown> {
-  return request.json().catch(() => null)
 }
