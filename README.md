@@ -88,7 +88,7 @@ Inside the TUI, slash commands control runtime selection and session state:
 /quit
 ```
 
-Selecting an agent, model, browser, or reasoning effort from the TUI persists the choice to `~/.openwebagents/config.yaml`, so the next TUI session starts with the same defaults.
+Selecting an agent, model, browser, or reasoning effort from the TUI persists the choice to `$OWA_HOME/config.yaml` or `~/.open-web-agent/config.yaml`, so the next TUI session starts with the same defaults.
 
 ## Runtime Options
 
@@ -145,10 +145,10 @@ Shared Python helpers are available in `agents/_common`. The included examples d
 
 ## Configuration
 
-Open Web Agent reads user-level runtime settings from:
+Open Web Agent reads user-level runtime settings from `OWA_HOME` when set, otherwise:
 
 ```text
-~/.openwebagents/config.yaml
+~/.open-web-agent/config.yaml
 ```
 
 Example:
@@ -207,7 +207,7 @@ If Codex file-backed ChatGPT auth is available at `codex_auth_path`, or if `CODE
 
 ## Local Data
 
-Runtime data is stored under `OWA_HOME` when set, otherwise:
+Runtime data and user-level config are stored under `OWA_HOME` when set, otherwise:
 
 ```text
 ~/.open-web-agent
@@ -219,7 +219,7 @@ Session metadata is stored in SQLite at `$OWA_HOME/metadata.sqlite`. Run traces 
 $OWA_HOME/projects/<sha256(project-path)>/sessions/<session-id>/runs/<run-id>/events.jsonl
 ```
 
-The config directory (`~/.openwebagents`) and runtime data directory (`~/.open-web-agent`) are intentionally different.
+For compatibility, a legacy config at `~/.openwebagents/config.yaml` is read when the unified config file does not exist. New writes go to `~/.open-web-agent/config.yaml`.
 
 ## Server API
 

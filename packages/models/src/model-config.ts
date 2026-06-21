@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import { resolveOwaHome } from "@open-web-agent/core"
 import { parse, stringify } from "yaml"
 import { resolveCodexAuthPath } from "./codex-auth"
 
@@ -35,10 +36,13 @@ export interface ModelParameters {
 
 export interface ReadModelConfigOptions {
   configPath?: string
+  homeDir?: string
 }
 
 export interface WriteModelSelectionConfigOptions {
   configPath?: string
+  env?: NodeJS.ProcessEnv
+  homeDir?: string
 }
 
 export interface ModelSelectionConfig {
@@ -68,12 +72,13 @@ const defaultContextWindowTokens = 128000
 const defaultMaxRetry = 0
 const defaultBrowserPreventFocus = false
 
-export function resolveModelConfigPath(): string {
-  return join(homedir(), ".openwebagents", "config.yaml")
+export function resolveModelConfigPath(env: NodeJS.ProcessEnv = process.env, homeDir = homedir()): string {
+  return join(resolveOwaHome(env, homeDir), "config.yaml")
 }
 
 export function readModelConfig(env: NodeJS.ProcessEnv = process.env, options: ReadModelConfigOptions = {}): ModelConfig {
-  const fileConfig = readConfigFile(options.configPath ?? resolveModelConfigPath())
+  const homeDir = options.homeDir ?? homedir()
+  const fileConfig = readConfigFile(options.configPath ?? resolveReadableModelConfigPath(env, homeDir))
 
   return {
     defaultModel: env.OPEN_WEB_AGENT_MODEL || fileConfig.defaultModel || defaultModel,
@@ -124,8 +129,8 @@ export async function writeModelSelectionConfig(
   selection: ModelSelectionConfig,
   options: WriteModelSelectionConfigOptions = {},
 ): Promise<void> {
-  const configPath = options.configPath ?? resolveModelConfigPath()
-  const parsed = await readRawConfigMapping(configPath)
+  const { readPath, writePath } = resolveWritableModelConfigPaths(options)
+  const parsed = await readRawConfigMapping(readPath)
   const next = {
     ...parsed,
     model_provider: selection.modelId,
@@ -133,26 +138,55 @@ export async function writeModelSelectionConfig(
     ...(selection.reasoningEffort && selection.reasoningEffort.length > 0 ? { reasoning_effort: selection.reasoningEffort } : {}),
   }
 
-  await mkdir(dirname(configPath), { recursive: true })
-  await writeFile(configPath, stringify(next), "utf8")
+  await mkdir(dirname(writePath), { recursive: true })
+  await writeFile(writePath, stringify(next), "utf8")
 }
 
 export async function writeAgentSelectionConfig(
   selection: AgentSelectionConfig,
   options: WriteModelSelectionConfigOptions = {},
 ): Promise<void> {
-  const configPath = options.configPath ?? resolveModelConfigPath()
-  const parsed = await readRawConfigMapping(configPath)
-  await writeConfigMapping(configPath, { ...parsed, agent: selection.agentId })
+  const { readPath, writePath } = resolveWritableModelConfigPaths(options)
+  const parsed = await readRawConfigMapping(readPath)
+  await writeConfigMapping(writePath, { ...parsed, agent: selection.agentId })
 }
 
 export async function writeBrowserSelectionConfig(
   selection: BrowserSelectionConfig,
   options: WriteModelSelectionConfigOptions = {},
 ): Promise<void> {
-  const configPath = options.configPath ?? resolveModelConfigPath()
-  const parsed = await readRawConfigMapping(configPath)
-  await writeConfigMapping(configPath, { ...parsed, browser: selection.browserId })
+  const { readPath, writePath } = resolveWritableModelConfigPaths(options)
+  const parsed = await readRawConfigMapping(readPath)
+  await writeConfigMapping(writePath, { ...parsed, browser: selection.browserId })
+}
+
+function resolveReadableModelConfigPath(env: NodeJS.ProcessEnv, homeDir: string): string {
+  const configPath = resolveModelConfigPath(env, homeDir)
+  if (hasConfiguredOwaHome(env) || existsSync(configPath)) return configPath
+  return resolveExistingLegacyModelConfigPath(homeDir) ?? configPath
+}
+
+function resolveWritableModelConfigPaths(options: WriteModelSelectionConfigOptions): { readPath: string; writePath: string } {
+  if (options.configPath) return { readPath: options.configPath, writePath: options.configPath }
+
+  const env = options.env ?? process.env
+  const homeDir = options.homeDir ?? homedir()
+  return {
+    readPath: resolveReadableModelConfigPath(env, homeDir),
+    writePath: resolveModelConfigPath(env, homeDir),
+  }
+}
+
+function resolveExistingLegacyModelConfigPath(homeDir: string): string | undefined {
+  return resolveLegacyModelConfigPaths(homeDir).find((configPath) => existsSync(configPath))
+}
+
+function resolveLegacyModelConfigPaths(homeDir: string): string[] {
+  return [join(homeDir, ".openwebagents", "config.yaml"), join(homeDir, ".openwebagent", "config.yaml")]
+}
+
+function hasConfiguredOwaHome(env: NodeJS.ProcessEnv): boolean {
+  return env.OWA_HOME != null && env.OWA_HOME.length > 0
 }
 
 function readConfigFile(configPath: string): Partial<ModelConfig> {
