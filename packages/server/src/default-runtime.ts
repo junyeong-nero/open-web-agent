@@ -155,7 +155,10 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
   const defaultAgentId = configuredDefaultAgentId ?? resolveRegisteredId(registeredAgentIds, "see-act") ?? registeredAgentIds[0]
   if (!defaultAgentId) throw new Error("No agents registered")
 
-  const playwrightEnvironment = new PlaywrightEnvironment({ preventFocus: modelConfig.browserPreventFocus })
+  const playwrightEnvironment = new PlaywrightEnvironment({
+    headless: modelConfig.browserHeadless,
+    preventFocus: modelConfig.browserPreventFocus,
+  })
   registry.registerEnvironment(playwrightEnvironment)
   registry.registerToolAdapter(new PlaywrightBrowserToolAdapter(playwrightEnvironment))
   const registeredEnvironmentIds = registry.listEnvironments().map((environment) => environment.id)

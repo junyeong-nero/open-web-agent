@@ -158,6 +158,7 @@ model: "nvidia/nemotron-3-super-120b-a12b:free"
 model_provider: "openrouter"
 agent: "see-act"
 browser: "playwright-browser"
+browser_headless: false
 browser_prevent_focus: true
 reasoning_effort: "medium"
 context_window_tokens: 128000
@@ -183,6 +184,8 @@ parameters:
   #   reasoning_effort: "low"
 ```
 
+`browser_headless` controls whether the local Playwright browser launches headlessly. The shorter `headless` key is accepted as an alias.
+
 Environment variables take precedence over YAML:
 
 ```text
@@ -190,6 +193,7 @@ OPEN_WEB_AGENT_MODEL
 OPEN_WEB_AGENT_MODEL_PROVIDER
 OPEN_WEB_AGENT_AGENT
 OPEN_WEB_AGENT_BROWSER
+OPEN_WEB_AGENT_BROWSER_HEADLESS
 OPEN_WEB_AGENT_BROWSER_PREVENT_FOCUS
 OPEN_WEB_AGENT_REASONING_EFFORT
 OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS

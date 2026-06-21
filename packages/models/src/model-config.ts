@@ -11,6 +11,7 @@ export interface ModelConfig {
   defaultModelProvider: string | null
   defaultAgentId: string | null
   defaultBrowserId: string | null
+  browserHeadless: boolean
   browserPreventFocus: boolean
   reasoningEffort: string
   contextWindowTokens: number
@@ -70,6 +71,7 @@ const defaultModel = defaultOpenRouterModel
 const defaultReasoningEffort = "medium"
 const defaultContextWindowTokens = 128000
 const defaultMaxRetry = 0
+const defaultBrowserHeadless = false
 const defaultBrowserPreventFocus = false
 
 export function resolveModelConfigPath(env: NodeJS.ProcessEnv = process.env, homeDir = homedir()): string {
@@ -85,6 +87,10 @@ export function readModelConfig(env: NodeJS.ProcessEnv = process.env, options: R
     defaultModelProvider: env.OPEN_WEB_AGENT_MODEL_PROVIDER || fileConfig.defaultModelProvider || null,
     defaultAgentId: env.OPEN_WEB_AGENT_AGENT || fileConfig.defaultAgentId || null,
     defaultBrowserId: env.OPEN_WEB_AGENT_BROWSER || fileConfig.defaultBrowserId || null,
+    browserHeadless:
+      readBooleanEnv(env.OPEN_WEB_AGENT_BROWSER_HEADLESS, "OPEN_WEB_AGENT_BROWSER_HEADLESS") ??
+      fileConfig.browserHeadless ??
+      defaultBrowserHeadless,
     browserPreventFocus:
       readBooleanEnv(env.OPEN_WEB_AGENT_BROWSER_PREVENT_FOCUS, "OPEN_WEB_AGENT_BROWSER_PREVENT_FOCUS") ??
       fileConfig.browserPreventFocus ??
@@ -207,6 +213,7 @@ function readConfigFile(configPath: string): Partial<ModelConfig> {
     defaultModelProvider: readOptionalString(parsed, configPath, "model_provider", "modelProvider"),
     defaultAgentId: readOptionalString(parsed, configPath, "agent", "agent_id", "default_agent", "defaultAgentId"),
     defaultBrowserId: readOptionalString(parsed, configPath, "browser", "browser_id", "environment_id", "default_browser", "defaultBrowserId"),
+    browserHeadless: readOptionalBoolean(parsed, configPath, "browser_headless", "browserHeadless", "headless"),
     browserPreventFocus: readOptionalBoolean(parsed, configPath, "browser_prevent_focus", "browserPreventFocus", "prevent_browser_focus", "preventBrowserFocus"),
     reasoningEffort: readOptionalString(parsed, configPath, "reasoning_effort", "reasoningEffort"),
     contextWindowTokens: readOptionalPositiveInteger(parsed, configPath, "context_window_tokens", "contextWindowTokens"),
