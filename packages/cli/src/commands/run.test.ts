@@ -68,6 +68,7 @@ describe("runCommand", () => {
             OWA_HOME: home,
             OPENAI_API_KEY: "test-openai-key",
             OPEN_WEB_AGENT_MODEL: "gpt-test",
+            OPEN_WEB_AGENT_ALLOW_PRIVATE_NETWORK_NAVIGATION: "true",
             OPEN_WEB_AGENT_CODEX_AUTH_PATH: join(home, "missing-codex-auth.json"),
           },
           configPath: join(home, "missing-config.yaml"),
