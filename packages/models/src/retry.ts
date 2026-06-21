@@ -27,8 +27,13 @@ export async function retryModelCall<T>(
 }
 
 export function isTransientModelProviderError(error: unknown): boolean {
+  if (isAbortError(error)) return false
   if (error instanceof ModelProviderHttpError) {
     return error.status === 408 || error.status === 409 || error.status === 429 || error.status >= 500
   }
   return true
+}
+
+export function isAbortError(error: unknown): boolean {
+  return (error instanceof DOMException || error instanceof Error) && error.name === "AbortError"
 }

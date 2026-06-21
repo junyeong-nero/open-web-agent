@@ -1,6 +1,6 @@
 import type { ModelMessage, ModelRequest, ModelResponse } from "@open-web-agent/core"
 import type { FetchLike } from "./openai-compatible-client"
-import { ModelProviderHttpError, retryModelCall } from "./retry"
+import { isTransientModelProviderError, ModelProviderHttpError, retryModelCall } from "./retry"
 import { shouldRetryWithoutTemperature, withoutTemperatureParameter } from "./temperature-fallback"
 
 export interface OpenAIResponsesClientOptions {
@@ -9,6 +9,10 @@ export interface OpenAIResponsesClientOptions {
   fetch?: FetchLike
   defaultHeaders?: Record<string, string>
   maxRetry?: number
+}
+
+export interface ResponsesClientCompleteOptions {
+  signal?: AbortSignal
 }
 
 interface ResponsesApiResponse {
@@ -29,20 +33,23 @@ export class OpenAIResponsesClient {
     this.fetchImpl = options.fetch ?? fetch
   }
 
-  async complete(request: ModelRequest): Promise<ModelResponse> {
+  async complete(request: ModelRequest, options: ResponsesClientCompleteOptions = {}): Promise<ModelResponse> {
     const startedAt = performance.now()
     let requestForAttempt = request
     const raw = await retryModelCall(async () => {
+      throwIfAborted(options.signal)
       try {
-        return await this.fetchResponse(requestForAttempt)
+        return await this.fetchResponse(requestForAttempt, options.signal)
       } catch (error) {
+        throwIfAborted(options.signal)
         if (shouldRetryWithoutTemperature(requestForAttempt, error)) {
           requestForAttempt = withoutTemperatureParameter(requestForAttempt)
-          return await this.fetchResponse(requestForAttempt)
+          throwIfAborted(options.signal)
+          return await this.fetchResponse(requestForAttempt, options.signal)
         }
         throw error
       }
-    }, { maxRetry: this.options.maxRetry })
+    }, { maxRetry: this.options.maxRetry, isRetryable: (error) => !options.signal?.aborted && isTransientModelProviderError(error) })
     const usage = raw.usage
 
     return {
@@ -68,11 +75,12 @@ export class OpenAIResponsesClient {
     }
   }
 
-  private async fetchResponse(request: ModelRequest): Promise<ResponsesApiResponse> {
+  private async fetchResponse(request: ModelRequest, signal: AbortSignal | undefined): Promise<ResponsesApiResponse> {
     const response = await this.fetchImpl(`${trimTrailingSlash(this.options.baseUrl)}/responses`, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify(toResponsesBody(request)),
+      signal,
     })
 
     if (!response.ok) {
@@ -80,6 +88,12 @@ export class OpenAIResponsesClient {
     }
 
     return (await response.json()) as ResponsesApiResponse
+  }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw signal.reason ?? new DOMException("Model call cancelled", "AbortError")
   }
 }
 

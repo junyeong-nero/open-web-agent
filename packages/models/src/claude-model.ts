@@ -36,7 +36,9 @@ export class ClaudeModel implements ModelPlugin {
     })
   }
 
-  async complete(request: ModelRequest, _ctx: RuntimeContext): Promise<ModelResponse> {
-    return this.client.complete({ ...request, ...this.defaultParameters, model: request.model || this.defaultModel })
+  async complete(request: ModelRequest, ctx: RuntimeContext): Promise<ModelResponse> {
+    return this.client.complete({ ...request, ...this.defaultParameters, model: request.model || this.defaultModel }, {
+      signal: ctx.abortSignal,
+    })
   }
 }

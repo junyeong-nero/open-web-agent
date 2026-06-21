@@ -1,5 +1,5 @@
 import type { ModelRequest, ModelResponse } from "@open-web-agent/core"
-import { ModelProviderHttpError, retryModelCall } from "./retry"
+import { isTransientModelProviderError, ModelProviderHttpError, retryModelCall } from "./retry"
 import { shouldRetryWithoutTemperature, withoutTemperatureParameter } from "./temperature-fallback"
 
 export type FetchLike = (url: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -10,6 +10,10 @@ export interface OpenAICompatibleClientOptions {
   fetch?: FetchLike
   defaultHeaders?: Record<string, string>
   maxRetry?: number
+}
+
+export interface ModelClientCompleteOptions {
+  signal?: AbortSignal
 }
 
 interface ChatCompletionResponse {
@@ -29,20 +33,23 @@ export class OpenAICompatibleClient {
     this.fetchImpl = options.fetch ?? fetch
   }
 
-  async complete(request: ModelRequest): Promise<ModelResponse> {
+  async complete(request: ModelRequest, options: ModelClientCompleteOptions = {}): Promise<ModelResponse> {
     const startedAt = performance.now()
     let requestForAttempt = request
     const raw = await retryModelCall(async () => {
+      throwIfAborted(options.signal)
       try {
-        return await this.fetchCompletion(requestForAttempt)
+        return await this.fetchCompletion(requestForAttempt, options.signal)
       } catch (error) {
+        throwIfAborted(options.signal)
         if (shouldRetryWithoutTemperature(requestForAttempt, error)) {
           requestForAttempt = withoutTemperatureParameter(requestForAttempt)
-          return await this.fetchCompletion(requestForAttempt)
+          throwIfAborted(options.signal)
+          return await this.fetchCompletion(requestForAttempt, options.signal)
         }
         throw error
       }
-    }, { maxRetry: this.options.maxRetry })
+    }, { maxRetry: this.options.maxRetry, isRetryable: (error) => !options.signal?.aborted && isTransientModelProviderError(error) })
     const usage = raw.usage
 
     return {
@@ -68,11 +75,12 @@ export class OpenAICompatibleClient {
     }
   }
 
-  private async fetchCompletion(request: ModelRequest): Promise<ChatCompletionResponse> {
+  private async fetchCompletion(request: ModelRequest, signal: AbortSignal | undefined): Promise<ChatCompletionResponse> {
     const response = await this.fetchImpl(`${trimTrailingSlash(this.options.baseUrl)}/chat/completions`, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify(toChatCompletionsBody(request)),
+      signal,
     })
 
     if (!response.ok) {
@@ -80,6 +88,12 @@ export class OpenAICompatibleClient {
     }
 
     return (await response.json()) as ChatCompletionResponse
+  }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw signal.reason ?? new DOMException("Model call cancelled", "AbortError")
   }
 }
 

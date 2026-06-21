@@ -57,6 +57,7 @@ describe("CodexOAuthModel", () => {
       contextWindowTokens: 256000,
     })
     expect(calls[0]?.url).toBe("https://api.openai.com/v1/responses")
+    expect(calls[0]?.init.signal).toBe(ctx.abortSignal)
     expect(calls[0]?.init.headers).toMatchObject({ authorization: "Bearer oauth-token" })
     expect(JSON.parse(String(calls[0]?.init.body))).toMatchObject({ model: "gpt-test", temperature: 0.2 })
     expect(response.text).toBe("codex oauth answer")

@@ -50,8 +50,10 @@ export class OpenRouterModel implements ModelPlugin {
     })
   }
 
-  async complete(request: ModelRequest, _ctx: RuntimeContext): Promise<ModelResponse> {
+  async complete(request: ModelRequest, ctx: RuntimeContext): Promise<ModelResponse> {
     const model = this.forceDefaultModel ? this.defaultModel : request.model || this.defaultModel
-    return this.client.complete(withChatReasoningEffort({ ...request, ...this.defaultParameters, model }, this.reasoningEffort))
+    return this.client.complete(withChatReasoningEffort({ ...request, ...this.defaultParameters, model }, this.reasoningEffort), {
+      signal: ctx.abortSignal,
+    })
   }
 }

@@ -670,4 +670,34 @@ describe("SimpleReActAgent", () => {
       "timed out",
     )
   })
+
+  it("aborts timed out model calls", async () => {
+    let aborted = false
+    const modelSignals: AbortSignal[] = []
+    const model: ModelPlugin = {
+      id: "slow",
+      name: "Slow",
+      provider: "test",
+      complete: (_request, modelCtx) => {
+        modelSignals.push(modelCtx.abortSignal)
+        return new Promise((_resolve, reject) => {
+          modelCtx.abortSignal.addEventListener(
+            "abort",
+            () => {
+              aborted = true
+              reject(modelCtx.abortSignal.reason)
+            },
+            { once: true },
+          )
+        })
+      },
+    }
+
+    await expect(new SimpleReActAgent({ model, modelName: "fake", timeoutMs: 5 }).step(state(), ctx())).rejects.toThrow(
+      "timed out",
+    )
+
+    expect(aborted).toBe(true)
+    expect(modelSignals[0]?.aborted).toBe(true)
+  })
 })
