@@ -476,6 +476,32 @@ describe("PlaywrightEnvironment", () => {
     expect(closeCalls).toBe(1)
   })
 
+  it("clicks fixture elements by DOM elementId target", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
+    try {
+      await env.reset(ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
+      const result = await tools.execute(
+        {
+          id: "tool_2",
+          type: "click",
+          target: { elementId: "toggle", selector: null, text: null, role: null, name: null, coordinates: null },
+        },
+        ctx,
+      )
+
+      expect(result.ok).toBe(true)
+      expect(result.observation?.text).toContain("Revealed")
+    } finally {
+      fixture.stop()
+      await env.close(ctx)
+    }
+  })
+
   it("navigates, interacts with a fixture page, observes text, and captures a screenshot", async () => {
     const env = new PlaywrightEnvironment({ headless: true })
     const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })

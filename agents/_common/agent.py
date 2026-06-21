@@ -6,10 +6,12 @@ from pathlib import Path
 from .protocol import (
     call_model,
     emit_response,
+    format_browser_tools,
     format_observation,
     normalize_decision,
     parse_json_object,
     read_request,
+    repair_decision_targets,
     validate_agent_decision,
 )
 
@@ -117,6 +119,14 @@ class AgentContext:
     @property
     def environment_id(self):
         return self.context.get("environmentId")
+
+    @property
+    def browser_tools(self):
+        value = self.context.get("browserTools")
+        return value if isinstance(value, list) else []
+
+    def browser_tools_text(self):
+        return format_browser_tools(self.browser_tools)
 
     @property
     def is_blank_page(self):
@@ -333,8 +343,11 @@ class ActionFactory:
 
 
 class DecisionFactory:
-    def from_model(self, value):
-        return validate_agent_decision(normalize_decision(value))
+    def from_model(self, value, observation=None):
+        decision = normalize_decision(value)
+        if observation:
+            decision = repair_decision_targets(decision, observation)
+        return validate_agent_decision(decision)
 
 
 def single_tool_decision(action_id, kind, reason, tool_call):
