@@ -32,6 +32,12 @@ describe("parseSlashCommand", () => {
     expect(parseSlashCommand("/browser playwright-browser")).toEqual({ kind: "browser", environmentId: "playwright-browser" })
   })
 
+  it("recognizes headless command with on and off values", () => {
+    expect(parseSlashCommand("/headless")).toEqual({ kind: "headless", value: null })
+    expect(parseSlashCommand("/headless on")).toEqual({ kind: "headless", value: "on" })
+    expect(parseSlashCommand("/headless off")).toEqual({ kind: "headless", value: "off" })
+  })
+
   it("recognizes theme command with and without an id", () => {
     expect(parseSlashCommand("/theme")).toEqual({ kind: "theme", themeId: null })
     expect(parseSlashCommand("/theme opencode")).toEqual({ kind: "theme", themeId: "opencode" })
@@ -61,6 +67,7 @@ describe("listSlashCommandSuggestions", () => {
       "/agent",
       "/model",
       "/browser",
+      "/headless",
       "/themes",
       "/new",
       "/stop",
@@ -101,7 +108,7 @@ describe("completeSlashCommand", () => {
 describe("formatSlashCommandHelp", () => {
   it("formats help text from displayed slash commands", () => {
     expect(formatSlashCommandHelp()).toBe(
-      "/help /clear /details /session /agent [id] /model [id] /browser [id] /themes [id] /new /stop /quit",
+      "/help /clear /details /session /agent [id] /model [id] /browser [id] /headless [on|off] /themes [id] /new /stop /quit",
     )
   })
 })

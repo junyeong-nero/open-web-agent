@@ -1,13 +1,24 @@
 import type { Hono } from "hono"
 import type { PluginRegistry } from "@open-web-agent/core"
-import { writeAgentSelectionConfig, writeBrowserSelectionConfig, writeModelSelectionConfig } from "@open-web-agent/models"
-import { UpdateAgentConfigRequestSchema, UpdateBrowserConfigRequestSchema, UpdateModelConfigRequestSchema } from "../schemas/api"
+import {
+  writeAgentSelectionConfig,
+  writeBrowserHeadlessConfig,
+  writeBrowserSelectionConfig,
+  writeModelSelectionConfig,
+} from "@open-web-agent/models"
+import {
+  UpdateAgentConfigRequestSchema,
+  UpdateBrowserConfigRequestSchema,
+  UpdateBrowserHeadlessConfigRequestSchema,
+  UpdateModelConfigRequestSchema,
+} from "../schemas/api"
 import { readJsonBody } from "./json-body"
 
 export interface ConfigRouteDeps {
   registry: PluginRegistry
   modelConfigPath?: string
   modelConfigEnv?: NodeJS.ProcessEnv
+  onBrowserHeadlessChanged?: (browserHeadless: boolean) => void | Promise<void>
 }
 
 export function registerConfigRoutes(app: Hono, deps: ConfigRouteDeps): void {
@@ -60,5 +71,20 @@ export function registerConfigRoutes(app: Hono, deps: ConfigRouteDeps): void {
     await writeBrowserSelectionConfig({ browserId: browser.id }, { configPath: deps.modelConfigPath, env: deps.modelConfigEnv })
 
     return c.json({ browserId: browser.id })
+  })
+
+  app.patch("/config/browser/headless", async (c) => {
+    const body = await readJsonBody(c.req)
+    if (!body.ok) return c.json({ error: body.error }, body.status)
+    const parsed = UpdateBrowserHeadlessConfigRequestSchema.safeParse(body.value)
+    if (!parsed.success) return c.json({ error: "Invalid browser headless config request" }, 400)
+
+    await writeBrowserHeadlessConfig(
+      { browserHeadless: parsed.data.browserHeadless },
+      { configPath: deps.modelConfigPath, env: deps.modelConfigEnv },
+    )
+    await deps.onBrowserHeadlessChanged?.(parsed.data.browserHeadless)
+
+    return c.json({ browserHeadless: parsed.data.browserHeadless })
   })
 }

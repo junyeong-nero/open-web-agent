@@ -19,10 +19,12 @@ export interface CreateAppDeps {
   browserSessions?: BrowserSessionManager
   modelConfigPath?: string
   modelConfigEnv?: NodeJS.ProcessEnv
+  onBrowserHeadlessChanged?: (browserHeadless: boolean) => void | Promise<void>
   runtimeDefaults?: {
     agentId?: string | null
     modelId?: string | null
     environmentId?: string | null
+    browserHeadless?: boolean | null
   }
 }
 
@@ -54,7 +56,12 @@ export function createApp(deps: CreateAppDeps): Hono {
     storage: deps.storage,
     browserSessions,
   })
-  registerConfigRoutes(app, { registry: deps.registry, modelConfigPath: deps.modelConfigPath, modelConfigEnv: deps.modelConfigEnv })
+  registerConfigRoutes(app, {
+    registry: deps.registry,
+    modelConfigPath: deps.modelConfigPath,
+    modelConfigEnv: deps.modelConfigEnv,
+    onBrowserHeadlessChanged: deps.onBrowserHeadlessChanged,
+  })
   registerPluginRoutes(app, { registry: deps.registry, defaults: deps.runtimeDefaults })
 
   return app

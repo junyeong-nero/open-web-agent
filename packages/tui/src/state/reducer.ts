@@ -28,10 +28,12 @@ export type TuiEvent =
       defaultAgentId?: string | null
       defaultModelId?: string | null
       defaultEnvironmentId?: string | null
+      defaultBrowserHeadless?: boolean | null
     }
   | { type: "agent.selected"; agentId: string }
   | { type: "model.selected"; modelId: string; reasoningEffort?: string }
   | { type: "environment.selected"; environmentId: string }
+  | { type: "browser.headless.selected"; browserHeadless: boolean }
   | { type: "theme.selected"; themeId: string }
   | { type: "run.event"; event: RunEvent }
   | { type: "slash.details" }
@@ -46,6 +48,7 @@ export function createInitialState(projectPath: string): TuiState {
     selectedAgentId: "see-act",
     selectedModelId: null,
     selectedEnvironmentId: "playwright-browser",
+    browserHeadless: false,
     selectedThemeId: "opencode",
     runtimeSelectorKind: null,
     runtimeSelectorQuery: "",
@@ -156,6 +159,7 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
       selectedAgentId,
       selectedModelId,
       selectedEnvironmentId,
+      browserHeadless: event.defaultBrowserHeadless ?? state.browserHeadless,
     }
   }
   if (event.type === "agent.selected") return { ...state, selectedAgentId: event.agentId }
@@ -169,6 +173,7 @@ export function reduceTuiEvent(state: TuiState, event: TuiEvent): TuiState {
     return { ...state, selectedModelId: event.modelId, availableModels }
   }
   if (event.type === "environment.selected") return { ...state, selectedEnvironmentId: event.environmentId }
+  if (event.type === "browser.headless.selected") return { ...state, browserHeadless: event.browserHeadless }
   if (event.type === "theme.selected") return { ...state, selectedThemeId: event.themeId }
   if (event.type === "slash.details") {
     return commitActiveView(state, { ...currentView(state), inspectorVisible: !state.inspectorVisible })

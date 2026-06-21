@@ -7,6 +7,7 @@ export type SlashCommand =
   | { kind: "agent"; agentId: string | null }
   | { kind: "model"; modelId: string | null }
   | { kind: "browser"; environmentId: string | null }
+  | { kind: "headless"; value: string | null }
   | { kind: "theme"; themeId: string | null }
   | { kind: "new" }
   | { kind: "stop" }
@@ -31,6 +32,7 @@ const commandDefinitions = [
   { name: "/agent", kind: "agent", description: "Switch agent", argumentHint: "[id]" },
   { name: "/model", kind: "model", description: "Switch model", argumentHint: "[id]" },
   { name: "/browser", kind: "browser", description: "Switch browser", argumentHint: "[id]" },
+  { name: "/headless", kind: "headless", description: "Toggle browser headless mode", argumentHint: "[on|off]" },
   { name: "/themes", kind: "theme", description: "Switch theme", argumentHint: "[id]" },
   { name: "/new", kind: "new", description: "Start a new session", argumentHint: null },
   { name: "/stop", kind: "stop", description: "Stop the current run", argumentHint: null },
@@ -81,6 +83,10 @@ export function parseSlashCommand(input: string): SlashCommand {
   if (kind === "browser") {
     const environmentId = value.slice(command.length).trim()
     return { kind: "browser", environmentId: environmentId.length > 0 ? environmentId : null }
+  }
+  if (kind === "headless") {
+    const headlessValue = value.slice(command.length).trim()
+    return { kind: "headless", value: headlessValue.length > 0 ? headlessValue : null }
   }
   if (kind === "theme") {
     const themeId = value.slice(command.length).trim()

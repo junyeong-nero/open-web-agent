@@ -88,6 +88,7 @@ export interface TuiState extends SessionViewState {
   selectedAgentId: string
   selectedModelId: string | null
   selectedEnvironmentId: string
+  browserHeadless: boolean
   selectedThemeId: string
   runtimeSelectorKind: RuntimeSelectorKind | null
   runtimeSelectorQuery: string

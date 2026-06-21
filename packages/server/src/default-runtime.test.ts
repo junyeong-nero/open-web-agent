@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { readModelConfig } from "@open-web-agent/models"
 import { startDefaultRuntime } from "./default-runtime"
 
 describe("startDefaultRuntime", () => {
@@ -332,6 +333,38 @@ describe("startDefaultRuntime", () => {
       }
 
       expect(environment.options?.headless).toBe(true)
+    } finally {
+      await runtime.stop()
+    }
+  })
+
+  it("updates Playwright and runtime defaults when browser headless config changes", async () => {
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const configPath = join(home, ".config.yaml")
+    const runtime = await startDefaultRuntime({
+      home,
+      configPath,
+      env: isolatedEnv(home, {
+        OPEN_WEB_AGENT_BROWSER_HEADLESS: "false",
+      }),
+    })
+
+    try {
+      const response = await fetch(`${runtime.url}/config/browser/headless`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ browserHeadless: true }),
+      })
+      expect(response.ok).toBe(true)
+      expect(await response.json()).toEqual({ browserHeadless: true })
+
+      const environment = runtime.registry.getEnvironment("playwright-browser") as unknown as {
+        options?: { headless?: boolean }
+      }
+
+      expect(environment.options?.headless).toBe(true)
+      expect(readModelConfig({}, { configPath }).browserHeadless).toBe(true)
+      expect((await fetchPlugins(runtime.url)).defaults?.browserHeadless).toBe(true)
     } finally {
       await runtime.stop()
     }
@@ -921,6 +954,9 @@ async function fetchPlugins(url: string): Promise<{
     contextWindowTokens?: number
   }>
   environments: Array<{ id: string }>
+  defaults?: {
+    browserHeadless?: boolean
+  }
 }> {
   const response = await fetch(`${url}/plugins`)
   expect(response.ok).toBe(true)

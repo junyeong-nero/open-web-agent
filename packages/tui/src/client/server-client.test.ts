@@ -81,6 +81,29 @@ describe("createServerClient", () => {
     ])
   })
 
+  it("persists browser headless preference", async () => {
+    const requests: unknown[] = []
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        const url = new URL(request.url)
+        if (url.pathname === "/config/browser/headless" && request.method === "PATCH") {
+          requests.push(await request.json())
+          return Response.json({ browserHeadless: true })
+        }
+        return new Response("not found", { status: 404 })
+      },
+    })
+    servers.push(server)
+
+    expect(await createServerClient(`http://${server.hostname}:${server.port}`).setBrowserHeadless(true)).toEqual({
+      browserHeadless: true,
+    })
+
+    expect(requests).toEqual([{ browserHeadless: true }])
+  })
+
   it("sends reasoning effort when selecting a model with effort changes", async () => {
     const requests: unknown[] = []
     const server = Bun.serve({

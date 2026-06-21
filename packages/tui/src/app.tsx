@@ -36,6 +36,7 @@ export interface AppProps {
     agents: AgentSummary[]
     models: ModelSummary[]
     environments: EnvironmentSummary[]
+    defaultBrowserHeadless?: boolean | null
   }
   onExit(): void
 }
@@ -50,6 +51,7 @@ export function App(props: AppProps) {
         agents: props.initialRuntimePlugins.agents,
         models: props.initialRuntimePlugins.models,
         environments: props.initialRuntimePlugins.environments,
+        defaultBrowserHeadless: props.initialRuntimePlugins.defaultBrowserHeadless,
       })
     : createInitialState(props.projectPath)
   const [state, setState] = createSignal(initialState)
@@ -153,6 +155,7 @@ export function App(props: AppProps) {
           defaultAgentId: plugins.defaults?.agentId,
           defaultModelId: plugins.defaults?.modelId,
           defaultEnvironmentId: plugins.defaults?.environmentId,
+          defaultBrowserHeadless: plugins.defaults?.browserHeadless,
         }),
       )
     } catch (error) {
@@ -561,6 +564,17 @@ export function App(props: AppProps) {
       await persistAndSelectBrowser(environmentId)
       return
     }
+    if (command.kind === "headless") {
+      setPrompt("")
+      const browserHeadless = parseHeadlessValue(command.value)
+      if (browserHeadless == null) {
+        appendSystemMessage(`Browser headless is ${state().browserHeadless ? "on" : "off"}. Usage: /headless on|off`)
+        return
+      }
+
+      await persistAndSelectBrowserHeadless(browserHeadless)
+      return
+    }
     if (command.kind === "agent") {
       setPrompt("")
       if (!command.agentId) {
@@ -726,6 +740,30 @@ export function App(props: AppProps) {
     setState((current) => reduceRuntimeSelectionSuccess(current, { kind: "browser", environmentId }))
   }
 
+  async function persistAndSelectBrowserHeadless(browserHeadless: boolean) {
+    try {
+      await client.setBrowserHeadless(browserHeadless)
+    } catch (error) {
+      setState((current) =>
+        reduceTuiEvent(current, {
+          type: "conversation.append",
+          message: { role: "system", content: `Failed to save browser headless preference: ${formatError(error)}` },
+        }),
+      )
+      return
+    }
+
+    setState((current) =>
+      reduceTuiEvent(
+        reduceTuiEvent(current, { type: "browser.headless.selected", browserHeadless }),
+        {
+          type: "conversation.append",
+          message: { role: "system", content: `Browser headless ${browserHeadless ? "enabled" : "disabled"}` },
+        },
+      ),
+    )
+  }
+
   return (
     <box
       position="relative"
@@ -834,6 +872,14 @@ function formatAvailableThemes(): string {
   return `Available themes: ${listThemes()
     .map((theme) => theme.id)
     .join(", ")}`
+}
+
+function parseHeadlessValue(value: string | null): boolean | null {
+  const normalized = value?.trim().toLowerCase()
+  if (!normalized) return null
+  if (["on", "true", "1"].includes(normalized)) return true
+  if (["off", "false", "0"].includes(normalized)) return false
+  return null
 }
 
 function printableKeyText(key: { sequence?: string; ctrl?: boolean; meta?: boolean; super?: boolean }): string | null {

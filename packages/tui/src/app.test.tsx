@@ -92,9 +92,11 @@ describe.serial("App", () => {
   it("persists agent and browser changes made through slash commands", async () => {
     const persistedAgents: unknown[] = []
     const persistedBrowsers: unknown[] = []
+    const persistedHeadless: unknown[] = []
     const server = startTuiServer({
       onPersistAgent: (body) => persistedAgents.push(body),
       onPersistBrowser: (body) => persistedBrowsers.push(body),
+      onPersistBrowserHeadless: (body) => persistedHeadless.push(body),
     })
     const setup = await testRender(
       () => <App serverUrl={server.url} projectPath="/tmp/open-web-agent-test" onExit={() => {}} />,
@@ -113,6 +115,11 @@ describe.serial("App", () => {
       setup.mockInput.pressEnter()
       await setup.flush()
       await eventually(() => expect(persistedBrowsers).toEqual([{ browserId: "test-browser" }]))
+
+      await setup.mockInput.typeText("/headless on")
+      setup.mockInput.pressEnter()
+      await setup.flush()
+      await eventually(() => expect(persistedHeadless).toEqual([{ browserHeadless: true }]))
     } finally {
       setup.renderer.destroy()
     }
@@ -158,10 +165,12 @@ describe.serial("App", () => {
     const persistedModels: unknown[] = []
     const persistedAgents: unknown[] = []
     const persistedBrowsers: unknown[] = []
+    const persistedHeadless: unknown[] = []
     const server = startTuiServer({
       onPersistModel: (body) => persistedModels.push(body),
       onPersistAgent: (body) => persistedAgents.push(body),
       onPersistBrowser: (body) => persistedBrowsers.push(body),
+      onPersistBrowserHeadless: (body) => persistedHeadless.push(body),
     })
     const setup = await testRender(
       () => (
@@ -198,6 +207,11 @@ describe.serial("App", () => {
       setup.mockInput.pressEnter()
       await setup.flush()
       await eventually(() => expect(persistedBrowsers).toEqual([{ browserId: "test-browser" }]))
+
+      await setup.mockInput.typeText("/headless off")
+      setup.mockInput.pressEnter()
+      await setup.flush()
+      await eventually(() => expect(persistedHeadless).toEqual([{ browserHeadless: false }]))
 
       expect(appendedHistory).toEqual([])
     } finally {
@@ -331,6 +345,7 @@ function startTuiServer(
     onPersistModel?: (body: unknown) => void
     onPersistAgent?: (body: unknown) => void
     onPersistBrowser?: (body: unknown) => void
+    onPersistBrowserHeadless?: (body: unknown) => void
     sessionRunStatus?: "idle" | "running" | "completed" | "failed" | "cancelled"
   } = {},
 ): { url: string } {
@@ -378,6 +393,12 @@ function startTuiServer(
         return request.json().then((body) => {
           options.onPersistBrowser?.(body)
           return Response.json({ browserId: "test-browser" })
+        })
+      }
+      if (url.pathname === "/config/browser/headless" && request.method === "PATCH") {
+        return request.json().then((body) => {
+          options.onPersistBrowserHeadless?.(body)
+          return Response.json(body)
         })
       }
       if (url.pathname === "/events" && request.method === "GET") {

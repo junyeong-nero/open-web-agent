@@ -60,6 +60,10 @@ export interface BrowserSelectionConfig {
   browserId: string
 }
 
+export interface BrowserHeadlessConfig {
+  browserHeadless: boolean
+}
+
 export type ModelProvider = "openai" | "openrouter" | "gemini" | "claude"
 
 export const defaultOpenAIModel = "gpt-4.1-mini"
@@ -164,6 +168,15 @@ export async function writeBrowserSelectionConfig(
   const { readPath, writePath } = resolveWritableModelConfigPaths(options)
   const parsed = await readRawConfigMapping(readPath)
   await writeConfigMapping(writePath, { ...parsed, browser: selection.browserId })
+}
+
+export async function writeBrowserHeadlessConfig(
+  selection: BrowserHeadlessConfig,
+  options: WriteModelSelectionConfigOptions = {},
+): Promise<void> {
+  const { readPath, writePath } = resolveWritableModelConfigPaths(options)
+  const parsed = await readRawConfigMapping(readPath)
+  await writeConfigMapping(writePath, { ...parsed, browser_headless: selection.browserHeadless })
 }
 
 function resolveReadableModelConfigPath(env: NodeJS.ProcessEnv, homeDir: string): string {

@@ -283,6 +283,7 @@ describe("reduceTuiEvent", () => {
       type: "plugins.loaded",
       defaultAgentId: "plan-act",
       defaultEnvironmentId: "playwright-browser",
+      defaultBrowserHeadless: true,
       agents: [
         { id: "simple-react-agent", name: "Simple ReAct Agent", description: "Model-driven browser control" },
         { id: "see-act", name: "See-Act Agent", description: "Model-driven browser control" },
@@ -294,6 +295,8 @@ describe("reduceTuiEvent", () => {
 
     expect(loaded.selectedAgentId).toBe("plan-act")
     expect(loaded.selectedEnvironmentId).toBe("playwright-browser")
+    expect(loaded.browserHeadless).toBe(true)
+    expect(reduceTuiEvent(loaded, { type: "browser.headless.selected", browserHeadless: false }).browserHeadless).toBe(false)
   })
 
   it("tracks model inference activity and context usage from model events", () => {

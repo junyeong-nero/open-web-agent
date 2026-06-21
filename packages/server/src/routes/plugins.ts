@@ -7,6 +7,7 @@ export interface PluginRouteDeps {
     agentId?: string | null
     modelId?: string | null
     environmentId?: string | null
+    browserHeadless?: boolean | null
   }
 }
 
@@ -20,6 +21,7 @@ export function registerPluginRoutes(app: Hono, deps: PluginRouteDeps): void {
         agentId: deps.defaults?.agentId ?? null,
         modelId: deps.defaults?.modelId ?? null,
         environmentId: deps.defaults?.environmentId ?? null,
+        browserHeadless: deps.defaults?.browserHeadless ?? null,
       }),
     }),
   )

@@ -78,6 +78,7 @@ Inside the TUI, slash commands control runtime selection and session state:
 /agent [id]
 /model [id]
 /browser [id]
+/headless [on|off]
 /themes [id]
 /theme [id]
 /session
@@ -88,7 +89,7 @@ Inside the TUI, slash commands control runtime selection and session state:
 /quit
 ```
 
-Selecting an agent, model, browser, or reasoning effort from the TUI persists the choice to `$OWA_HOME/config.yaml` or `~/.open-web-agent/config.yaml`, so the next TUI session starts with the same defaults.
+Selecting an agent, model, browser, browser headless mode, or reasoning effort from the TUI persists the choice to `$OWA_HOME/config.yaml` or `~/.open-web-agent/config.yaml`, so the next TUI session starts with the same defaults.
 
 ## Runtime Options
 
@@ -184,7 +185,7 @@ parameters:
   #   reasoning_effort: "low"
 ```
 
-`browser_headless` controls whether the local Playwright browser launches headlessly. The shorter `headless` key is accepted as an alias.
+`browser_headless` controls whether the local Playwright browser launches headlessly. The shorter `headless` key is accepted as an alias. In the TUI, use `/headless on` or `/headless off` to persist and apply this setting.
 
 Environment variables take precedence over YAML:
 
@@ -249,6 +250,7 @@ The TUI and headless CLI use the same local HTTP/SSE boundary:
 | `PATCH /config/model` | Persist selected model and reasoning effort. |
 | `PATCH /config/agent` | Persist selected agent. |
 | `PATCH /config/browser` | Persist selected browser. |
+| `PATCH /config/browser/headless` | Persist and apply browser headless mode. |
 
 ## Eval
 

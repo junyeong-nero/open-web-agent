@@ -8,6 +8,7 @@ import {
   resolveModelConfigPath,
   resolveProviderDefaultModel,
   writeAgentSelectionConfig,
+  writeBrowserHeadlessConfig,
   writeBrowserSelectionConfig,
   writeModelSelectionConfig,
 } from "./model-config"
@@ -402,5 +403,33 @@ describe("readModelConfig", () => {
       defaultAgentId: "plan-act",
       defaultBrowserId: "playwright-browser",
     })
+  })
+
+  it("persists browser headless preference while preserving existing config", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-browser-headless-config-"))
+    const configPath = join(dir, ".open-web-agent", "config.yaml")
+    await mkdir(join(dir, ".open-web-agent"), { recursive: true })
+    await writeFile(
+      configPath,
+      [
+        'model: "gpt-5.5"',
+        'browser: "playwright-browser"',
+        "parameters:",
+        "  temperature: 0.25",
+        "unknown_key: keep-me",
+        "",
+      ].join("\n"),
+    )
+
+    await writeBrowserHeadlessConfig({ browserHeadless: true }, { configPath })
+
+    expect(parse(await readFile(configPath, "utf8"))).toMatchObject({
+      model: "gpt-5.5",
+      browser: "playwright-browser",
+      browser_headless: true,
+      parameters: { temperature: 0.25 },
+      unknown_key: "keep-me",
+    })
+    expect(readModelConfig({}, { configPath }).browserHeadless).toBe(true)
   })
 })
