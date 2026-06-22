@@ -84,4 +84,3 @@ There is no auth layer in the current sprint. Loopback binding is the protection
 | `PATCH /config/agent` | Persist selected agent. |
 | `PATCH /config/browser` | Persist selected browser. |
 | `PATCH /config/browser/headless` | Persist and apply browser headless mode. |
-

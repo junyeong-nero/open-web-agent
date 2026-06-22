@@ -87,4 +87,3 @@ For page interaction or screenshot grounding, select the Playwright browser in c
 /agent text-vision-mixed-grounding
 Use mixed grounding on https://example.com
 ```
-

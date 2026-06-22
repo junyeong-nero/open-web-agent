@@ -26,4 +26,3 @@ protocol: oneshot # or jsonl
 `jsonl` agents can also request `model.complete` calls from the TypeScript runtime, so provider selection, model lifecycle events, cancellation, and traces stay owned by the runtime.
 
 Shared Python helpers are available in `agents/_common`. The included examples demonstrate a plan-act model loop, AgentOccam-style browser commands, and mixed text/screenshot grounding.
-

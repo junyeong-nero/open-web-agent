@@ -90,4 +90,3 @@ Run traces are stored as JSONL under a project-hash directory:
 ```text
 $OWA_HOME/projects/<sha256(project-path)>/sessions/<session-id>/runs/<run-id>/events.jsonl
 ```
-
