@@ -100,6 +100,7 @@ Built-in agents and repository examples:
 | `simple-react-agent` | Model-backed browser-control agent. |
 | `see-act` | Model-backed visual grounding agent. |
 | `plan-act` | Repository example Python `jsonl` agent loaded from `agents/plan-act` when this repo is the active project. |
+| `occam` | Repository example Python `jsonl` agent that uses compact AgentOccam-style observation/action commands. |
 | `text-vision-mixed-grounding` | Repository example Python agent that combines extracted text and screenshots. |
 
 Browser environments:
@@ -142,7 +143,7 @@ protocol: oneshot # or jsonl
 
 `oneshot` agents receive one lifecycle request on stdin and return one JSON response. `jsonl` agents can also request `model.complete` calls from the TypeScript runtime, so provider selection, model lifecycle events, cancellation, and traces stay owned by the runtime.
 
-Shared Python helpers are available in `agents/_common`. The included examples demonstrate a plan-act model loop and mixed text/screenshot grounding.
+Shared Python helpers are available in `agents/_common`. The included examples demonstrate a plan-act model loop, AgentOccam-style browser commands, and mixed text/screenshot grounding.
 
 ## Configuration
 

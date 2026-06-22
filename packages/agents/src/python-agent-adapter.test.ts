@@ -792,6 +792,187 @@ if __name__ == "__main__":
     })
   })
 
+  it("lets occam parse compact click commands against numbered observations", async () => {
+    const model = new SequenceModel([
+      [
+        "Interaction history summary: No previous interaction.",
+        "Observation description: The page has a Next button.",
+        "Reason: Click the next button to continue.",
+        "Action: click [1]",
+        "Observation Highlight: 1",
+      ].join("\n"),
+    ])
+    const observedState = state()
+    observedState.lastObservation = {
+      ...observedState.lastObservation!,
+      interactiveElements: [
+        {
+          id: "element_next",
+          role: "button",
+          name: "Next",
+          text: "Next",
+          selector: null,
+          xpath: null,
+          boundingBox: { x: 10, y: 20, width: 40, height: 20 },
+          attributes: {},
+        },
+      ],
+    }
+    const agent = new PythonAgentAdapter({
+      id: "occam",
+      name: "AgentOccam",
+      description: "Occam-style browser agent",
+      command: [python, resolve(repoAgentsDir, "occam/main.py")],
+      protocol: "jsonl",
+      model,
+    })
+
+    const decision = await agent.step(observedState, ctx({ browserTools: defaultBrowserTools }))
+
+    expect(decision).toMatchObject({
+      type: "browser_actions",
+      thought: "Click the next button to continue.",
+      actions: [
+        {
+          id: "occam_click",
+          kind: "click",
+          toolCalls: [
+            {
+              id: "occam_click_tool",
+              type: "click",
+              target: {
+                elementId: "element_next",
+                coordinates: { x: 30, y: 30 },
+              },
+            },
+          ],
+        },
+      ],
+    })
+    const systemPrompt = messageText(model.requests[0]?.messages.find((message) => message.role === "system")?.content ?? "")
+    const userPrompt = messageText(model.requests[0]?.messages.find((message) => message.role === "user")?.content ?? "")
+    expect(systemPrompt).toContain("branch [parent_plan_id]")
+    expect(systemPrompt).toContain("click [id]")
+    expect(userPrompt).toContain("CURRENT OBSERVATION")
+    expect(userPrompt).toContain('1. [element_next] button name="Next" text="Next"')
+  })
+
+  it("lets occam map type commands with enter into type and press_key tool calls", async () => {
+    const model = new SequenceModel([
+      [
+        "Interaction history summary: Search field is visible.",
+        "Observation description: A search box can accept the query.",
+        "Reason: Submit the requested query.",
+        "Action: type [1] [agent occam] [1]",
+        "Observation Highlight: 1",
+      ].join("\n"),
+    ])
+    const observedState = state()
+    observedState.lastObservation = {
+      ...observedState.lastObservation!,
+      interactiveElements: [
+        {
+          id: "element_search",
+          role: "textbox",
+          name: "Search",
+          text: "",
+          selector: "input[name='q']",
+          xpath: null,
+          boundingBox: null,
+          attributes: {},
+        },
+      ],
+    }
+    const agent = new PythonAgentAdapter({
+      id: "occam",
+      name: "AgentOccam",
+      description: "Occam-style browser agent",
+      command: [python, resolve(repoAgentsDir, "occam/main.py")],
+      protocol: "jsonl",
+      model,
+    })
+
+    const decision = await agent.step(observedState, ctx({ browserTools: defaultBrowserTools }))
+
+    expect(decision).toEqual({
+      type: "browser_actions",
+      thought: "Submit the requested query.",
+      actions: [
+        {
+          id: "occam_type",
+          kind: "type",
+          reason: "Submit the requested query.",
+          requiresApproval: false,
+          toolCalls: [
+            {
+              id: "occam_type_tool",
+              type: "type",
+              target: {
+                elementId: "element_search",
+                selector: "input[name='q']",
+                text: null,
+                role: "textbox",
+                name: "Search",
+                coordinates: null,
+              },
+              value: "agent occam",
+            },
+            { id: "occam_type_enter_tool", type: "press_key", key: "Enter" },
+          ],
+        },
+      ],
+    })
+  })
+
+  it("lets occam translate branch commands into visible plan updates", async () => {
+    const model = new SequenceModel([
+      [
+        "Interaction history summary: No previous interaction.",
+        "Observation description: The current page needs a subplan.",
+        "Reason: Break the objective into a smaller navigation target.",
+        "Action: branch [0] [Open the details page]",
+        "Observation Highlight:",
+      ].join("\n"),
+    ])
+    const runtimeContext = ctx({ browserTools: defaultBrowserTools })
+    const agent = new PythonAgentAdapter({
+      id: "occam",
+      name: "AgentOccam",
+      description: "Occam-style browser agent",
+      command: [python, resolve(repoAgentsDir, "occam/main.py")],
+      protocol: "jsonl",
+      model,
+    })
+
+    const decision = await agent.step(state(), runtimeContext)
+
+    expect(runtimeContext.emitted).toEqual([
+      {
+        type: "plan.updated",
+        payload: {
+          items: [
+            { id: "0", title: "Read example.com", status: "completed" },
+            { id: "1", title: "Open the details page", status: "active" },
+          ],
+          reason: "occam_branch",
+        },
+      },
+    ])
+    expect(decision).toEqual({
+      type: "browser_actions",
+      thought: "Break the objective into a smaller navigation target.",
+      actions: [
+        {
+          id: "occam_branch",
+          kind: "plan",
+          reason: "Break the objective into a smaller navigation target.",
+          requiresApproval: false,
+          toolCalls: [{ id: "occam_branch_wait_tool", type: "wait", ms: 1 }],
+        },
+      ],
+    })
+  })
+
   it("includes stderr when the process exits non-zero", async () => {
     const script = await writePythonScript(`
 import sys
