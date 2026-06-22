@@ -1,0 +1,6 @@
+id: occam
+name: AgentOccam
+description: Aligns browser observations and actions into compact AgentOccam-style commands.
+language: python
+entry: main.py
+protocol: jsonl

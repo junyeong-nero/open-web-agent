@@ -686,6 +686,91 @@ describe("startDefaultRuntime", () => {
     }
   })
 
+  it("loads the project-local occam external agent and completes from a stop command", async () => {
+    const originalFetch = globalThis.fetch
+    const providerRequests: unknown[] = []
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input)
+      if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) {
+        return originalFetch(input, init)
+      }
+
+      providerRequests.push(JSON.parse(String(init?.body ?? "{}")))
+      return Response.json({
+        id: "chatcmpl_occam",
+        choices: [
+          {
+            message: {
+              content: [
+                "Interaction history summary: The page already contains the answer.",
+                "Observation description: Enough information is visible.",
+                "Reason: The requested answer is available.",
+                "Action: stop [occam answered]",
+                "Observation Highlight:",
+              ].join("\n"),
+            },
+          },
+        ],
+      })
+    }) as typeof fetch
+
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const runtime = await startDefaultRuntime({
+      home,
+      agentsDir: resolve(import.meta.dir, "../../../agents"),
+      configPath: join(home, "missing-config.yaml"),
+      env: isolatedEnv(home, {
+        OPENAI_API_KEY: "test-openai-key",
+        OPEN_WEB_AGENT_MODEL: "gpt-test",
+      }),
+    })
+
+    try {
+      const plugins = await fetchPlugins(runtime.url)
+      expect(plugins.agents.map((agent) => agent.id)).toContain("occam")
+
+      const completed = new Promise<{ type: string; payload: Record<string, unknown> }>((resolveDone) => {
+        const unsubscribe = runtime.eventBus.subscribe((event) => {
+          if (event.type === "run.completed" || event.type === "run.failed") {
+            unsubscribe()
+            resolveDone({ type: event.type, payload: event.payload })
+          }
+        })
+      })
+      const sessionResponse = await fetch(`${runtime.url}/sessions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectPath: "/tmp/project" }),
+      })
+      const session = (await sessionResponse.json()) as { sessionId: string }
+      const runResponse = await fetch(`${runtime.url}/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId: session.sessionId,
+          prompt: "answer with occam",
+          agentId: "occam",
+          modelId: "openai",
+          environmentId: "playwright-browser",
+        }),
+      })
+      expect(runResponse.ok).toBe(true)
+
+      const result = await completed
+
+      expect(result).toEqual({
+        type: "run.completed",
+        payload: { finalAnswer: "occam answered" },
+      })
+      const providerBody = providerRequests[0] as { messages: Array<{ role: string; content: unknown }> } | undefined
+      const systemContent = providerBody?.messages.find((message) => message.role === "system")?.content
+      expect(typeof systemContent === "string" ? systemContent : "").toContain("branch [parent_plan_id]")
+    } finally {
+      await runtime.stop()
+      globalThis.fetch = originalFetch
+    }
+  })
+
   it("runs text-vision mixed grounding through the runtime model with text and screenshot content", async () => {
     const originalFetch = globalThis.fetch
     const fixtureServer = Bun.serve({
