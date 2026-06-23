@@ -46,4 +46,59 @@ describe("EventBus", () => {
 
     expect(observed).toEqual([0])
   })
+
+  it("isolates subscriber failures from publishers and other subscribers", async () => {
+    const bus = new EventBus()
+    const observed: string[] = []
+
+    bus.subscribe(() => {
+      observed.push("before")
+    })
+    bus.subscribe(() => {
+      throw new Error("broken subscriber")
+    })
+    bus.subscribe(async () => {
+      throw new Error("rejected subscriber")
+    })
+    bus.subscribe(() => {
+      observed.push("after")
+    })
+
+    await expect(bus.publish(event(0))).resolves.toBeUndefined()
+
+    expect(observed).toEqual(["before", "after"])
+  })
+
+  it("dispatches subscribers concurrently for the same event", async () => {
+    const bus = new EventBus()
+    const observed: string[] = []
+    let releaseSlowSubscriber: () => void = () => {}
+    let resolveSlowSubscriberStarted: () => void = () => {}
+    const slowSubscriberStarted = new Promise<void>((resolve) => {
+      resolveSlowSubscriberStarted = resolve
+    })
+    const slowSubscriberRelease = new Promise<void>((resolve) => {
+      releaseSlowSubscriber = resolve
+    })
+
+    bus.subscribe(async () => {
+      resolveSlowSubscriberStarted()
+      await slowSubscriberRelease
+      observed.push("slow")
+    })
+    bus.subscribe(() => {
+      observed.push("fast")
+    })
+
+    const published = bus.publish(event(0))
+    await slowSubscriberStarted
+    await Promise.resolve()
+
+    expect(observed).toEqual(["fast"])
+
+    releaseSlowSubscriber()
+    await published
+
+    expect(observed).toEqual(["fast", "slow"])
+  })
 })

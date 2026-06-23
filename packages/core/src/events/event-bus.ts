@@ -13,8 +13,15 @@ export class EventBus {
   }
 
   async publish(event: RunEvent): Promise<void> {
-    for (const handler of [...this.handlers]) {
-      await handler(event)
-    }
+    await Promise.all(
+      [...this.handlers].map(async (handler) => {
+        try {
+          await handler(event)
+        } catch {
+          // Subscribers are best-effort observers. A broken stream or logger must
+          // not fail the run that produced the event.
+        }
+      }),
+    )
   }
 }

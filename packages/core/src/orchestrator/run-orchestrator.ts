@@ -99,7 +99,7 @@ export class RunOrchestrator {
       }
       sequence += 1
       await eventStore.append(event)
-      await this.options.eventBus.publish(event)
+      void this.options.eventBus.publish(event).catch(() => undefined)
       return event
     }
 
