@@ -182,7 +182,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     agentId: defaultAgentId,
     modelId: defaultModelId,
     environmentId: defaultEnvironmentId,
-    maxSteps: 4,
+    maxSteps: modelConfig.maxSteps,
   })
   const storage = new SQLiteStore(join(home, "metadata.sqlite"))
   storage.migrate()
