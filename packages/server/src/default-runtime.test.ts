@@ -394,6 +394,97 @@ describe("startDefaultRuntime", () => {
     }
   })
 
+  it("uses the configured max steps for run loop limits", async () => {
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+    const agentsDir = join(home, "agents")
+    const agentDir = join(agentsDir, "loop-agent")
+    const configPath = join(home, ".config.yaml")
+    await mkdir(agentDir, { recursive: true })
+    await writeFile(configPath, ["max_steps: 1", ""].join("\n"))
+    await writeFile(
+      join(agentDir, "agent.yaml"),
+      [
+        "id: loop-agent",
+        "name: Loop Agent",
+        "description: Always requests another browser step",
+        "language: python",
+        "entry: main.py",
+        "",
+      ].join("\n"),
+    )
+    await writeFile(
+      join(agentDir, "main.py"),
+      [
+        "import json",
+        "import sys",
+        "",
+        "request = json.load(sys.stdin)",
+        'if request["method"] == "initialize":',
+        '    print(json.dumps({"ok": True}))',
+        'elif request["method"] == "finalize":',
+        '    print(json.dumps({"finalAnswer": request["state"].get("finalAnswer") or ""}))',
+        "else:",
+        "    print(json.dumps({",
+        '        "decision": {',
+        '            "type": "browser_actions",',
+        '            "thought": "Need another step.",',
+        '            "actions": [{',
+        '                "id": "wait_once",',
+        '                "kind": "wait",',
+        '                "reason": "Keep the run in the browser loop.",',
+        '                "requiresApproval": False,',
+        '                "toolCalls": [{"id": "wait_once_tool", "type": "wait", "ms": 1}],',
+        "            }],",
+        "        },",
+        "    }))",
+        "",
+      ].join("\n"),
+    )
+    const runtime = await startDefaultRuntime({
+      home,
+      agentsDir,
+      configPath,
+      env: isolatedEnv(home),
+    })
+
+    try {
+      const failed = new Promise<string>((resolve) => {
+        const unsubscribe = runtime.eventBus.subscribe((event) => {
+          if (event.type === "run.failed") {
+            unsubscribe()
+            resolve(String(event.payload.message ?? ""))
+          }
+        })
+      })
+      const sessionResponse = await fetch(`${runtime.url}/sessions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectPath: "/tmp/open-web-agent-max-steps-test" }),
+      })
+      expect(sessionResponse.ok).toBe(true)
+      const session = (await sessionResponse.json()) as { sessionId: string }
+      const runResponse = await fetch(`${runtime.url}/runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId: session.sessionId,
+          prompt: "keep going",
+          agentId: "loop-agent",
+          environmentId: "playwright-browser",
+        }),
+      })
+      expect(runResponse.ok).toBe(true)
+
+      const message = await Promise.race([
+        failed,
+        new Promise<string>((resolve) => setTimeout(() => resolve("run did not fail"), 5000)),
+      ])
+      expect(message).toBe("Max steps exceeded: 1")
+    } finally {
+      await runtime.stop()
+    }
+  })
+
   it("registers Python agents from a manifest directory", async () => {
     const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
     const agentsDir = join(home, "agents")

@@ -16,6 +16,7 @@ export interface ModelConfig {
   reasoningEffort: string
   contextWindowTokens: number
   maxRetry: number
+  maxSteps: number
   openaiApiKey: string | null
   openrouterApiKey: string | null
   geminiApiKey: string | null
@@ -75,6 +76,7 @@ const defaultModel = defaultOpenRouterModel
 const defaultReasoningEffort = "medium"
 const defaultContextWindowTokens = 128000
 const defaultMaxRetry = 0
+const defaultMaxSteps = 100
 const defaultBrowserHeadless = false
 const defaultBrowserPreventFocus = false
 
@@ -102,6 +104,7 @@ export function readModelConfig(env: NodeJS.ProcessEnv = process.env, options: R
     reasoningEffort: env.OPEN_WEB_AGENT_REASONING_EFFORT || fileConfig.reasoningEffort || defaultReasoningEffort,
     contextWindowTokens: readContextWindowTokens(env.OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS) ?? fileConfig.contextWindowTokens ?? defaultContextWindowTokens,
     maxRetry: readMaxRetry(env.OPEN_WEB_AGENT_MAX_RETRY) ?? fileConfig.maxRetry ?? defaultMaxRetry,
+    maxSteps: readMaxSteps(env.OPEN_WEB_AGENT_MAX_STEPS) ?? fileConfig.maxSteps ?? defaultMaxSteps,
     openaiApiKey: env.OPENAI_API_KEY || fileConfig.openaiApiKey || null,
     openrouterApiKey: env.OPENROUTER_API_KEY || fileConfig.openrouterApiKey || null,
     geminiApiKey: env.GEMINI_API_KEY || fileConfig.geminiApiKey || null,
@@ -231,6 +234,7 @@ function readConfigFile(configPath: string): Partial<ModelConfig> {
     reasoningEffort: readOptionalString(parsed, configPath, "reasoning_effort", "reasoningEffort"),
     contextWindowTokens: readOptionalPositiveInteger(parsed, configPath, "context_window_tokens", "contextWindowTokens"),
     maxRetry: readOptionalNonNegativeInteger(parsed, configPath, "max_retry", "maxRetry"),
+    maxSteps: readOptionalPositiveInteger(parsed, configPath, "max_steps", "maxSteps"),
     openaiApiKey: readOptionalString(parsed, configPath, "openai_api_key", "openaiApiKey"),
     openrouterApiKey: readOptionalString(parsed, configPath, "openrouter_api_key", "openrouterApiKey"),
     geminiApiKey: readOptionalString(parsed, configPath, "gemini_api_key", "geminiApiKey"),
@@ -399,6 +403,15 @@ function readMaxRetry(value: string | undefined): number | undefined {
   const parsed = Number(value)
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new Error("Invalid OPEN_WEB_AGENT_MAX_RETRY: must be a non-negative integer")
+  }
+  return parsed
+}
+
+function readMaxSteps(value: string | undefined): number | undefined {
+  if (!value) return undefined
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error("Invalid OPEN_WEB_AGENT_MAX_STEPS: must be a positive integer")
   }
   return parsed
 }

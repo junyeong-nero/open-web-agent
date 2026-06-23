@@ -20,6 +20,7 @@ browser_prevent_focus: true
 reasoning_effort: "medium"
 context_window_tokens: 128000
 max_retry: 2
+max_steps: 100
 codex_auth_path: "~/.codex/auth.json"
 
 openai_api_key: "sk-..."
@@ -57,6 +58,7 @@ OPEN_WEB_AGENT_BROWSER_PREVENT_FOCUS
 OPEN_WEB_AGENT_REASONING_EFFORT
 OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS
 OPEN_WEB_AGENT_MAX_RETRY
+OPEN_WEB_AGENT_MAX_STEPS
 OPEN_WEB_AGENT_MODEL_TIMEOUT_MS
 OPEN_WEB_AGENT_ALLOW_PRIVATE_NETWORK_NAVIGATION
 OPEN_WEB_AGENT_CODEX_AUTH_PATH
@@ -68,6 +70,8 @@ CODEX_ACCESS_TOKEN
 ```
 
 `OPEN_WEB_AGENT_ALLOW_PRIVATE_NETWORK_NAVIGATION` defaults to false. Set it only for trusted local development or tests that intentionally navigate to loopback or private-network fixtures.
+
+`max_steps` controls how many agent loop steps a run can take before failing with `Max steps exceeded`. It defaults to 100. `OPEN_WEB_AGENT_MAX_STEPS` overrides the YAML value.
 
 If Codex file-backed ChatGPT auth is available at `codex_auth_path`, or if `CODEX_ACCESS_TOKEN` is set, the runtime registers the `codex-oauth` model provider.
 
