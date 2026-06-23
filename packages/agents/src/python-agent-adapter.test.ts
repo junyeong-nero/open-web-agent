@@ -924,6 +924,62 @@ if __name__ == "__main__":
     })
   })
 
+  it("lets occam parse named press_enter_after flags without typing them", async () => {
+    const model = new SequenceModel([
+      [
+        "Interaction history summary: Search field is visible.",
+        "Observation description: A search box can accept the query.",
+        "Reason: Fill the search field without submitting yet.",
+        "Action: type [1] [agent occam] [press_enter_after=0]",
+        "Observation Highlight: 1",
+      ].join("\n"),
+    ])
+    const observedState = state()
+    observedState.lastObservation = {
+      ...observedState.lastObservation!,
+      interactiveElements: [
+        {
+          id: "element_search",
+          role: "textbox",
+          name: "Search",
+          text: "",
+          selector: "input[name='q']",
+          xpath: null,
+          boundingBox: null,
+          attributes: {},
+        },
+      ],
+    }
+    const agent = new PythonAgentAdapter({
+      id: "occam",
+      name: "AgentOccam",
+      description: "Occam-style browser agent",
+      command: [python, resolve(repoAgentsDir, "occam/main.py")],
+      protocol: "jsonl",
+      model,
+    })
+
+    const decision = await agent.step(observedState, ctx({ browserTools: defaultBrowserTools }))
+
+    expect(decision).toMatchObject({
+      type: "browser_actions",
+      actions: [
+        {
+          toolCalls: [
+            {
+              type: "type",
+              value: "agent occam",
+            },
+          ],
+        },
+      ],
+    })
+    expect(decision.type).toBe("browser_actions")
+    if (decision.type === "browser_actions") {
+      expect(decision.actions[0]?.toolCalls).toHaveLength(1)
+    }
+  })
+
   it("lets occam translate branch commands into visible plan updates", async () => {
     const model = new SequenceModel([
       [
