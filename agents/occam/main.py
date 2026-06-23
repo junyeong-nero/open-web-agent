@@ -327,7 +327,11 @@ def element_for_action(action, observation):
 
 
 def parse_type_action(action, observation):
-    match = re.search(r"type\s*\[(\d+)\]\s*\[(.*?)\]\s*(?:\[(0|1)\])?\s*$", action, re.IGNORECASE | re.DOTALL)
+    match = re.search(
+        r"type\s*\[(\d+)\]\s*\[(.*?)\]\s*(?:\[(?:press_enter_after=)?(0|1)\])?\s*$",
+        action,
+        re.IGNORECASE | re.DOTALL,
+    )
     if not match:
         raise RuntimeError(f"Invalid Occam type command: {action}")
     element = element_for_action(f"click [{match.group(1)}]", observation)
