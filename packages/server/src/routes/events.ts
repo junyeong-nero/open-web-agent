@@ -9,13 +9,18 @@ export interface EventRouteDeps {
 export function registerEventRoutes(app: Hono, deps: EventRouteDeps): void {
   app.get("/events", (c) =>
     streamSSE(c, async (stream) => {
-      const unsubscribe = deps.eventBus.subscribe((event) =>
-        stream.writeSSE({
-          event: event.type,
-          id: String(event.sequence),
-          data: JSON.stringify(event),
-        }),
-      )
+      let unsubscribe: () => void = () => {}
+      unsubscribe = deps.eventBus.subscribe(async (event) => {
+        try {
+          await stream.writeSSE({
+            event: event.type,
+            id: String(event.sequence),
+            data: JSON.stringify(event),
+          })
+        } catch {
+          unsubscribe()
+        }
+      })
 
       stream.onAbort(unsubscribe)
       await stream.write(": connected\n\n")

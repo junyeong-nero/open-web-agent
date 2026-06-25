@@ -439,6 +439,58 @@ describe("RunOrchestrator", () => {
     expect(persistedEvents.map((event) => event.type)).toEqual(setup.observedEvents.map((event) => event.type))
   })
 
+  it("does not wait for live event subscribers before continuing the run", async () => {
+    const eventBus = new EventBus()
+    let releaseSubscriber: () => void = () => {}
+    const subscriberRelease = new Promise<void>((resolve) => {
+      releaseSubscriber = resolve
+    })
+    let subscriberCalls = 0
+    eventBus.subscribe(async () => {
+      subscriberCalls += 1
+      await subscriberRelease
+    })
+
+    const registry = new PluginRegistry()
+    const environment = new TestEnvironment()
+    const toolAdapter = new TestBrowserToolAdapter(environment)
+    registry.registerAgent(new TestAgent())
+    registry.registerEnvironment(environment)
+    registry.registerToolAdapter(toolAdapter)
+
+    const home = await mkdtemp(join(tmpdir(), "owa-orchestrator-"))
+    const runOrchestrator = new RunOrchestrator({
+      home,
+      eventBus,
+      registry,
+      agentId: "test-agent",
+      environmentId: "test-browser",
+      maxSteps: 4,
+      now: () => new Date("2026-06-17T00:00:00.000Z"),
+    })
+    const started = runOrchestrator.startRun({
+      session: session(),
+      prompt: "example.com에 접속해서 페이지 제목을 알려줘",
+    })
+    let timeout: ReturnType<typeof setTimeout> | null = null
+
+    try {
+      const result = await Promise.race([
+        started.result,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("run timed out waiting for event subscriber")), 500)
+        }),
+      ])
+
+      expect(result.status).toBe("completed")
+      expect(result.finalAnswer).toBe(finalAnswer)
+      expect(subscriberCalls).toBeGreaterThan(0)
+    } finally {
+      if (timeout) clearTimeout(timeout)
+      releaseSubscriber()
+    }
+  })
+
   it("injects the selected tool adapter catalog into runtime context", async () => {
     const agent = new ToolCatalogAgent()
     const environment = new TestEnvironment()
