@@ -2,7 +2,16 @@ import { existsSync, readdirSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { chromium, firefox, webkit, type Browser, type BrowserContext, type Page } from "playwright"
+import {
+  chromium,
+  errors,
+  firefox,
+  webkit,
+  type Browser,
+  type BrowserContext,
+  type ElementHandle,
+  type Page,
+} from "playwright"
 import {
   isAllowedBrowserNavigationUrl,
   REDACTED_VALUE,
@@ -32,6 +41,13 @@ interface PlaywrightSessionState {
   lastScreenshotPath: string | null
   screenshotCount: number
 }
+
+const OBSERVATION_CAPTURE_ATTEMPTS = 3
+const NAVIGATION_CONTEXT_ERROR_PATTERNS = [
+  "Execution context was destroyed",
+  "Cannot find context with specified id",
+]
+const RAW_INPUT_NAVIGATION_DETECTION_MS = 250
 
 export class PlaywrightEnvironment implements BrowserEnvironment {
   id = "playwright-browser"
@@ -189,76 +205,86 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
 
   private async readObservation(state: PlaywrightSessionState): Promise<Observation> {
     const { page } = state
-    const [title, text, interactiveElements] = await Promise.all([
-      page.title().catch(() => null),
-      page.locator("body").innerText().catch(() => null),
-      page.evaluate(() => {
-        const candidates: Array<{ element: HTMLElement; rect: DOMRect }> = []
-        const elements = Array.from(
-          document.querySelectorAll<HTMLElement>(
-            "a,button,input,textarea,select,[role],[tabindex],[contenteditable='true']",
-          ),
-        )
 
-        for (const element of elements) {
-          const rect = element.getBoundingClientRect()
-          const style = window.getComputedStyle(element)
-          const isHiddenInput = element instanceof HTMLInputElement && element.type === "hidden"
-          const isVisible =
-            !isHiddenInput &&
-            !element.hidden &&
-            element.getAttribute("aria-hidden") !== "true" &&
-            style.display !== "none" &&
-            style.visibility !== "hidden" &&
-            style.visibility !== "collapse" &&
-            rect.width > 0 &&
-            rect.height > 0 &&
-            rect.bottom > 0 &&
-            rect.right > 0 &&
-            rect.top < window.innerHeight &&
-            rect.left < window.innerWidth
+    for (let attempt = 1; attempt <= OBSERVATION_CAPTURE_ATTEMPTS; attempt += 1) {
+      try {
+        const snapshot = await page.evaluate(() => {
+          const candidates: Array<{ element: HTMLElement; rect: DOMRect }> = []
+          const elements = Array.from(
+            document.querySelectorAll<HTMLElement>(
+              "a,button,input,textarea,select,[role],[tabindex],[contenteditable='true']",
+            ),
+          )
 
-          if (!isVisible) continue
-          candidates.push({ element, rect })
-          if (candidates.length >= 50) break
-        }
+          for (const element of elements) {
+            const rect = element.getBoundingClientRect()
+            const style = window.getComputedStyle(element)
+            const isHiddenInput = element instanceof HTMLInputElement && element.type === "hidden"
+            const isVisible =
+              !isHiddenInput &&
+              !element.hidden &&
+              element.getAttribute("aria-hidden") !== "true" &&
+              style.display !== "none" &&
+              style.visibility !== "hidden" &&
+              style.visibility !== "collapse" &&
+              rect.width > 0 &&
+              rect.height > 0 &&
+              rect.bottom > 0 &&
+              rect.right > 0 &&
+              rect.top < window.innerHeight &&
+              rect.left < window.innerWidth
 
-        return candidates.map(({ element, rect }, index) => {
-          const attributes: Record<string, string> = {}
-          for (const attribute of Array.from(element.attributes)) {
-            attributes[attribute.name] = attribute.value
+            if (!isVisible) continue
+            candidates.push({ element, rect })
+            if (candidates.length >= 50) break
           }
 
           return {
-            id: element.id || `element_${index + 1}`,
-            role: element.getAttribute("role") ?? element.tagName.toLowerCase(),
-            name:
-              element.getAttribute("aria-label") ??
-              element.getAttribute("title") ??
-              ("value" in element ? String((element as HTMLInputElement).value || "") : null),
-            text: element.innerText || element.textContent || null,
-            selector: element.id ? `#${CSS.escape(element.id)}` : null,
-            xpath: null,
-            boundingBox: {
-              x: rect.x,
-              y: rect.y,
-              width: rect.width,
-              height: rect.height,
-            },
-            attributes,
+            url: window.location.href,
+            title: document.title || null,
+            text: document.body?.innerText ?? null,
+            interactiveElements: candidates.map(({ element, rect }, index) => {
+              const attributes: Record<string, string> = {}
+              for (const attribute of Array.from(element.attributes)) {
+                attributes[attribute.name] = attribute.value
+              }
+
+              return {
+                id: element.id || `element_${index + 1}`,
+                role: element.getAttribute("role") ?? element.tagName.toLowerCase(),
+                name:
+                  element.getAttribute("aria-label") ??
+                  element.getAttribute("title") ??
+                  ("value" in element ? String((element as HTMLInputElement).value || "") : null),
+                text: element.innerText || element.textContent || null,
+                selector: element.id ? `#${CSS.escape(element.id)}` : null,
+                xpath: null,
+                boundingBox: {
+                  x: rect.x,
+                  y: rect.y,
+                  width: rect.width,
+                  height: rect.height,
+                },
+                attributes,
+              }
+            }),
           }
         })
-      }),
-    ])
 
-    return redactSensitiveData({
-      url: page.url(),
-      title,
-      text,
-      screenshotPath: state.lastScreenshotPath,
-      interactiveElements,
-      metadata: {},
-    })
+        return redactSensitiveData({
+          ...snapshot,
+          screenshotPath: state.lastScreenshotPath,
+          metadata: {},
+        })
+      } catch (error) {
+        if (attempt === OBSERVATION_CAPTURE_ATTEMPTS || !isNavigationContextError(error)) {
+          throw error
+        }
+        await page.waitForLoadState("domcontentloaded")
+      }
+    }
+
+    throw new Error("Observation capture exhausted without a result")
   }
 }
 
@@ -298,8 +324,26 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
       const locator = locatorForTarget(page, call.target)
       if (locator) {
         await this.withToolAbort(locator.click(), ctx)
+        await this.withToolAbort(page.waitForLoadState("domcontentloaded"), ctx)
       } else if (call.target.coordinates) {
-        await this.withToolAbort(page.mouse.click(call.target.coordinates.x, call.target.coordinates.y), ctx)
+        const target = await elementAtCoordinates(page, call.target.coordinates)
+        if (target) {
+          try {
+            await this.withToolAbort(target.element.click({ position: target.position }), ctx)
+            await this.withToolAbort(page.waitForLoadState("domcontentloaded"), ctx)
+          } finally {
+            await target.element.dispose().catch(() => {})
+          }
+        } else {
+          const navigation = waitForMainFrameNavigation(page)
+          await this.withToolAbort(
+            Promise.all([
+              page.mouse.click(call.target.coordinates.x, call.target.coordinates.y),
+              navigation,
+            ]),
+            ctx,
+          )
+        }
       } else {
         return {
           ok: false,
@@ -341,7 +385,9 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
     }
 
     if (call.type === "press_key") {
-      await this.withToolAbort(page.keyboard.press(call.key), ctx)
+      const locator = await focusedLocatorForKeyPress(page)
+      await this.withToolAbort(locator.press(call.key), ctx)
+      await this.withToolAbort(page.waitForLoadState("domcontentloaded"), ctx)
       return {
         ok: true,
         message: "pressed key",
@@ -496,12 +542,62 @@ function locatorForTarget(page: Page, target: {
   return null
 }
 
+async function focusedLocatorForKeyPress(page: Page) {
+  const focused = page.locator(":focus")
+  return (await focused.count()) > 0 ? focused.first() : page.locator("body")
+}
+
+async function elementAtCoordinates(
+  page: Page,
+  coordinates: { x: number; y: number },
+): Promise<{ element: ElementHandle<HTMLElement>; position: { x: number; y: number } } | null> {
+  const handle = await page.evaluateHandle(({ x, y }) => document.elementFromPoint(x, y), coordinates)
+  const element = handle.asElement() as ElementHandle<HTMLElement> | null
+  if (!element) {
+    await handle.dispose()
+    return null
+  }
+
+  const box = await element.boundingBox()
+  if (!box) {
+    await element.dispose()
+    return null
+  }
+
+  return {
+    element,
+    position: {
+      x: coordinates.x - box.x,
+      y: coordinates.y - box.y,
+    },
+  }
+}
+
+async function waitForMainFrameNavigation(page: Page): Promise<void> {
+  try {
+    await page.waitForEvent("framenavigated", {
+      predicate: (frame) => frame === page.mainFrame(),
+      timeout: RAW_INPUT_NAVIGATION_DETECTION_MS,
+    })
+  } catch (error) {
+    if (error instanceof errors.TimeoutError) return
+    throw error
+  }
+
+  await page.waitForLoadState("domcontentloaded")
+}
+
 function isGeneratedElementId(elementId: string): boolean {
   return /^element_\d+$/.test(elementId)
 }
 
 function escapeCssString(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+}
+
+function isNavigationContextError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return NAVIGATION_CONTEXT_ERROR_PATTERNS.some((pattern) => message.includes(pattern))
 }
 
 function withAbort<T>(promise: Promise<T>, signal: AbortSignal, onAbort?: () => Promise<void> | void): Promise<T> {

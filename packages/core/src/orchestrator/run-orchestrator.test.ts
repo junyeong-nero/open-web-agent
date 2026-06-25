@@ -54,6 +54,7 @@ class TestAgent implements AgentPlugin {
 class TestEnvironment implements BrowserEnvironment {
   id = "test-browser"
   name = "Test Browser"
+  observeCalls = 0
   private observation: Observation = {
     url: "about:blank",
     title: null,
@@ -77,6 +78,7 @@ class TestEnvironment implements BrowserEnvironment {
   }
 
   async observe(): Promise<Observation> {
+    this.observeCalls += 1
     return this.observation
   }
 
@@ -304,6 +306,14 @@ class FailedResultBrowserToolAdapter extends TestBrowserToolAdapter {
   }
 }
 
+class NullObservationBrowserToolAdapter extends TestBrowserToolAdapter {
+  async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
+    this.calls.push(call)
+    const result = await this.environment.applyBrowserTool(call, ctx)
+    return { ...result, observation: null }
+  }
+}
+
 function delay(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.reject(new DOMException("Run cancelled", "AbortError"))
   return new Promise((resolve, reject) => {
@@ -437,6 +447,43 @@ describe("RunOrchestrator", () => {
       eventsPath(setup.home, runSession.projectHash, runSession.id, started.runId),
     ).readAll()
     expect(persistedEvents.map((event) => event.type)).toEqual(setup.observedEvents.map((event) => event.type))
+  })
+
+  it("reuses the final browser tool observation after an action batch", async () => {
+    const environment = new TestEnvironment()
+    const setup = await orchestratorWith(new TestAgent(), environment, new TestBrowserToolAdapter(environment))
+
+    const result = await setup.orchestrator.startRun({
+      session: session(),
+      prompt: "reuse tool observation",
+    }).result
+
+    expect(result.status).toBe("completed")
+    expect(environment.observeCalls).toBe(1)
+    const captured = setup.observedEvents.filter((event) => event.type === "observation.captured")
+    expect(captured).toHaveLength(2)
+    expect(captured.at(-1)?.payload.observation).toMatchObject({
+      url: "https://example.com/",
+      title: "Example Domain",
+    })
+  })
+
+  it("falls back to environment observation when tool results contain none", async () => {
+    const environment = new TestEnvironment()
+    const setup = await orchestratorWith(new TestAgent(), environment, new NullObservationBrowserToolAdapter(environment))
+
+    const result = await setup.orchestrator.startRun({
+      session: session(),
+      prompt: "fallback observation",
+    }).result
+
+    expect(result.status).toBe("completed")
+    expect(environment.observeCalls).toBe(2)
+    const captured = setup.observedEvents.filter((event) => event.type === "observation.captured")
+    expect(captured.at(-1)?.payload.observation).toMatchObject({
+      url: "https://example.com/",
+      title: "Example Domain",
+    })
   })
 
   it("does not wait for live event subscribers before continuing the run", async () => {

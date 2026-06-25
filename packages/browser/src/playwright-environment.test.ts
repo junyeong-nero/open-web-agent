@@ -3,6 +3,7 @@ import { mkdtemp, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { EventBus, type RuntimeContext } from "@open-web-agent/core"
+import { errors } from "playwright"
 import * as playwrightEnvironment from "./playwright-environment"
 import { PlaywrightBrowserToolAdapter, PlaywrightEnvironment } from "./playwright-environment"
 
@@ -36,6 +37,11 @@ function fixtureHtml(): string {
       <head><title>Playwright Fixture</title></head>
       <body>
         <button id="toggle">Reveal</button>
+        <form action="/submitted">
+          <input id="search" aria-label="Search" />
+          <button id="submit" type="submit">Submit</button>
+        </form>
+        <a id="destination" href="/submitted">Destination</a>
         <input id="name" aria-label="Name" />
         <input id="password" type="password" value="initial-secret" />
         <input id="hidden-token" type="hidden" name="where" value="nexearch" />
@@ -57,7 +63,17 @@ function startFixtureServer(): { url: string; stop(): void } {
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch: () => new Response(fixtureHtml(), { headers: { "content-type": "text/html" } }),
+    async fetch(request) {
+      const url = new URL(request.url)
+      if (url.pathname === "/submitted") {
+        await Bun.sleep(50)
+        return new Response(
+          "<!doctype html><html><head><title>Submitted</title></head><body>Submitted destination</body></html>",
+          { headers: { "content-type": "text/html" } },
+        )
+      }
+      return new Response(fixtureHtml(), { headers: { "content-type": "text/html" } })
+    },
   })
 
   return {
@@ -162,6 +178,86 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
     resolve = () => resolvePromise()
   })
   return { promise, resolve }
+}
+
+const observationSnapshot = {
+  url: "https://example.com/result",
+  title: "Result",
+  text: "Stable result",
+  interactiveElements: [],
+}
+
+function installObservationPage(
+  env: PlaywrightEnvironment,
+  ctx: RuntimeContext,
+  options: {
+    evaluate(): Promise<typeof observationSnapshot>
+    waitForLoadState?(): Promise<void>
+  },
+): { evaluateCalls: () => number; loadStateCalls: () => number } {
+  let evaluateCalls = 0
+  let loadStateCalls = 0
+  const page = {
+    async title() {
+      return observationSnapshot.title
+    },
+    locator() {
+      return {
+        async innerText() {
+          return observationSnapshot.text
+        },
+      }
+    },
+    url() {
+      return observationSnapshot.url
+    },
+    async evaluate() {
+      evaluateCalls += 1
+      return options.evaluate()
+    },
+    async waitForLoadState() {
+      loadStateCalls += 1
+      await options.waitForLoadState?.()
+    },
+  }
+
+  ;(
+    env as unknown as {
+      browser: { isConnected(): boolean; close(): Promise<void> }
+      sessions: Map<
+        string,
+        {
+          context: { close(): Promise<void> }
+          page: typeof page
+          lastScreenshotPath: string | null
+          screenshotCount: number
+        }
+      >
+    }
+  ).browser = { isConnected: () => true, async close() {} }
+  ;(
+    env as unknown as {
+      sessions: Map<
+        string,
+        {
+          context: { close(): Promise<void> }
+          page: typeof page
+          lastScreenshotPath: string | null
+          screenshotCount: number
+        }
+      >
+    }
+  ).sessions.set(ctx.session.id, {
+    context: { async close() {} },
+    page,
+    lastScreenshotPath: null,
+    screenshotCount: 0,
+  })
+
+  return {
+    evaluateCalls: () => evaluateCalls,
+    loadStateCalls: () => loadStateCalls,
+  }
 }
 
 function gateFakeNewPages(fake: ReturnType<typeof createFakeBrowser>) {
@@ -476,6 +572,74 @@ describe("PlaywrightEnvironment", () => {
     expect(closeCalls).toBe(1)
   })
 
+  it("retries an observation after a navigation destroys the execution context", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const ctx = await context()
+    let failuresRemaining = 1
+    const calls = installObservationPage(env, ctx, {
+      async evaluate() {
+        if (failuresRemaining > 0) {
+          failuresRemaining -= 1
+          throw new Error("evaluate: Execution context was destroyed, most likely because of a navigation")
+        }
+        return observationSnapshot
+      },
+    })
+
+    const observation = await env.observe(ctx)
+
+    expect(observation).toMatchObject(observationSnapshot)
+    expect(calls.evaluateCalls()).toBe(2)
+    expect(calls.loadStateCalls()).toBe(1)
+  })
+
+  it("stops retrying an observation after three navigation-context failures", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const ctx = await context()
+    const calls = installObservationPage(env, ctx, {
+      async evaluate() {
+        throw new Error("evaluate: Cannot find context with specified id")
+      },
+    })
+
+    await expect(env.observe(ctx)).rejects.toThrow("Cannot find context with specified id")
+    expect(calls.evaluateCalls()).toBe(3)
+    expect(calls.loadStateCalls()).toBe(2)
+  })
+
+  it("does not retry non-navigation observation failures", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const ctx = await context()
+    const calls = installObservationPage(env, ctx, {
+      async evaluate() {
+        throw new Error("evaluate: fixture exploded")
+      },
+    })
+
+    await expect(env.observe(ctx)).rejects.toThrow("fixture exploded")
+    expect(calls.evaluateCalls()).toBe(1)
+    expect(calls.loadStateCalls()).toBe(0)
+  })
+
+  it("cancels while waiting to retry an observation", async () => {
+    const abort = new AbortController()
+    const ctx = await context("ses_1", "run_1", abort.signal)
+    const env = new PlaywrightEnvironment({ headless: true })
+    installObservationPage(env, ctx, {
+      async evaluate() {
+        throw new Error("evaluate: Execution context was destroyed, most likely because of a navigation")
+      },
+      async waitForLoadState() {
+        await new Promise<void>(() => {})
+      },
+    })
+
+    const observation = env.observe(ctx)
+    setTimeout(() => abort.abort(), 5)
+
+    await expect(observation).rejects.toThrow("Run cancelled")
+  })
+
   it("clicks fixture elements by DOM elementId target", async () => {
     const env = new PlaywrightEnvironment({ headless: true })
     const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
@@ -496,6 +660,310 @@ describe("PlaywrightEnvironment", () => {
 
       expect(result.ok).toBe(true)
       expect(result.observation?.text).toContain("Revealed")
+    } finally {
+      fixture.stop()
+      await env.close(ctx)
+    }
+  })
+
+  it("waits for form navigation triggered by pressing Enter", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
+    try {
+      await env.reset(ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
+      await tools.execute(
+        {
+          id: "tool_2",
+          type: "type",
+          target: { selector: "#search", elementId: null, text: null, role: null, name: null, coordinates: null },
+          value: "weather",
+        },
+        ctx,
+      )
+
+      const result = await tools.execute({ id: "tool_3", type: "press_key", key: "Enter" }, ctx)
+
+      expect(result.ok).toBe(true)
+      expect(result.observation?.url).toContain("/submitted")
+      expect(result.observation?.title).toBe("Submitted")
+      expect(result.observation?.text).toContain("Submitted destination")
+    } finally {
+      fixture.stop()
+      await env.close(ctx)
+    }
+  })
+
+  it("uses the focused locator for key presses", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
+    try {
+      await env.reset(ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
+      const page = env.pageForTools(ctx)
+      await page.locator("#name").focus()
+      const originalPress = page.keyboard.press.bind(page.keyboard)
+      ;(page.keyboard as unknown as { press(): Promise<void> }).press = async () => {
+        throw new Error("raw keyboard press should not be used")
+      }
+
+      try {
+        const result = await tools.execute({ id: "tool_2", type: "press_key", key: "A" }, ctx)
+        expect(result.ok).toBe(true)
+        expect(result.observation?.text).toContain("Typed A")
+      } finally {
+        ;(page.keyboard as unknown as { press: typeof originalPress }).press = originalPress
+      }
+    } finally {
+      fixture.stop()
+      await env.close(ctx)
+    }
+  })
+
+  it("checks document readiness after a focused key press", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
+    try {
+      await env.reset(ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
+      const page = env.pageForTools(ctx)
+      await page.locator("#name").focus()
+      const originalWaitForLoadState = page.waitForLoadState.bind(page)
+      let readinessChecks = 0
+      ;(page as unknown as { waitForLoadState(): Promise<void> }).waitForLoadState = async () => {
+        readinessChecks += 1
+        await originalWaitForLoadState("domcontentloaded")
+      }
+
+      try {
+        await tools.execute({ id: "tool_2", type: "press_key", key: "A" }, ctx)
+        expect(readinessChecks).toBe(1)
+      } finally {
+        ;(page as unknown as { waitForLoadState: typeof originalWaitForLoadState }).waitForLoadState =
+          originalWaitForLoadState
+      }
+    } finally {
+      fixture.stop()
+      await env.close(ctx)
+    }
+  })
+
+  it("waits for navigation triggered by a locator click", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
+    try {
+      await env.reset(ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
+      const result = await tools.execute(
+        {
+          id: "tool_2",
+          type: "click",
+          target: { selector: "#destination", elementId: null, text: null, role: null, name: null, coordinates: null },
+        },
+        ctx,
+      )
+
+      expect(result.observation?.title).toBe("Submitted")
+      expect(result.observation?.url).toContain("/submitted")
+    } finally {
+      fixture.stop()
+      await env.close(ctx)
+    }
+  })
+
+  it("checks document readiness after a locator click", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
+    try {
+      await env.reset(ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
+      const page = env.pageForTools(ctx)
+      const originalWaitForLoadState = page.waitForLoadState.bind(page)
+      let readinessChecks = 0
+      ;(page as unknown as { waitForLoadState(): Promise<void> }).waitForLoadState = async () => {
+        readinessChecks += 1
+        await originalWaitForLoadState("domcontentloaded")
+      }
+
+      try {
+        await tools.execute(
+          {
+            id: "tool_2",
+            type: "click",
+            target: { selector: "#toggle", elementId: null, text: null, role: null, name: null, coordinates: null },
+          },
+          ctx,
+        )
+        expect(readinessChecks).toBe(1)
+      } finally {
+        ;(page as unknown as { waitForLoadState: typeof originalWaitForLoadState }).waitForLoadState =
+          originalWaitForLoadState
+      }
+    } finally {
+      fixture.stop()
+      await env.close(ctx)
+    }
+  })
+
+  it("preserves viewport coordinates while waiting for element navigation", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
+    try {
+      await env.reset(ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
+      const page = env.pageForTools(ctx)
+      const box = await page.locator("#destination").boundingBox()
+      expect(box).not.toBeNull()
+      const originalClick = page.mouse.click.bind(page.mouse)
+      ;(page.mouse as unknown as { click(): Promise<void> }).click = async () => {
+        throw new Error("raw mouse click should not be used")
+      }
+
+      try {
+        const result = await tools.execute(
+          {
+            id: "tool_2",
+            type: "click",
+            target: {
+              selector: null,
+              elementId: null,
+              text: null,
+              role: null,
+              name: null,
+              coordinates: { x: (box?.x ?? 0) + 2, y: (box?.y ?? 0) + 2 },
+            },
+          },
+          ctx,
+        )
+
+        expect(result.observation?.title).toBe("Submitted")
+        expect(result.observation?.url).toContain("/submitted")
+      } finally {
+        ;(page.mouse as unknown as { click: typeof originalClick }).click = originalClick
+      }
+    } finally {
+      fixture.stop()
+      await env.close(ctx)
+    }
+  })
+
+  it("waits for navigation from the raw coordinate-click fallback", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
+    try {
+      await env.reset(ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
+      const page = env.pageForTools(ctx)
+      const originalEvaluateHandle = page.evaluateHandle.bind(page)
+      const originalClick = page.mouse.click.bind(page.mouse)
+      ;(page as unknown as { evaluateHandle(): Promise<unknown> }).evaluateHandle = async () => ({
+        asElement: () => null,
+        async dispose() {},
+      })
+      ;(page.mouse as unknown as { click(): Promise<void> }).click = async () => {
+        setTimeout(() => {
+          void page.goto(`${fixture.url}submitted`, { waitUntil: "domcontentloaded" })
+        }, 10)
+      }
+
+      try {
+        const result = await tools.execute(
+          {
+            id: "tool_2",
+            type: "click",
+            target: {
+              selector: null,
+              elementId: null,
+              text: null,
+              role: null,
+              name: null,
+              coordinates: { x: 1, y: 1 },
+            },
+          },
+          ctx,
+        )
+        expect(result.observation?.title).toBe("Submitted")
+        expect(result.observation?.url).toContain("/submitted")
+      } finally {
+        ;(page as unknown as { evaluateHandle: typeof originalEvaluateHandle }).evaluateHandle = originalEvaluateHandle
+        ;(page.mouse as unknown as { click: typeof originalClick }).click = originalClick
+      }
+    } finally {
+      fixture.stop()
+      await env.close(ctx)
+    }
+  })
+
+  it("propagates document readiness timeouts after raw coordinate navigation starts", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
+    try {
+      await env.reset(ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
+      const page = env.pageForTools(ctx)
+      const originalEvaluateHandle = page.evaluateHandle.bind(page)
+      const originalClick = page.mouse.click.bind(page.mouse)
+      const originalWaitForEvent = page.waitForEvent.bind(page)
+      const originalWaitForLoadState = page.waitForLoadState.bind(page)
+      ;(page as unknown as { evaluateHandle(): Promise<unknown> }).evaluateHandle = async () => ({
+        asElement: () => null,
+        async dispose() {},
+      })
+      ;(page.mouse as unknown as { click(): Promise<void> }).click = async () => {}
+      ;(page as unknown as { waitForEvent(): Promise<unknown> }).waitForEvent = async () => page.mainFrame()
+      ;(page as unknown as { waitForLoadState(): Promise<void> }).waitForLoadState = async () => {
+        throw new errors.TimeoutError("document readiness timed out")
+      }
+
+      try {
+        await expect(
+          tools.execute(
+            {
+              id: "tool_2",
+              type: "click",
+              target: {
+                selector: null,
+                elementId: null,
+                text: null,
+                role: null,
+                name: null,
+                coordinates: { x: 1, y: 1 },
+              },
+            },
+            ctx,
+          ),
+        ).rejects.toThrow("document readiness timed out")
+      } finally {
+        ;(page as unknown as { evaluateHandle: typeof originalEvaluateHandle }).evaluateHandle = originalEvaluateHandle
+        ;(page.mouse as unknown as { click: typeof originalClick }).click = originalClick
+        ;(page as unknown as { waitForEvent: typeof originalWaitForEvent }).waitForEvent = originalWaitForEvent
+        ;(page as unknown as { waitForLoadState: typeof originalWaitForLoadState }).waitForLoadState =
+          originalWaitForLoadState
+      }
     } finally {
       fixture.stop()
       await env.close(ctx)

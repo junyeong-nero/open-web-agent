@@ -1,5 +1,5 @@
 import type { AgentDecision } from "../contracts/agent"
-import type { ActionResult, BrowserToolCall } from "../contracts/browser"
+import type { ActionResult, BrowserToolCall, Observation } from "../contracts/browser"
 import type { RunEvent, RunEventType } from "../contracts/event"
 import type { BrowserEnvironment, ToolAdapter } from "../contracts/plugin"
 import type { EventBus } from "../events/event-bus"
@@ -161,8 +161,14 @@ export class RunOrchestrator {
           return { runId, status: "completed", finalAnswer }
         }
 
-        await this.executeBrowserActions(decision, stepId, step.actionResults, ctx, environment)
-        state.lastObservation = await environment.observe(ctx)
+        const actionObservation = await this.executeBrowserActions(
+          decision,
+          stepId,
+          step.actionResults,
+          ctx,
+          environment,
+        )
+        state.lastObservation = actionObservation ?? (await environment.observe(ctx))
         step.observation = state.lastObservation
         await emit("observation.captured", { observation: state.lastObservation })
       }
@@ -186,8 +192,9 @@ export class RunOrchestrator {
     actionResults: ActionResult[],
     ctx: RuntimeContext,
     environment: BrowserEnvironment,
-  ): Promise<void> {
+  ): Promise<Observation | null> {
     const toolAdapter = this.options.registry.getToolAdapterForEnvironment(ctx.environmentId ?? this.options.environmentId)
+    let latestObservation: Observation | null = null
 
     for (const action of decision.actions) {
       await ctx.emit("browser.action.started", { action }, stepId)
@@ -206,6 +213,7 @@ export class RunOrchestrator {
           },
         }
         actionResults.push(result)
+        if (result.observation) latestObservation = result.observation
         actionFailed = true
       } else {
         for (const toolCall of action.toolCalls) {
@@ -213,6 +221,7 @@ export class RunOrchestrator {
           await ctx.emit("browser.tool.started", { actionId: action.id, toolCall }, stepId)
           const result = await executeBrowserTool(toolAdapter, toolCall, ctx, environment)
           actionResults.push(result)
+          if (result.observation) latestObservation = result.observation
           await ctx.emit("browser.tool.completed", { actionId: action.id, toolCall, result }, stepId)
 
           if (!result.ok) {
@@ -225,6 +234,8 @@ export class RunOrchestrator {
       await ctx.emit("browser.action.completed", { action, actionResults }, stepId)
       if (actionFailed) break
     }
+
+    return latestObservation
   }
 }
 
