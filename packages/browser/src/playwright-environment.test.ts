@@ -164,6 +164,86 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve }
 }
 
+const observationSnapshot = {
+  url: "https://example.com/result",
+  title: "Result",
+  text: "Stable result",
+  interactiveElements: [],
+}
+
+function installObservationPage(
+  env: PlaywrightEnvironment,
+  ctx: RuntimeContext,
+  options: {
+    evaluate(): Promise<typeof observationSnapshot>
+    waitForLoadState?(): Promise<void>
+  },
+): { evaluateCalls: () => number; loadStateCalls: () => number } {
+  let evaluateCalls = 0
+  let loadStateCalls = 0
+  const page = {
+    async title() {
+      return observationSnapshot.title
+    },
+    locator() {
+      return {
+        async innerText() {
+          return observationSnapshot.text
+        },
+      }
+    },
+    url() {
+      return observationSnapshot.url
+    },
+    async evaluate() {
+      evaluateCalls += 1
+      return options.evaluate()
+    },
+    async waitForLoadState() {
+      loadStateCalls += 1
+      await options.waitForLoadState?.()
+    },
+  }
+
+  ;(
+    env as unknown as {
+      browser: { isConnected(): boolean; close(): Promise<void> }
+      sessions: Map<
+        string,
+        {
+          context: { close(): Promise<void> }
+          page: typeof page
+          lastScreenshotPath: string | null
+          screenshotCount: number
+        }
+      >
+    }
+  ).browser = { isConnected: () => true, async close() {} }
+  ;(
+    env as unknown as {
+      sessions: Map<
+        string,
+        {
+          context: { close(): Promise<void> }
+          page: typeof page
+          lastScreenshotPath: string | null
+          screenshotCount: number
+        }
+      >
+    }
+  ).sessions.set(ctx.session.id, {
+    context: { async close() {} },
+    page,
+    lastScreenshotPath: null,
+    screenshotCount: 0,
+  })
+
+  return {
+    evaluateCalls: () => evaluateCalls,
+    loadStateCalls: () => loadStateCalls,
+  }
+}
+
 function gateFakeNewPages(fake: ReturnType<typeof createFakeBrowser>) {
   const firstPageStarted = deferred()
   const releasePages = deferred()
@@ -474,6 +554,74 @@ describe("PlaywrightEnvironment", () => {
 
     await expect(result).rejects.toThrow("Run cancelled")
     expect(closeCalls).toBe(1)
+  })
+
+  it("retries an observation after a navigation destroys the execution context", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const ctx = await context()
+    let failuresRemaining = 1
+    const calls = installObservationPage(env, ctx, {
+      async evaluate() {
+        if (failuresRemaining > 0) {
+          failuresRemaining -= 1
+          throw new Error("evaluate: Execution context was destroyed, most likely because of a navigation")
+        }
+        return observationSnapshot
+      },
+    })
+
+    const observation = await env.observe(ctx)
+
+    expect(observation).toMatchObject(observationSnapshot)
+    expect(calls.evaluateCalls()).toBe(2)
+    expect(calls.loadStateCalls()).toBe(1)
+  })
+
+  it("stops retrying an observation after three navigation-context failures", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const ctx = await context()
+    const calls = installObservationPage(env, ctx, {
+      async evaluate() {
+        throw new Error("evaluate: Cannot find context with specified id")
+      },
+    })
+
+    await expect(env.observe(ctx)).rejects.toThrow("Cannot find context with specified id")
+    expect(calls.evaluateCalls()).toBe(3)
+    expect(calls.loadStateCalls()).toBe(2)
+  })
+
+  it("does not retry non-navigation observation failures", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const ctx = await context()
+    const calls = installObservationPage(env, ctx, {
+      async evaluate() {
+        throw new Error("evaluate: fixture exploded")
+      },
+    })
+
+    await expect(env.observe(ctx)).rejects.toThrow("fixture exploded")
+    expect(calls.evaluateCalls()).toBe(1)
+    expect(calls.loadStateCalls()).toBe(0)
+  })
+
+  it("cancels while waiting to retry an observation", async () => {
+    const abort = new AbortController()
+    const ctx = await context("ses_1", "run_1", abort.signal)
+    const env = new PlaywrightEnvironment({ headless: true })
+    installObservationPage(env, ctx, {
+      async evaluate() {
+        throw new Error("evaluate: Execution context was destroyed, most likely because of a navigation")
+      },
+      async waitForLoadState() {
+        await new Promise<void>(() => {})
+      },
+    })
+
+    const observation = env.observe(ctx)
+    setTimeout(() => abort.abort(), 5)
+
+    await expect(observation).rejects.toThrow("Run cancelled")
   })
 
   it("clicks fixture elements by DOM elementId target", async () => {
