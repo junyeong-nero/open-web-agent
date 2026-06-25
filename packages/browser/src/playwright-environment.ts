@@ -579,11 +579,12 @@ async function waitForMainFrameNavigation(page: Page): Promise<void> {
       predicate: (frame) => frame === page.mainFrame(),
       timeout: RAW_INPUT_NAVIGATION_DETECTION_MS,
     })
-    await page.waitForLoadState("domcontentloaded")
   } catch (error) {
     if (error instanceof errors.TimeoutError) return
     throw error
   }
+
+  await page.waitForLoadState("domcontentloaded")
 }
 
 function isGeneratedElementId(elementId: string): boolean {

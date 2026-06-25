@@ -3,6 +3,7 @@ import { mkdtemp, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { EventBus, type RuntimeContext } from "@open-web-agent/core"
+import { errors } from "playwright"
 import * as playwrightEnvironment from "./playwright-environment"
 import { PlaywrightBrowserToolAdapter, PlaywrightEnvironment } from "./playwright-environment"
 
@@ -907,6 +908,61 @@ describe("PlaywrightEnvironment", () => {
       } finally {
         ;(page as unknown as { evaluateHandle: typeof originalEvaluateHandle }).evaluateHandle = originalEvaluateHandle
         ;(page.mouse as unknown as { click: typeof originalClick }).click = originalClick
+      }
+    } finally {
+      fixture.stop()
+      await env.close(ctx)
+    }
+  })
+
+  it("propagates document readiness timeouts after raw coordinate navigation starts", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
+    try {
+      await env.reset(ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
+      const page = env.pageForTools(ctx)
+      const originalEvaluateHandle = page.evaluateHandle.bind(page)
+      const originalClick = page.mouse.click.bind(page.mouse)
+      const originalWaitForEvent = page.waitForEvent.bind(page)
+      const originalWaitForLoadState = page.waitForLoadState.bind(page)
+      ;(page as unknown as { evaluateHandle(): Promise<unknown> }).evaluateHandle = async () => ({
+        asElement: () => null,
+        async dispose() {},
+      })
+      ;(page.mouse as unknown as { click(): Promise<void> }).click = async () => {}
+      ;(page as unknown as { waitForEvent(): Promise<unknown> }).waitForEvent = async () => page.mainFrame()
+      ;(page as unknown as { waitForLoadState(): Promise<void> }).waitForLoadState = async () => {
+        throw new errors.TimeoutError("document readiness timed out")
+      }
+
+      try {
+        await expect(
+          tools.execute(
+            {
+              id: "tool_2",
+              type: "click",
+              target: {
+                selector: null,
+                elementId: null,
+                text: null,
+                role: null,
+                name: null,
+                coordinates: { x: 1, y: 1 },
+              },
+            },
+            ctx,
+          ),
+        ).rejects.toThrow("document readiness timed out")
+      } finally {
+        ;(page as unknown as { evaluateHandle: typeof originalEvaluateHandle }).evaluateHandle = originalEvaluateHandle
+        ;(page.mouse as unknown as { click: typeof originalClick }).click = originalClick
+        ;(page as unknown as { waitForEvent: typeof originalWaitForEvent }).waitForEvent = originalWaitForEvent
+        ;(page as unknown as { waitForLoadState: typeof originalWaitForLoadState }).waitForLoadState =
+          originalWaitForLoadState
       }
     } finally {
       fixture.stop()
