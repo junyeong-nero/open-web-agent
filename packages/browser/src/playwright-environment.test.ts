@@ -725,6 +725,37 @@ describe("PlaywrightEnvironment", () => {
     }
   })
 
+  it("checks document readiness after a focused key press", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
+    try {
+      await env.reset(ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
+      const page = env.pageForTools(ctx)
+      await page.locator("#name").focus()
+      const originalWaitForLoadState = page.waitForLoadState.bind(page)
+      let readinessChecks = 0
+      ;(page as unknown as { waitForLoadState(): Promise<void> }).waitForLoadState = async () => {
+        readinessChecks += 1
+        await originalWaitForLoadState("domcontentloaded")
+      }
+
+      try {
+        await tools.execute({ id: "tool_2", type: "press_key", key: "A" }, ctx)
+        expect(readinessChecks).toBe(1)
+      } finally {
+        ;(page as unknown as { waitForLoadState: typeof originalWaitForLoadState }).waitForLoadState =
+          originalWaitForLoadState
+      }
+    } finally {
+      fixture.stop()
+      await env.close(ctx)
+    }
+  })
+
   it("waits for navigation triggered by a locator click", async () => {
     const env = new PlaywrightEnvironment({ headless: true })
     const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
@@ -745,6 +776,43 @@ describe("PlaywrightEnvironment", () => {
 
       expect(result.observation?.title).toBe("Submitted")
       expect(result.observation?.url).toContain("/submitted")
+    } finally {
+      fixture.stop()
+      await env.close(ctx)
+    }
+  })
+
+  it("checks document readiness after a locator click", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
+    try {
+      await env.reset(ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
+      const page = env.pageForTools(ctx)
+      const originalWaitForLoadState = page.waitForLoadState.bind(page)
+      let readinessChecks = 0
+      ;(page as unknown as { waitForLoadState(): Promise<void> }).waitForLoadState = async () => {
+        readinessChecks += 1
+        await originalWaitForLoadState("domcontentloaded")
+      }
+
+      try {
+        await tools.execute(
+          {
+            id: "tool_2",
+            type: "click",
+            target: { selector: "#toggle", elementId: null, text: null, role: null, name: null, coordinates: null },
+          },
+          ctx,
+        )
+        expect(readinessChecks).toBe(1)
+      } finally {
+        ;(page as unknown as { waitForLoadState: typeof originalWaitForLoadState }).waitForLoadState =
+          originalWaitForLoadState
+      }
     } finally {
       fixture.stop()
       await env.close(ctx)

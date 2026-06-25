@@ -324,11 +324,13 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
       const locator = locatorForTarget(page, call.target)
       if (locator) {
         await this.withToolAbort(locator.click(), ctx)
+        await this.withToolAbort(page.waitForLoadState("domcontentloaded"), ctx)
       } else if (call.target.coordinates) {
         const target = await elementAtCoordinates(page, call.target.coordinates)
         if (target) {
           try {
             await this.withToolAbort(target.element.click({ position: target.position }), ctx)
+            await this.withToolAbort(page.waitForLoadState("domcontentloaded"), ctx)
           } finally {
             await target.element.dispose().catch(() => {})
           }
@@ -385,6 +387,7 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
     if (call.type === "press_key") {
       const locator = await focusedLocatorForKeyPress(page)
       await this.withToolAbort(locator.press(call.key), ctx)
+      await this.withToolAbort(page.waitForLoadState("domcontentloaded"), ctx)
       return {
         ok: true,
         message: "pressed key",
