@@ -33,6 +33,12 @@ interface PlaywrightSessionState {
   screenshotCount: number
 }
 
+const OBSERVATION_CAPTURE_ATTEMPTS = 3
+const NAVIGATION_CONTEXT_ERROR_PATTERNS = [
+  "Execution context was destroyed",
+  "Cannot find context with specified id",
+]
+
 export class PlaywrightEnvironment implements BrowserEnvironment {
   id = "playwright-browser"
   name = "Playwright Browser"
@@ -189,76 +195,86 @@ export class PlaywrightEnvironment implements BrowserEnvironment {
 
   private async readObservation(state: PlaywrightSessionState): Promise<Observation> {
     const { page } = state
-    const [title, text, interactiveElements] = await Promise.all([
-      page.title().catch(() => null),
-      page.locator("body").innerText().catch(() => null),
-      page.evaluate(() => {
-        const candidates: Array<{ element: HTMLElement; rect: DOMRect }> = []
-        const elements = Array.from(
-          document.querySelectorAll<HTMLElement>(
-            "a,button,input,textarea,select,[role],[tabindex],[contenteditable='true']",
-          ),
-        )
 
-        for (const element of elements) {
-          const rect = element.getBoundingClientRect()
-          const style = window.getComputedStyle(element)
-          const isHiddenInput = element instanceof HTMLInputElement && element.type === "hidden"
-          const isVisible =
-            !isHiddenInput &&
-            !element.hidden &&
-            element.getAttribute("aria-hidden") !== "true" &&
-            style.display !== "none" &&
-            style.visibility !== "hidden" &&
-            style.visibility !== "collapse" &&
-            rect.width > 0 &&
-            rect.height > 0 &&
-            rect.bottom > 0 &&
-            rect.right > 0 &&
-            rect.top < window.innerHeight &&
-            rect.left < window.innerWidth
+    for (let attempt = 1; attempt <= OBSERVATION_CAPTURE_ATTEMPTS; attempt += 1) {
+      try {
+        const snapshot = await page.evaluate(() => {
+          const candidates: Array<{ element: HTMLElement; rect: DOMRect }> = []
+          const elements = Array.from(
+            document.querySelectorAll<HTMLElement>(
+              "a,button,input,textarea,select,[role],[tabindex],[contenteditable='true']",
+            ),
+          )
 
-          if (!isVisible) continue
-          candidates.push({ element, rect })
-          if (candidates.length >= 50) break
-        }
+          for (const element of elements) {
+            const rect = element.getBoundingClientRect()
+            const style = window.getComputedStyle(element)
+            const isHiddenInput = element instanceof HTMLInputElement && element.type === "hidden"
+            const isVisible =
+              !isHiddenInput &&
+              !element.hidden &&
+              element.getAttribute("aria-hidden") !== "true" &&
+              style.display !== "none" &&
+              style.visibility !== "hidden" &&
+              style.visibility !== "collapse" &&
+              rect.width > 0 &&
+              rect.height > 0 &&
+              rect.bottom > 0 &&
+              rect.right > 0 &&
+              rect.top < window.innerHeight &&
+              rect.left < window.innerWidth
 
-        return candidates.map(({ element, rect }, index) => {
-          const attributes: Record<string, string> = {}
-          for (const attribute of Array.from(element.attributes)) {
-            attributes[attribute.name] = attribute.value
+            if (!isVisible) continue
+            candidates.push({ element, rect })
+            if (candidates.length >= 50) break
           }
 
           return {
-            id: element.id || `element_${index + 1}`,
-            role: element.getAttribute("role") ?? element.tagName.toLowerCase(),
-            name:
-              element.getAttribute("aria-label") ??
-              element.getAttribute("title") ??
-              ("value" in element ? String((element as HTMLInputElement).value || "") : null),
-            text: element.innerText || element.textContent || null,
-            selector: element.id ? `#${CSS.escape(element.id)}` : null,
-            xpath: null,
-            boundingBox: {
-              x: rect.x,
-              y: rect.y,
-              width: rect.width,
-              height: rect.height,
-            },
-            attributes,
+            url: window.location.href,
+            title: document.title || null,
+            text: document.body?.innerText ?? null,
+            interactiveElements: candidates.map(({ element, rect }, index) => {
+              const attributes: Record<string, string> = {}
+              for (const attribute of Array.from(element.attributes)) {
+                attributes[attribute.name] = attribute.value
+              }
+
+              return {
+                id: element.id || `element_${index + 1}`,
+                role: element.getAttribute("role") ?? element.tagName.toLowerCase(),
+                name:
+                  element.getAttribute("aria-label") ??
+                  element.getAttribute("title") ??
+                  ("value" in element ? String((element as HTMLInputElement).value || "") : null),
+                text: element.innerText || element.textContent || null,
+                selector: element.id ? `#${CSS.escape(element.id)}` : null,
+                xpath: null,
+                boundingBox: {
+                  x: rect.x,
+                  y: rect.y,
+                  width: rect.width,
+                  height: rect.height,
+                },
+                attributes,
+              }
+            }),
           }
         })
-      }),
-    ])
 
-    return redactSensitiveData({
-      url: page.url(),
-      title,
-      text,
-      screenshotPath: state.lastScreenshotPath,
-      interactiveElements,
-      metadata: {},
-    })
+        return redactSensitiveData({
+          ...snapshot,
+          screenshotPath: state.lastScreenshotPath,
+          metadata: {},
+        })
+      } catch (error) {
+        if (attempt === OBSERVATION_CAPTURE_ATTEMPTS || !isNavigationContextError(error)) {
+          throw error
+        }
+        await page.waitForLoadState("domcontentloaded")
+      }
+    }
+
+    throw new Error("Observation capture exhausted without a result")
   }
 }
 
@@ -502,6 +518,11 @@ function isGeneratedElementId(elementId: string): boolean {
 
 function escapeCssString(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+}
+
+function isNavigationContextError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return NAVIGATION_CONTEXT_ERROR_PATTERNS.some((pattern) => message.includes(pattern))
 }
 
 function withAbort<T>(promise: Promise<T>, signal: AbortSignal, onAbort?: () => Promise<void> | void): Promise<T> {
