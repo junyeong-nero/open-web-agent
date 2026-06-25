@@ -36,6 +36,11 @@ function fixtureHtml(): string {
       <head><title>Playwright Fixture</title></head>
       <body>
         <button id="toggle">Reveal</button>
+        <form action="/submitted">
+          <input id="search" aria-label="Search" />
+          <button id="submit" type="submit">Submit</button>
+        </form>
+        <a id="destination" href="/submitted">Destination</a>
         <input id="name" aria-label="Name" />
         <input id="password" type="password" value="initial-secret" />
         <input id="hidden-token" type="hidden" name="where" value="nexearch" />
@@ -57,7 +62,17 @@ function startFixtureServer(): { url: string; stop(): void } {
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch: () => new Response(fixtureHtml(), { headers: { "content-type": "text/html" } }),
+    async fetch(request) {
+      const url = new URL(request.url)
+      if (url.pathname === "/submitted") {
+        await Bun.sleep(50)
+        return new Response(
+          "<!doctype html><html><head><title>Submitted</title></head><body>Submitted destination</body></html>",
+          { headers: { "content-type": "text/html" } },
+        )
+      }
+      return new Response(fixtureHtml(), { headers: { "content-type": "text/html" } })
+    },
   })
 
   return {
@@ -644,6 +659,187 @@ describe("PlaywrightEnvironment", () => {
 
       expect(result.ok).toBe(true)
       expect(result.observation?.text).toContain("Revealed")
+    } finally {
+      fixture.stop()
+      await env.close(ctx)
+    }
+  })
+
+  it("waits for form navigation triggered by pressing Enter", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
+    try {
+      await env.reset(ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
+      await tools.execute(
+        {
+          id: "tool_2",
+          type: "type",
+          target: { selector: "#search", elementId: null, text: null, role: null, name: null, coordinates: null },
+          value: "weather",
+        },
+        ctx,
+      )
+
+      const result = await tools.execute({ id: "tool_3", type: "press_key", key: "Enter" }, ctx)
+
+      expect(result.ok).toBe(true)
+      expect(result.observation?.url).toContain("/submitted")
+      expect(result.observation?.title).toBe("Submitted")
+      expect(result.observation?.text).toContain("Submitted destination")
+    } finally {
+      fixture.stop()
+      await env.close(ctx)
+    }
+  })
+
+  it("uses the focused locator for key presses", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
+    try {
+      await env.reset(ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
+      const page = env.pageForTools(ctx)
+      await page.locator("#name").focus()
+      const originalPress = page.keyboard.press.bind(page.keyboard)
+      ;(page.keyboard as unknown as { press(): Promise<void> }).press = async () => {
+        throw new Error("raw keyboard press should not be used")
+      }
+
+      try {
+        const result = await tools.execute({ id: "tool_2", type: "press_key", key: "A" }, ctx)
+        expect(result.ok).toBe(true)
+        expect(result.observation?.text).toContain("Typed A")
+      } finally {
+        ;(page.keyboard as unknown as { press: typeof originalPress }).press = originalPress
+      }
+    } finally {
+      fixture.stop()
+      await env.close(ctx)
+    }
+  })
+
+  it("waits for navigation triggered by a locator click", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
+    try {
+      await env.reset(ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
+      const result = await tools.execute(
+        {
+          id: "tool_2",
+          type: "click",
+          target: { selector: "#destination", elementId: null, text: null, role: null, name: null, coordinates: null },
+        },
+        ctx,
+      )
+
+      expect(result.observation?.title).toBe("Submitted")
+      expect(result.observation?.url).toContain("/submitted")
+    } finally {
+      fixture.stop()
+      await env.close(ctx)
+    }
+  })
+
+  it("preserves viewport coordinates while waiting for element navigation", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
+    try {
+      await env.reset(ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
+      const page = env.pageForTools(ctx)
+      const box = await page.locator("#destination").boundingBox()
+      expect(box).not.toBeNull()
+      const originalClick = page.mouse.click.bind(page.mouse)
+      ;(page.mouse as unknown as { click(): Promise<void> }).click = async () => {
+        throw new Error("raw mouse click should not be used")
+      }
+
+      try {
+        const result = await tools.execute(
+          {
+            id: "tool_2",
+            type: "click",
+            target: {
+              selector: null,
+              elementId: null,
+              text: null,
+              role: null,
+              name: null,
+              coordinates: { x: (box?.x ?? 0) + 2, y: (box?.y ?? 0) + 2 },
+            },
+          },
+          ctx,
+        )
+
+        expect(result.observation?.title).toBe("Submitted")
+        expect(result.observation?.url).toContain("/submitted")
+      } finally {
+        ;(page.mouse as unknown as { click: typeof originalClick }).click = originalClick
+      }
+    } finally {
+      fixture.stop()
+      await env.close(ctx)
+    }
+  })
+
+  it("waits for navigation from the raw coordinate-click fallback", async () => {
+    const env = new PlaywrightEnvironment({ headless: true })
+    const tools = new PlaywrightBrowserToolAdapter(env, { allowPrivateNetworkNavigation: true })
+    const ctx = await context()
+    const fixture = startFixtureServer()
+
+    try {
+      await env.reset(ctx)
+      await tools.execute({ id: "tool_1", type: "navigate", url: fixture.url }, ctx)
+      const page = env.pageForTools(ctx)
+      const originalEvaluateHandle = page.evaluateHandle.bind(page)
+      const originalClick = page.mouse.click.bind(page.mouse)
+      ;(page as unknown as { evaluateHandle(): Promise<unknown> }).evaluateHandle = async () => ({
+        asElement: () => null,
+        async dispose() {},
+      })
+      ;(page.mouse as unknown as { click(): Promise<void> }).click = async () => {
+        setTimeout(() => {
+          void page.goto(`${fixture.url}submitted`, { waitUntil: "domcontentloaded" })
+        }, 10)
+      }
+
+      try {
+        const result = await tools.execute(
+          {
+            id: "tool_2",
+            type: "click",
+            target: {
+              selector: null,
+              elementId: null,
+              text: null,
+              role: null,
+              name: null,
+              coordinates: { x: 1, y: 1 },
+            },
+          },
+          ctx,
+        )
+        expect(result.observation?.title).toBe("Submitted")
+        expect(result.observation?.url).toContain("/submitted")
+      } finally {
+        ;(page as unknown as { evaluateHandle: typeof originalEvaluateHandle }).evaluateHandle = originalEvaluateHandle
+        ;(page.mouse as unknown as { click: typeof originalClick }).click = originalClick
+      }
     } finally {
       fixture.stop()
       await env.close(ctx)

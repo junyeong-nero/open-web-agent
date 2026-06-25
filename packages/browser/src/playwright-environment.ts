@@ -2,7 +2,16 @@ import { existsSync, readdirSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { chromium, firefox, webkit, type Browser, type BrowserContext, type Page } from "playwright"
+import {
+  chromium,
+  errors,
+  firefox,
+  webkit,
+  type Browser,
+  type BrowserContext,
+  type ElementHandle,
+  type Page,
+} from "playwright"
 import {
   isAllowedBrowserNavigationUrl,
   REDACTED_VALUE,
@@ -38,6 +47,7 @@ const NAVIGATION_CONTEXT_ERROR_PATTERNS = [
   "Execution context was destroyed",
   "Cannot find context with specified id",
 ]
+const RAW_INPUT_NAVIGATION_DETECTION_MS = 250
 
 export class PlaywrightEnvironment implements BrowserEnvironment {
   id = "playwright-browser"
@@ -315,7 +325,23 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
       if (locator) {
         await this.withToolAbort(locator.click(), ctx)
       } else if (call.target.coordinates) {
-        await this.withToolAbort(page.mouse.click(call.target.coordinates.x, call.target.coordinates.y), ctx)
+        const target = await elementAtCoordinates(page, call.target.coordinates)
+        if (target) {
+          try {
+            await this.withToolAbort(target.element.click({ position: target.position }), ctx)
+          } finally {
+            await target.element.dispose().catch(() => {})
+          }
+        } else {
+          const navigation = waitForMainFrameNavigation(page)
+          await this.withToolAbort(
+            Promise.all([
+              page.mouse.click(call.target.coordinates.x, call.target.coordinates.y),
+              navigation,
+            ]),
+            ctx,
+          )
+        }
       } else {
         return {
           ok: false,
@@ -357,7 +383,8 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
     }
 
     if (call.type === "press_key") {
-      await this.withToolAbort(page.keyboard.press(call.key), ctx)
+      const locator = await focusedLocatorForKeyPress(page)
+      await this.withToolAbort(locator.press(call.key), ctx)
       return {
         ok: true,
         message: "pressed key",
@@ -510,6 +537,50 @@ function locatorForTarget(page: Page, target: {
   if (target.role) return page.getByRole(target.role as Parameters<Page["getByRole"]>[0], { name: target.name ?? undefined }).first()
   if (target.text) return page.getByText(target.text).first()
   return null
+}
+
+async function focusedLocatorForKeyPress(page: Page) {
+  const focused = page.locator(":focus")
+  return (await focused.count()) > 0 ? focused.first() : page.locator("body")
+}
+
+async function elementAtCoordinates(
+  page: Page,
+  coordinates: { x: number; y: number },
+): Promise<{ element: ElementHandle<HTMLElement>; position: { x: number; y: number } } | null> {
+  const handle = await page.evaluateHandle(({ x, y }) => document.elementFromPoint(x, y), coordinates)
+  const element = handle.asElement() as ElementHandle<HTMLElement> | null
+  if (!element) {
+    await handle.dispose()
+    return null
+  }
+
+  const box = await element.boundingBox()
+  if (!box) {
+    await element.dispose()
+    return null
+  }
+
+  return {
+    element,
+    position: {
+      x: coordinates.x - box.x,
+      y: coordinates.y - box.y,
+    },
+  }
+}
+
+async function waitForMainFrameNavigation(page: Page): Promise<void> {
+  try {
+    await page.waitForEvent("framenavigated", {
+      predicate: (frame) => frame === page.mainFrame(),
+      timeout: RAW_INPUT_NAVIGATION_DETECTION_MS,
+    })
+    await page.waitForLoadState("domcontentloaded")
+  } catch (error) {
+    if (error instanceof errors.TimeoutError) return
+    throw error
+  }
 }
 
 function isGeneratedElementId(elementId: string): boolean {
