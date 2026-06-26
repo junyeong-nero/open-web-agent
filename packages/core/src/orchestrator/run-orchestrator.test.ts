@@ -13,8 +13,9 @@ import {
 } from "../contracts/browser"
 import type { RunEvent } from "../contracts/event"
 import type { AgentPlugin, BrowserEnvironment, ToolAdapter } from "../contracts/plugin"
-import type { ModelToolCall } from "../contracts/model"
+import type { ModelToolCall, ModelToolResult } from "../contracts/model"
 import { EventBus } from "../events/event-bus"
+import { redactSensitiveData } from "../redaction/sensitive-data"
 import { PluginRegistry } from "../registry/plugin-registry"
 import { JsonlEventStore } from "../storage/jsonl-event-store"
 import { eventsPath, hashProjectPath } from "../storage/paths"
@@ -56,6 +57,15 @@ class TestAgent implements AgentPlugin {
 
   async finalize(state: AgentState): Promise<string> {
     return state.finalAnswer ?? finalAnswer
+  }
+}
+
+class ToolResultCapturingAgent extends TestAgent {
+  results: ModelToolResult[][] = []
+
+  override async step(state: AgentState): Promise<AgentDecision> {
+    this.results.push(state.steps.flatMap((step) => step.modelToolResults))
+    return super.step(state)
   }
 }
 
@@ -289,7 +299,7 @@ class ApprovalRequiredAgent implements AgentPlugin {
             id: "action_requires_approval",
             kind: "navigate_sensitive_page",
             reason: "Sensitive action requires explicit approval.",
-            requiresApproval: true,
+            requiresApproval: false,
             toolCalls: [{ id: "tool_sensitive_nav", type: "navigate", url: "https://example.com" }],
           },
         ],
@@ -506,6 +516,56 @@ describe("RunOrchestrator", () => {
     expect(persistedEvents.map((event) => event.type)).toEqual(setup.observedEvents.map((event) => event.type))
   })
 
+  it("records one correlated model tool result per completed browser call", async () => {
+    const environment = new TestEnvironment()
+    const agent = new ToolResultCapturingAgent()
+    const adapter = new TestBrowserToolAdapter(environment, coreToolDefinitions())
+    const setup = await orchestratorWith(agent, environment, adapter)
+
+    const result = await setup.orchestrator.startRun({ session: session(), prompt: "use tools" }).result
+
+    expect(result.status).toBe("completed")
+    expect(agent.results.at(-1)).toEqual([
+      expect.objectContaining({ toolCallId: "tool_0001", name: "browser_navigate", isError: false }),
+      expect.objectContaining({ toolCallId: "tool_0002", name: "browser_take_screenshot", isError: false }),
+      expect.objectContaining({ toolCallId: "tool_0003", name: "browser_extract_text", isError: false }),
+    ])
+  })
+
+  it("rejects a browser call that is absent from the active capability catalog", async () => {
+    const environment = new TestEnvironment()
+    const adapter = new TestBrowserToolAdapter(environment, [])
+    const setup = await orchestratorWith(new TestAgent(), environment, adapter)
+
+    const result = await setup.orchestrator.startRun({ session: session(), prompt: "blocked tool" }).result
+
+    expect(result.status).toBe("failed")
+    expect(adapter.calls).toEqual([])
+    expect(setup.observedEvents.map((event) => event.type)).not.toContain("browser.tool.started")
+  })
+
+  it("includes capabilities and model tool names in run.started", async () => {
+    const setup = await orchestrator()
+    await setup.orchestrator.startRun({ session: session(), prompt: "metadata" }).result
+
+    expect(setup.observedEvents.find((event) => event.type === "run.started")?.payload).toMatchObject({
+      browserCapabilities: ["core"],
+      browserTools: expect.arrayContaining(["browser_navigate"]),
+    })
+  })
+
+  it("redacts model-facing browser_type arguments", () => {
+    expect(
+      redactSensitiveData({
+        id: "call_1",
+        name: "browser_type",
+        arguments: { target: { selector: "#password" }, value: "new-secret" },
+      }),
+    ).toMatchObject({
+      arguments: { value: "[redacted]" },
+    })
+  })
+
   it("reuses the final browser tool observation after an action batch", async () => {
     const environment = new TestEnvironment()
     const setup = await orchestratorWith(new TestAgent(), environment, new TestBrowserToolAdapter(environment))
@@ -713,7 +773,10 @@ describe("RunOrchestrator", () => {
   it("requests human approval and skips browser tools for approval-gated actions", async () => {
     const environment = new TestEnvironment()
     const agent = new ApprovalRequiredAgent()
-    const toolAdapter = new TestBrowserToolAdapter(environment)
+    const approvalTools = coreToolDefinitions().map((tool) =>
+      tool.type === "navigate" ? { ...tool, requiresApproval: true } : tool,
+    )
+    const toolAdapter = new TestBrowserToolAdapter(environment, approvalTools)
     const setup = await orchestratorWith(agent, environment, toolAdapter)
     const started = setup.orchestrator.startRun({
       session: session(),

@@ -1,6 +1,7 @@
 import type { AgentDecision } from "../contracts/agent"
-import type { ActionResult, BrowserCapability, BrowserToolCall, Observation } from "../contracts/browser"
+import type { ActionResult, BrowserAction, BrowserCapability, BrowserToolCall, Observation } from "../contracts/browser"
 import type { RunEvent, RunEventType } from "../contracts/event"
+import type { ModelToolResult } from "../contracts/model"
 import type { BrowserEnvironment, ToolAdapter } from "../contracts/plugin"
 import type { EventBus } from "../events/event-bus"
 import { makeEventId, makeRunId, makeStepId } from "../ids/ids"
@@ -156,13 +157,14 @@ export class RunOrchestrator {
         const stepId = makeStepId()
         await emit("agent.step.started", { stepIndex }, stepId)
 
-        const decision = await agent.step(state, ctx)
+        const rawDecision = await agent.step(state, ctx)
+        const decision = normalizeBrowserDecision(rawDecision, toolAdapter, ctx.browserCapabilities)
         const step = {
           id: stepId,
           decision,
           observation: state.lastObservation,
           actionResults: [] as ActionResult[],
-          modelToolResults: [],
+          modelToolResults: [] as ModelToolResult[],
         }
 
         await emit("agent.step.completed", { decision }, stepId)
@@ -180,8 +182,10 @@ export class RunOrchestrator {
           decision,
           stepId,
           step.actionResults,
+          step.modelToolResults,
           ctx,
           environment,
+          toolAdapter,
         )
         state.lastObservation = actionObservation ?? (await environment.observe(ctx))
         step.observation = state.lastObservation
@@ -205,10 +209,11 @@ export class RunOrchestrator {
     decision: Extract<AgentDecision, { type: "browser_actions" }>,
     stepId: string,
     actionResults: ActionResult[],
+    modelToolResults: ModelToolResult[],
     ctx: RuntimeContext,
     environment: BrowserEnvironment,
+    toolAdapter: ToolAdapter,
   ): Promise<Observation | null> {
-    const toolAdapter = this.options.registry.getToolAdapterForEnvironment(ctx.environmentId ?? this.options.environmentId)
     let latestObservation: Observation | null = null
 
     for (const action of decision.actions) {
@@ -228,16 +233,42 @@ export class RunOrchestrator {
           },
         }
         actionResults.push(result)
+        for (const toolCall of action.toolCalls) {
+          const validatedCall = toolAdapter.validateToolCall(toolCall, ctx.browserCapabilities)
+          modelToolResults.push({
+            toolCallId: validatedCall.id,
+            name: toolAdapter.modelToolName(validatedCall),
+            output: {
+              ok: false,
+              message: APPROVAL_REQUIRED_MESSAGE,
+              approvalRequired: true,
+              actionId: action.id,
+            },
+            isError: true,
+          })
+        }
         if (result.observation) latestObservation = result.observation
         actionFailed = true
       } else {
         for (const toolCall of action.toolCalls) {
           throwIfAborted(ctx.abortSignal)
-          await ctx.emit("browser.tool.started", { actionId: action.id, toolCall }, stepId)
-          const result = await executeBrowserTool(toolAdapter, toolCall, ctx, environment)
+          const validatedCall = toolAdapter.validateToolCall(toolCall, ctx.browserCapabilities)
+          await ctx.emit("browser.tool.started", { actionId: action.id, toolCall: validatedCall }, stepId)
+          const result = await executeBrowserTool(toolAdapter, validatedCall, ctx, environment)
           actionResults.push(result)
+          modelToolResults.push({
+            toolCallId: validatedCall.id,
+            name: toolAdapter.modelToolName(validatedCall),
+            output: {
+              ok: result.ok,
+              message: result.message,
+              observation: result.observation,
+              metadata: result.metadata,
+            },
+            isError: !result.ok,
+          })
           if (result.observation) latestObservation = result.observation
-          await ctx.emit("browser.tool.completed", { actionId: action.id, toolCall, result }, stepId)
+          await ctx.emit("browser.tool.completed", { actionId: action.id, toolCall: validatedCall, result }, stepId)
 
           if (!result.ok) {
             actionFailed = true
@@ -251,6 +282,25 @@ export class RunOrchestrator {
     }
 
     return latestObservation
+  }
+}
+
+function normalizeBrowserDecision(
+  decision: AgentDecision,
+  adapter: ToolAdapter,
+  capabilities: BrowserCapability[],
+): AgentDecision {
+  if (decision.type !== "browser_actions") return decision
+  return {
+    ...decision,
+    actions: decision.actions.map((action): BrowserAction => {
+      const toolCalls = action.toolCalls.map((call) => adapter.validateToolCall(call, capabilities))
+      return {
+        ...action,
+        requiresApproval: toolCalls.some((call) => adapter.requiresApproval(call)),
+        toolCalls,
+      }
+    }),
   }
 }
 

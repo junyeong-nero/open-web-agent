@@ -23,12 +23,21 @@ function redactValue(value: unknown): unknown {
   if (!isRecord(value)) return value
 
   const isTypeToolCall = value.type === "type" && "value" in value
+  const isModelBrowserTypeCall = value.name === "browser_type" && isRecord(value.arguments)
   const isSensitiveElement = isSensitiveElementRecord(value)
   const redacted: Record<string, unknown> = {}
 
   for (const [key, entry] of Object.entries(value)) {
     if (isTypeToolCall && key === "value") {
       redacted[key] = REDACTED_VALUE
+      continue
+    }
+
+    if (isModelBrowserTypeCall && key === "arguments" && isRecord(entry)) {
+      redacted[key] = {
+        ...(redactValue(entry) as Record<string, unknown>),
+        ...("value" in entry ? { value: REDACTED_VALUE } : {}),
+      }
       continue
     }
 

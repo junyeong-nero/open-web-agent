@@ -1041,8 +1041,11 @@ describe("startDefaultRuntime", () => {
         provider: "openai",
         reasoningEffort: "high",
         contextWindowTokens: 400000,
+        toolCount: 10,
       })
       expect(JSON.parse(events[1]!)).toMatchObject({
+        responseMode: "text",
+        toolCalls: [],
         response: {
           usage: { inputTokens: 7200, outputTokens: 40, totalTokens: 7240 },
         },

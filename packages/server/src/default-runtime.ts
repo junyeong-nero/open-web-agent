@@ -293,10 +293,15 @@ class RuntimeSelectedModel implements ModelPlugin {
       contextWindowTokens: model.contextWindowTokens ?? null,
     }
 
-    await ctx.emit("model.called", metadata)
+    await ctx.emit("model.called", {
+      ...metadata,
+      toolCount: request.tools?.length ?? 0,
+    })
     const response = await model.complete(request, ctx)
     await ctx.emit("model.completed", {
       ...metadata,
+      responseMode: response.toolCalls.length > 0 ? "tool_calls" : "text",
+      toolCalls: response.toolCalls.map((call) => ({ id: call.id, name: call.name })),
       response: {
         id: response.id,
         usage: response.usage,
