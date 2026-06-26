@@ -55,6 +55,7 @@ export class OpenAIResponsesClient {
     return {
       id: raw.id ?? null,
       text: readResponseText(raw),
+      toolCalls: [],
       raw,
       usage: usage
         ? {

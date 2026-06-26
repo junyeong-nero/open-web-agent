@@ -116,6 +116,7 @@ class FakeModel implements ModelPlugin {
     return {
       id: "response_1",
       text: this.responses.shift() ?? "",
+      toolCalls: [],
       raw: {},
       usage: null,
       latencyMs: 0,

@@ -60,6 +60,7 @@ class FakeModel implements ModelPlugin {
     return {
       id: "fake-response",
       text: "manifest model answer",
+      toolCalls: [],
       raw: {},
       usage: null,
       latencyMs: 0,

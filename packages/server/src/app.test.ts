@@ -330,7 +330,7 @@ class TestModel implements ModelPlugin {
   reasoningEffort = "medium"
 
   async complete(_request: ModelRequest, _ctx: RuntimeContext): Promise<ModelResponse> {
-    return { id: "model_response_1", text: "{}", raw: {}, usage: null, latencyMs: 0 }
+    return { id: "model_response_1", text: "{}", toolCalls: [], raw: {}, usage: null, latencyMs: 0 }
   }
 }
 

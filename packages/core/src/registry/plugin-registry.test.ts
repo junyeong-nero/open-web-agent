@@ -30,7 +30,7 @@ const model: ModelPlugin = {
   name: "Model 1",
   provider: "test",
   async complete() {
-    return { id: "response-1", text: "done", raw: {}, usage: null, latencyMs: 0 }
+    return { id: "response-1", text: "done", toolCalls: [], raw: {}, usage: null, latencyMs: 0 }
   },
 }
 

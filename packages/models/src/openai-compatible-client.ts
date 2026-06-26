@@ -55,6 +55,7 @@ export class OpenAICompatibleClient {
     return {
       id: raw.id ?? null,
       text: raw.choices?.[0]?.message?.content ?? "",
+      toolCalls: [],
       raw,
       usage: usage
         ? {
