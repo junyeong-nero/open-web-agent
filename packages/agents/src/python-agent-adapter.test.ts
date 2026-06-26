@@ -87,14 +87,24 @@ function ctx(
 
 const defaultBrowserTools: BrowserToolDefinition[] = [
   {
+    name: "browser_navigate",
     type: "navigate",
+    capability: "core",
     description: "Open an absolute URL in the current browser page.",
+    inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false },
+    readOnly: false,
+    requiresApproval: false,
     parameters: [{ name: "url", type: "string", required: true, description: "Absolute URL to open." }],
     example: { id: "tool_1", type: "navigate", url: "https://example.com" },
   },
   {
+    name: "browser_click",
     type: "click",
+    capability: "core",
     description: "Click an interactive element or coordinate on the current page.",
+    inputSchema: { type: "object", properties: { target: { type: "object" } }, required: ["target"], additionalProperties: false },
+    readOnly: false,
+    requiresApproval: false,
     parameters: [{ name: "target", type: "ActionTarget", required: true, description: "Element or coordinates to click." }],
     example: { id: "tool_2", type: "click", target: { selector: 'button[type="submit"]' } },
   },

@@ -3,9 +3,17 @@ import { mkdtemp } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { AgentDecision } from "../contracts/agent"
-import type { ActionResult, BrowserToolCall, BrowserToolDefinition, Observation } from "../contracts/browser"
+import {
+  BrowserToolCallSchema,
+  type ActionResult,
+  type BrowserCapability,
+  type BrowserToolCall,
+  type BrowserToolDefinition,
+  type Observation,
+} from "../contracts/browser"
 import type { RunEvent } from "../contracts/event"
 import type { AgentPlugin, BrowserEnvironment, ToolAdapter } from "../contracts/plugin"
+import type { ModelToolCall } from "../contracts/model"
 import { EventBus } from "../events/event-bus"
 import { PluginRegistry } from "../registry/plugin-registry"
 import { JsonlEventStore } from "../storage/jsonl-event-store"
@@ -110,15 +118,41 @@ class TestBrowserToolAdapter implements ToolAdapter {
   id = "test-browser-tools"
   name = "Test Browser Tools"
   environmentId = "test-browser"
+  supportedCapabilities: BrowserCapability[] = ["core"]
   calls: BrowserToolCall[] = []
 
   constructor(
     protected readonly environment: TestEnvironment,
-    private readonly tools: BrowserToolDefinition[] = [],
+    private readonly tools: BrowserToolDefinition[] = coreToolDefinitions(),
   ) {}
 
-  listTools() {
-    return this.tools
+  listTools(capabilities: BrowserCapability[]): BrowserToolDefinition[] {
+    const enabled = new Set(capabilities)
+    return this.tools.filter((tool) => enabled.has(tool.capability))
+  }
+
+  parseToolCall(call: ModelToolCall, capabilities: BrowserCapability[]): BrowserToolCall {
+    const definition = this.listTools(capabilities).find((tool) => tool.name === call.name)
+    if (!definition) throw new Error(`Unknown browser tool: ${call.name}`)
+    return BrowserToolCallSchema.parse({
+      id: call.id,
+      type: definition.type,
+      ...(isRecord(call.arguments) ? call.arguments : {}),
+    })
+  }
+
+  validateToolCall(call: BrowserToolCall, capabilities: BrowserCapability[]): BrowserToolCall {
+    const definition = this.listTools(capabilities).find((tool) => tool.type === call.type)
+    if (!definition) throw new Error(`Unknown browser tool type: ${call.type}`)
+    return BrowserToolCallSchema.parse(call)
+  }
+
+  modelToolName(call: BrowserToolCall): string {
+    return this.tools.find((tool) => tool.type === call.type)?.name ?? `browser_${call.type}`
+  }
+
+  requiresApproval(call: BrowserToolCall): boolean {
+    return this.tools.find((tool) => tool.type === call.type)?.requiresApproval ?? false
   }
 
   async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
@@ -279,6 +313,29 @@ function target(selector: string): Extract<BrowserToolCall, { type: "click" | "t
     name: null,
     coordinates: null,
   }
+}
+
+function coreToolDefinitions(): BrowserToolDefinition[] {
+  const definitions: Array<Pick<BrowserToolDefinition, "name" | "type" | "readOnly">> = [
+    { name: "browser_navigate", type: "navigate", readOnly: false },
+    { name: "browser_click", type: "click", readOnly: false },
+    { name: "browser_type", type: "type", readOnly: false },
+    { name: "browser_take_screenshot", type: "screenshot", readOnly: true },
+    { name: "browser_extract_text", type: "extract_text", readOnly: true },
+  ]
+  return definitions.map((definition) => ({
+    ...definition,
+    capability: "core",
+    description: definition.name,
+    inputSchema: { type: "object" },
+    requiresApproval: false,
+    parameters: [],
+    example: {},
+  }))
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 class ThrowingBrowserToolAdapter extends TestBrowserToolAdapter {
@@ -543,8 +600,13 @@ describe("RunOrchestrator", () => {
     const environment = new TestEnvironment()
     const toolDefinitions: BrowserToolDefinition[] = [
       {
+        name: "browser_navigate",
         type: "navigate",
+        capability: "core",
         description: "Open an absolute URL.",
+        inputSchema: { type: "object" },
+        readOnly: false,
+        requiresApproval: false,
         parameters: [{ name: "url", type: "string", required: true, description: "Absolute URL to open." }],
         example: { id: "tool_1", type: "navigate", url: "https://example.com" },
       },

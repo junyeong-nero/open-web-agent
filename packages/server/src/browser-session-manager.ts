@@ -129,7 +129,7 @@ export class BrowserSessionManager {
 
   private listBrowserTools(environmentId: string): RuntimeContext["browserTools"] {
     return (
-      this.options.registry.listToolAdapters().find((adapter) => adapter.environmentId === environmentId)?.listTools() ?? []
+      this.options.registry.listToolAdapters().find((adapter) => adapter.environmentId === environmentId)?.listTools(["core"]) ?? []
     )
   }
 }

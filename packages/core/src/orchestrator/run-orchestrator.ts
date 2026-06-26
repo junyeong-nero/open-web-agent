@@ -240,7 +240,7 @@ export class RunOrchestrator {
 }
 
 function listBrowserToolsForEnvironment(registry: PluginRegistry, environmentId: string) {
-  return registry.listToolAdapters().find((adapter) => adapter.environmentId === environmentId)?.listTools() ?? []
+  return registry.listToolAdapters().find((adapter) => adapter.environmentId === environmentId)?.listTools(["core"]) ?? []
 }
 
 async function executeBrowserTool(

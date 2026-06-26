@@ -284,7 +284,7 @@ function gateFakeNewPages(fake: ReturnType<typeof createFakeBrowser>) {
 
 describe("PlaywrightEnvironment", () => {
   it("exposes the browser tools it can execute", () => {
-    const tools = new PlaywrightBrowserToolAdapter(new PlaywrightEnvironment({ headless: true })).listTools()
+    const tools = new PlaywrightBrowserToolAdapter(new PlaywrightEnvironment({ headless: true })).listTools(["core"])
 
     expect(tools.map((tool) => tool.type)).toEqual([
       "navigate",
@@ -299,8 +299,17 @@ describe("PlaywrightEnvironment", () => {
       "go_forward",
     ])
     expect(tools.find((tool) => tool.type === "navigate")).toMatchObject({
-      description: "Open an absolute URL in the current browser page.",
-      parameters: [{ name: "url", type: "string", required: true, description: "Absolute URL to open." }],
+      name: "browser_navigate",
+      capability: "core",
+      description: "Open an absolute HTTP(S) URL in the current browser page.",
+      inputSchema: {
+        type: "object",
+        required: ["url"],
+        additionalProperties: false,
+      },
+      readOnly: false,
+      requiresApproval: false,
+      parameters: [{ name: "url", type: "string", required: true, description: "Absolute HTTP(S) URL to open." }],
       example: { id: "tool_1", type: "navigate", url: "https://example.com" },
     })
     expect(tools.find((tool) => tool.type === "click")).toMatchObject({

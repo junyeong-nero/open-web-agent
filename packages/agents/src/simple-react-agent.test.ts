@@ -72,8 +72,13 @@ function searchState(): AgentState {
 
 const defaultBrowserTools: RuntimeContext["browserTools"] = [
   {
+    name: "browser_type",
     type: "type",
+    capability: "core",
     description: "Fill text into an editable element.",
+    inputSchema: { type: "object", properties: { target: { type: "object" }, value: { type: "string" } }, required: ["target", "value"], additionalProperties: false },
+    readOnly: false,
+    requiresApproval: false,
     parameters: [
       { name: "target", type: "ActionTarget", required: true, description: "Editable element to fill." },
       { name: "value", type: "string", required: true, description: "Text to enter." },
@@ -81,8 +86,13 @@ const defaultBrowserTools: RuntimeContext["browserTools"] = [
     example: { id: "tool_1", type: "type", target: { selector: 'input[name="query"]' }, value: "tomorrow weather" },
   },
   {
+    name: "browser_click",
     type: "click",
+    capability: "core",
     description: "Click an interactive element.",
+    inputSchema: { type: "object", properties: { target: { type: "object" } }, required: ["target"], additionalProperties: false },
+    readOnly: false,
+    requiresApproval: false,
     parameters: [{ name: "target", type: "ActionTarget", required: true, description: "Element to click." }],
     example: { id: "tool_2", type: "click", target: { selector: 'button[type="submit"]' } },
   },
@@ -275,14 +285,24 @@ describe("SimpleReActAgent", () => {
       state(),
       ctx([
         {
+          name: "browser_navigate",
           type: "navigate",
+          capability: "core",
           description: "Open an absolute URL in the current browser page.",
+          inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false },
+          readOnly: false,
+          requiresApproval: false,
           parameters: [{ name: "url", type: "string", required: true, description: "Absolute URL to open." }],
           example: { id: "tool_1", type: "navigate", url: "https://example.com" },
         },
         {
+          name: "browser_take_screenshot",
           type: "screenshot",
+          capability: "core",
           description: "Capture a full-page screenshot for visual inspection.",
+          inputSchema: { type: "object", properties: {}, additionalProperties: false },
+          readOnly: true,
+          requiresApproval: false,
           parameters: [],
           example: { id: "tool_2", type: "screenshot" },
         },
