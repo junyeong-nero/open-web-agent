@@ -1,5 +1,12 @@
 import { describe, expect, it } from "bun:test"
-import { EventBus, type AgentState, type ModelPlugin, type ModelRequest, type ModelResponse, type RuntimeContext } from "@open-web-agent/core"
+import {
+  EventBus,
+  type AgentState,
+  type ModelPlugin,
+  type ModelRequest,
+  type ModelResponse,
+  type RuntimeContext,
+} from "@open-web-agent/core"
 import { formatObservationForPrompt, SimpleReActAgent } from "./simple-react-agent"
 
 function state(): AgentState {
@@ -114,25 +121,63 @@ function ctx(browserTools: RuntimeContext["browserTools"] = defaultBrowserTools)
   }
 }
 
+type FakeResponse = string | {
+  text?: string
+  toolCalls?: ModelResponse["toolCalls"]
+}
+
 class FakeModel implements ModelPlugin {
   id = "fake-model"
   name = "Fake Model"
   provider = "test"
   requests: ModelRequest[] = []
 
-  constructor(private readonly responses: string[]) {}
+  constructor(private readonly responses: FakeResponse[]) {}
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
     this.requests.push(request)
+    const next = this.responses.shift() ?? ""
     return {
       id: "response_1",
-      text: this.responses.shift() ?? "",
-      toolCalls: [],
+      text: typeof next === "string" ? next : (next.text ?? ""),
+      toolCalls: typeof next === "string" ? [] : (next.toolCalls ?? []),
       raw: {},
       usage: null,
       latencyMs: 0,
     }
   }
+}
+
+function coreBrowserTools(): RuntimeContext["browserTools"] {
+  return [
+    {
+      name: "browser_navigate",
+      type: "navigate",
+      capability: "core",
+      description: "Open an absolute HTTP(S) URL.",
+      inputSchema: {
+        type: "object",
+        properties: { url: { type: "string", format: "uri" } },
+        required: ["url"],
+        additionalProperties: false,
+      },
+      readOnly: false,
+      requiresApproval: false,
+      parameters: [{ name: "url", type: "string", required: true, description: "Absolute URL." }],
+      example: { url: "https://example.com" },
+    },
+    {
+      name: "browser_extract_text",
+      type: "extract_text",
+      capability: "core",
+      description: "Return visible page text.",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      readOnly: true,
+      requiresApproval: false,
+      parameters: [],
+      example: {},
+    },
+  ]
 }
 
 describe("formatObservationForPrompt", () => {
@@ -185,6 +230,143 @@ describe("formatObservationForPrompt", () => {
 })
 
 describe("SimpleReActAgent", () => {
+  it("converts native calls into one browser action per call in provider order", async () => {
+    const model = new FakeModel([
+      {
+        text: "Open and inspect the page.",
+        toolCalls: [
+          { id: "call_1", name: "browser_navigate", arguments: { url: "https://example.com" } },
+          { id: "call_2", name: "browser_extract_text", arguments: {} },
+        ],
+      },
+    ])
+
+    const decision = await new SimpleReActAgent({ model, modelName: "fake" }).step(state(), ctx(coreBrowserTools()))
+
+    expect(decision).toEqual({
+      type: "browser_actions",
+      thought: "Open and inspect the page.",
+      actions: [
+        {
+          id: "action_call_1",
+          kind: "browser_navigate",
+          reason: "Open and inspect the page.",
+          requiresApproval: false,
+          toolCalls: [{ id: "call_1", type: "navigate", url: "https://example.com" }],
+        },
+        {
+          id: "action_call_2",
+          kind: "browser_extract_text",
+          reason: "Open and inspect the page.",
+          requiresApproval: false,
+          toolCalls: [{ id: "call_2", type: "extract_text" }],
+        },
+      ],
+    })
+    expect(model.requests[0]).toMatchObject({ toolChoice: "auto", responseFormat: "text" })
+    expect(model.requests[0]?.tools?.map((tool) => tool.name)).toContain("browser_navigate")
+  })
+
+  it("treats ordinary text without tool calls as the final answer", async () => {
+    const model = new FakeModel(["Example Domain"])
+
+    const decision = await new SimpleReActAgent({ model, modelName: "fake" }).step(state(), ctx(coreBrowserTools()))
+
+    expect(decision).toEqual({
+      type: "final_answer",
+      thought: null,
+      finalAnswer: "Example Domain",
+      confidence: null,
+    })
+  })
+
+  it("retries an invalid native batch without returning any executable action", async () => {
+    const model = new FakeModel([
+      {
+        toolCalls: [
+          { id: "call_1", name: "browser_navigate", arguments: {} },
+          { id: "call_2", name: "browser_extract_text", arguments: {} },
+        ],
+      },
+      {
+        toolCalls: [
+          { id: "call_3", name: "browser_navigate", arguments: { url: "https://example.com" } },
+        ],
+      },
+    ])
+
+    const decision = await new SimpleReActAgent({ model, modelName: "fake" }).step(state(), ctx(coreBrowserTools()))
+
+    expect(decision).toMatchObject({
+      type: "browser_actions",
+      actions: [{ toolCalls: [{ id: "call_3", type: "navigate" }] }],
+    })
+    expect(model.requests).toHaveLength(2)
+    const retryMessages = model.requests[1]?.messages ?? []
+    expect(retryMessages).toContainEqual(
+      expect.objectContaining({ role: "tool", toolCallId: "call_1", name: "browser_navigate" }),
+    )
+    expect(retryMessages).toContainEqual(
+      expect.objectContaining({ role: "tool", toolCallId: "call_2", name: "browser_extract_text" }),
+    )
+    expect(JSON.stringify(retryMessages)).toContain("invalid_tool_arguments")
+    expect(JSON.stringify(retryMessages)).toContain("not_executed_due_to_invalid_batch")
+  })
+
+  it("fails after the native correction limit", async () => {
+    const model = new FakeModel([
+      { toolCalls: [{ id: "call_1", name: "browser_navigate", arguments: {} }] },
+      { toolCalls: [{ id: "call_2", name: "browser_navigate", arguments: {} }] },
+    ])
+
+    await expect(new SimpleReActAgent({ model, modelName: "fake" }).step(state(), ctx(coreBrowserTools()))).rejects.toThrow(
+      "Invalid native browser tool call after retry",
+    )
+  })
+
+  it("reconstructs assistant tool calls and correlated results from prior steps", async () => {
+    const previous = state()
+    previous.steps.push({
+      id: "step_1",
+      decision: {
+        type: "browser_actions",
+        thought: "Open the page.",
+        actions: [
+          {
+            id: "action_call_1",
+            kind: "browser_navigate",
+            reason: "Open the page.",
+            requiresApproval: false,
+            toolCalls: [{ id: "call_1", type: "navigate", url: "https://example.com" }],
+          },
+        ],
+      },
+      observation: previous.lastObservation,
+      actionResults: [],
+      modelToolResults: [
+        {
+          toolCallId: "call_1",
+          name: "browser_navigate",
+          output: { ok: true, message: "navigated" },
+          isError: false,
+        },
+      ],
+    })
+    const model = new FakeModel(["done"])
+
+    await new SimpleReActAgent({ model, modelName: "fake" }).step(previous, ctx(coreBrowserTools()))
+
+    expect(model.requests[0]?.messages).toContainEqual(
+      expect.objectContaining({
+        role: "assistant",
+        toolCalls: [expect.objectContaining({ id: "call_1", name: "browser_navigate" })],
+      }),
+    )
+    expect(model.requests[0]?.messages).toContainEqual(
+      expect.objectContaining({ role: "tool", toolCallId: "call_1", name: "browser_navigate" }),
+    )
+  })
+
   it("parses browser action model decisions", async () => {
     const model = new FakeModel([
       JSON.stringify({
@@ -210,7 +392,7 @@ describe("SimpleReActAgent", () => {
     const decision = await new SimpleReActAgent({ model, modelName: "fake" }).step(state(), ctx())
 
     expect(decision.type).toBe("browser_actions")
-    expect(model.requests[0]?.responseFormat).toBe("json")
+    expect(model.requests[0]?.responseFormat).toBe("text")
     expect(model.requests[0]).not.toHaveProperty("temperature")
   })
 
@@ -254,6 +436,7 @@ describe("SimpleReActAgent", () => {
           metadata: {},
         },
       ],
+      modelToolResults: [],
     })
     const model = new FakeModel([
       JSON.stringify({ type: "final_answer", thought: null, finalAnswer: "done", confidence: 1 }),
@@ -708,7 +891,7 @@ describe("SimpleReActAgent", () => {
 
   it("retries once after invalid JSON", async () => {
     const model = new FakeModel([
-      "not json",
+      "{",
       JSON.stringify({ type: "final_answer", thought: null, finalAnswer: "done", confidence: 1 }),
     ])
     const decision = await new SimpleReActAgent({ model, modelName: "fake" }).step(state(), ctx())
@@ -718,7 +901,7 @@ describe("SimpleReActAgent", () => {
   })
 
   it("throws with raw model output after retry failure", async () => {
-    const model = new FakeModel(["not json", JSON.stringify({ type: "tool_calls", toolCalls: [] })])
+    const model = new FakeModel(["{", JSON.stringify({ type: "tool_calls", toolCalls: [] })])
 
     await expect(new SimpleReActAgent({ model, modelName: "fake" }).step(state(), ctx())).rejects.toThrow(
       "Invalid model decision",

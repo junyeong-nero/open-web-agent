@@ -1,6 +1,7 @@
 import type { AgentDecision } from "../contracts/agent"
 import type { ActionResult, BrowserCapability, BrowserToolDefinition, Observation } from "../contracts/browser"
 import type { RunEvent, RunEventType } from "../contracts/event"
+import type { ModelToolResult } from "../contracts/model"
 import type { EventBus } from "../events/event-bus"
 
 export interface SessionState {
@@ -19,6 +20,7 @@ export interface AgentStepRecord {
   decision: AgentDecision | null
   observation: Observation | null
   actionResults: ActionResult[]
+  modelToolResults: ModelToolResult[]
 }
 
 export interface AgentState {

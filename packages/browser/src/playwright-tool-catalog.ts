@@ -1,11 +1,12 @@
 import { z, type ZodType } from "zod"
 import {
-  BrowserToolCallSchema,
   BrowserToolValidationError,
+  browserToolCallToModelToolCall,
   ClickArgumentsSchema,
   EmptyBrowserToolArgumentsSchema,
   NavigateArgumentsSchema,
   PressKeyArgumentsSchema,
+  parseModelToolCallFromDefinitions,
   ScrollArgumentsSchema,
   TypeArgumentsSchema,
   WaitArgumentsSchema,
@@ -202,24 +203,7 @@ export function parsePlaywrightModelToolCall(
     )
   }
 
-  const parsed = descriptor.argumentsSchema.safeParse(call.arguments)
-  if (!parsed.success) {
-    throw new BrowserToolValidationError(
-      "invalid_tool_arguments",
-      `Invalid arguments for ${call.name}`,
-      parsed.error.issues.map((issue) => ({
-        path: issue.path.map((part) => (typeof part === "symbol" ? String(part) : part)),
-        code: issue.code,
-        message: issue.message,
-      })),
-    )
-  }
-
-  return BrowserToolCallSchema.parse({
-    id: call.id,
-    type: descriptor.definition.type,
-    ...(parsed.data as Record<string, unknown>),
-  })
+  return parseModelToolCallFromDefinitions(call, listPlaywrightBrowserTools(capabilities))
 }
 
 export function validatePlaywrightBrowserToolCall(
@@ -228,14 +212,7 @@ export function validatePlaywrightBrowserToolCall(
 ): BrowserToolCall {
   const descriptor = DESCRIPTORS.find((entry) => entry.definition.type === call.type)
   if (!descriptor) throw new BrowserToolValidationError("unknown_tool", `Unknown browser tool type: ${call.type}`)
-  return parsePlaywrightModelToolCall(
-    {
-      id: call.id,
-      name: descriptor.definition.name,
-      arguments: Object.fromEntries(Object.entries(call).filter(([key]) => key !== "id" && key !== "type")),
-    },
-    capabilities,
-  )
+  return parsePlaywrightModelToolCall(browserToolCallToModelToolCall(call, [descriptor.definition], { redact: false }), capabilities)
 }
 
 export function playwrightModelToolName(call: BrowserToolCall): string {

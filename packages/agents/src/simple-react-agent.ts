@@ -1,5 +1,8 @@
 import {
   AgentDecisionSchema,
+  BrowserToolValidationError,
+  browserToolCallToModelToolCall,
+  parseModelToolCallFromDefinitions,
   redactSensitiveData,
   type AgentDecision,
   type AgentPlugin,
@@ -9,6 +12,11 @@ import {
   type BrowserToolDefinition,
   type ModelPlugin,
   type ModelRequest,
+  type ModelMessage,
+  type ModelResponse,
+  type ModelToolCall,
+  type ModelToolDefinition,
+  type ModelToolResult,
   type Observation,
   type RuntimeContext,
 } from "@open-web-agent/core"
@@ -24,6 +32,12 @@ type ObservedElement = Observation["interactiveElements"][number]
 
 const UNTRUSTED_OBSERVATION_BEGIN = "<<<UNTRUSTED_BROWSER_OBSERVATION_BEGIN>>>"
 const UNTRUSTED_OBSERVATION_END = "<<<UNTRUSTED_BROWSER_OBSERVATION_END>>>"
+
+interface NativeToolRetry {
+  assistantText: string
+  calls: ModelToolCall[]
+  results: ModelToolResult[]
+}
 
 export class SimpleReActAgent implements AgentPlugin {
   id = "simple-react-agent"
@@ -42,15 +56,37 @@ export class SimpleReActAgent implements AgentPlugin {
   async step(state: AgentState, ctx: RuntimeContext): Promise<AgentDecision> {
     let lastError: string | null = null
     let lastRaw = ""
+    let nativeRetry: NativeToolRetry | null = null
 
     for (let attempt = 0; attempt <= this.maxParseRetries; attempt += 1) {
-      const request = this.buildRequest(state, ctx, lastError, lastRaw)
+      const request = this.buildRequest(state, ctx, lastError, lastRaw, nativeRetry)
       const response = await withTimeout(
         (abortSignal) => this.options.model.complete(request, { ...ctx, abortSignal }),
         this.timeoutMs,
         ctx.abortSignal,
       )
       lastRaw = response.text
+
+      if (response.toolCalls.length > 0) {
+        const batch = validateNativeBatch(response, ctx.browserTools)
+        if (batch.ok) return batch.decision
+        if (attempt >= this.maxParseRetries) {
+          throw new Error("Invalid native browser tool call after retry")
+        }
+        nativeRetry = batch.retry
+        lastError = null
+        continue
+      }
+
+      nativeRetry = null
+      if (!looksLikeJsonDecision(response.text)) {
+        const finalAnswer = response.text.trim()
+        if (finalAnswer.length > 0) {
+          return { type: "final_answer", thought: null, finalAnswer, confidence: null }
+        }
+        lastError = "Model returned neither browser tool calls nor a final answer"
+        continue
+      }
 
       try {
         return repairDecisionTargets(parseDecision(response.text), state.lastObservation)
@@ -67,18 +103,33 @@ export class SimpleReActAgent implements AgentPlugin {
     return state.finalAnswer ?? ""
   }
 
-  private buildRequest(state: AgentState, ctx: RuntimeContext, lastError: string | null, lastRaw: string): ModelRequest {
+  private buildRequest(
+    state: AgentState,
+    ctx: RuntimeContext,
+    lastError: string | null,
+    lastRaw: string,
+    nativeRetry: NativeToolRetry | null,
+  ): ModelRequest {
     const failedResults = formatFailedBrowserResults(state)
 
     return {
       model: this.options.modelName,
-      responseFormat: "json",
+      responseFormat: "text",
+      ...(ctx.browserTools.length > 0
+        ? {
+            tools: toModelToolDefinitions(ctx.browserTools),
+            toolChoice: "auto" as const,
+          }
+        : {}),
       messages: [
         {
           role: "system",
           content: [
             "You are Open Web Agent's browser-control agent.",
-            "Return only JSON matching one of these shapes:",
+            "Use the provided browser tools when browser interaction is required.",
+            "When the task is complete, return the final answer as ordinary text.",
+            "Legacy AgentDecision JSON is accepted only as a compatibility fallback.",
+            "Legacy JSON shapes:",
             '{"type":"browser_actions","thought":string|null,"actions":[{"id":string,"kind":string,"reason":string|null,"requiresApproval":boolean,"toolCalls":[...]}]}',
             '{"type":"final_answer","thought":string|null,"finalAnswer":string,"confidence":number|null}',
             "Browser tool calls must be nested under browser_actions.actions[].toolCalls.",
@@ -89,6 +140,7 @@ export class SimpleReActAgent implements AgentPlugin {
             formatBrowserToolsForPrompt(ctx.browserTools),
           ].join("\n"),
         },
+        ...historyMessages(state, ctx.browserTools),
         {
           role: "user",
           content: [
@@ -121,9 +173,148 @@ export class SimpleReActAgent implements AgentPlugin {
               : []),
           ].join("\n"),
         },
+        ...nativeRetryMessages(nativeRetry),
       ],
     }
   }
+}
+
+function toModelToolDefinitions(tools: BrowserToolDefinition[]): ModelToolDefinition[] {
+  return tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+    strict: true,
+  }))
+}
+
+function historyMessages(state: AgentState, browserTools: BrowserToolDefinition[]): ModelMessage[] {
+  return state.steps.flatMap((step) => {
+    if (step.decision?.type !== "browser_actions") return []
+    const toolCalls = step.decision.actions.flatMap((action) =>
+      action.toolCalls.map((call) => browserToolCallToModelToolCall(call, browserTools, { redact: true })),
+    )
+    return [
+      { role: "assistant" as const, content: step.decision.thought ?? "", toolCalls },
+      ...step.modelToolResults.map((result) => ({
+        role: "tool" as const,
+        content: JSON.stringify(result.output),
+        toolCallId: result.toolCallId,
+        name: result.name,
+      })),
+    ]
+  })
+}
+
+function nativeRetryMessages(retry: NativeToolRetry | null): ModelMessage[] {
+  if (!retry) return []
+  return [
+    {
+      role: "assistant",
+      content: retry.assistantText,
+      toolCalls: retry.calls.map((call, index) => ({
+        ...call,
+        id: call.id || `invalid_call_${index + 1}`,
+        name: call.name || "unknown_browser_tool",
+      })),
+    },
+    ...retry.results.map((result) => ({
+      role: "tool" as const,
+      content: JSON.stringify(result.output),
+      toolCallId: result.toolCallId,
+      name: result.name,
+    })),
+  ]
+}
+
+function nativeDecisionFromCalls(
+  response: ModelResponse,
+  parsedCalls: BrowserToolCall[],
+  browserTools: BrowserToolDefinition[],
+): AgentDecision {
+  const reason = response.text.trim() || null
+  return {
+    type: "browser_actions",
+    thought: reason,
+    actions: parsedCalls.map((toolCall) => {
+      const definition = browserTools.find((tool) => tool.type === toolCall.type)
+      if (!definition) {
+        throw new BrowserToolValidationError("unknown_tool", `Unknown browser tool type: ${toolCall.type}`)
+      }
+      return {
+        id: `action_${toolCall.id}`,
+        kind: definition.name,
+        reason,
+        requiresApproval: definition.requiresApproval,
+        toolCalls: [toolCall],
+      }
+    }),
+  }
+}
+
+function validateNativeBatch(
+  response: ModelResponse,
+  browserTools: BrowserToolDefinition[],
+):
+  | { ok: true; decision: AgentDecision }
+  | { ok: false; retry: NativeToolRetry } {
+  const parsedCalls: BrowserToolCall[] = []
+  const failures = new Map<number, BrowserToolValidationError>()
+
+  response.toolCalls.forEach((call, index) => {
+    try {
+      parsedCalls.push(parseModelToolCallFromDefinitions(call, browserTools))
+    } catch (error) {
+      failures.set(
+        index,
+        error instanceof BrowserToolValidationError
+          ? error
+          : new BrowserToolValidationError("invalid_tool_arguments", String(error)),
+      )
+    }
+  })
+
+  if (failures.size > 0) {
+    return {
+      ok: false,
+      retry: {
+        assistantText: response.text,
+        calls: response.toolCalls,
+        results: invalidBatchResults(response.toolCalls, failures),
+      },
+    }
+  }
+
+  return {
+    ok: true,
+    decision: nativeDecisionFromCalls(response, parsedCalls, browserTools),
+  }
+}
+
+function invalidBatchResults(
+  calls: ModelToolCall[],
+  failures: Map<number, BrowserToolValidationError>,
+): ModelToolResult[] {
+  return calls.map((call, index) => {
+    const failure = failures.get(index)
+    return {
+      toolCallId: call.id || `invalid_call_${index + 1}`,
+      name: call.name || "unknown_browser_tool",
+      output: failure
+        ? failure.toModelOutput()
+        : {
+            code: "not_executed_due_to_invalid_batch",
+            message: "The browser tool batch was not executed because another call was invalid.",
+            issues: [],
+          },
+      isError: true,
+    }
+  })
+}
+
+function looksLikeJsonDecision(text: string): boolean {
+  const trimmed = text.trimStart()
+  return trimmed.startsWith("{") || trimmed.startsWith("[")
 }
 
 function formatBrowserToolsForPrompt(tools: BrowserToolDefinition[]): string {
@@ -340,6 +531,7 @@ function normalizeToolCall(toolCall: unknown, actionId: string, toolIndex: numbe
     const targetUrl = normalized.target.url
     if (typeof targetUrl === "string") {
       normalized.url = targetUrl
+      delete normalized.target
     }
   }
 

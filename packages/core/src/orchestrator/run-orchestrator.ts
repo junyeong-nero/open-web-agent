@@ -162,6 +162,7 @@ export class RunOrchestrator {
           decision,
           observation: state.lastObservation,
           actionResults: [] as ActionResult[],
+          modelToolResults: [],
         }
 
         await emit("agent.step.completed", { decision }, stepId)
