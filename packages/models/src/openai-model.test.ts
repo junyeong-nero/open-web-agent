@@ -16,13 +16,30 @@ describe("OpenAIModel", () => {
     })
 
     const response = await model.complete(
-      { model: "gpt-test", messages: [{ role: "user", content: "hi" }], temperature: 0, responseFormat: "text" },
+      {
+        model: "gpt-test",
+        messages: [{ role: "user", content: "hi" }],
+        tools: [
+          {
+            name: "browser_navigate",
+            description: "Navigate",
+            inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
+          },
+        ],
+        toolChoice: "auto",
+        temperature: 0,
+        responseFormat: "text",
+      },
       { abortSignal: abort.signal } as RuntimeContext,
     )
 
     expect(model.id).toBe("openai")
     expect(calls[0]?.url).toBe("https://api.openai.com/v1/chat/completions")
     expect(calls[0]?.init.signal).toBe(abort.signal)
+    expect(JSON.parse(String(calls[0]?.init.body))).toMatchObject({
+      tools: [{ type: "function", function: { name: "browser_navigate" } }],
+      tool_choice: "auto",
+    })
     expect(response.text).toBe("ok")
   })
 

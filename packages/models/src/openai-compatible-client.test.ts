@@ -186,6 +186,123 @@ describe("OpenAICompatibleClient", () => {
     })
   })
 
+  it("serializes function tools and correlated tool conversation messages", async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const client = new OpenAICompatibleClient({
+      baseUrl: "https://provider.test/v1",
+      apiKey: "key_123",
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return Response.json({
+          id: "chatcmpl_1",
+          choices: [{ message: { content: "done" } }],
+        })
+      },
+    })
+
+    await client.complete({
+      model: "test-model",
+      messages: [
+        { role: "user", content: "Open example.com" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            { id: "call_1", name: "browser_navigate", arguments: { url: "https://example.com" } },
+          ],
+        },
+        {
+          role: "tool",
+          content: '{"ok":true}',
+          toolCallId: "call_1",
+          name: "browser_navigate",
+        },
+      ],
+      tools: [
+        {
+          name: "browser_navigate",
+          description: "Navigate",
+          inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
+          strict: true,
+        },
+      ],
+      toolChoice: "auto",
+      responseFormat: "text",
+    })
+
+    expect(bodies[0]).toMatchObject({
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "browser_navigate",
+            description: "Navigate",
+            parameters: { type: "object" },
+            strict: true,
+          },
+        },
+      ],
+      tool_choice: "auto",
+      messages: [
+        { role: "user", content: "Open example.com" },
+        {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            {
+              id: "call_1",
+              type: "function",
+              function: { name: "browser_navigate", arguments: '{"url":"https://example.com"}' },
+            },
+          ],
+        },
+        { role: "tool", content: '{"ok":true}', tool_call_id: "call_1", name: "browser_navigate" },
+      ],
+    })
+  })
+
+  it("parses multiple native tool calls and preserves malformed arguments for local validation", async () => {
+    const client = new OpenAICompatibleClient({
+      baseUrl: "https://provider.test/v1",
+      apiKey: "key_123",
+      fetch: async () =>
+        Response.json({
+          id: "chatcmpl_tools",
+          choices: [
+            {
+              message: {
+                content: "Use the browser.",
+                tool_calls: [
+                  {
+                    id: "call_1",
+                    type: "function",
+                    function: { name: "browser_navigate", arguments: '{"url":"https://example.com"}' },
+                  },
+                  {
+                    id: "call_2",
+                    type: "function",
+                    function: { name: "browser_click", arguments: "{not-json" },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+    })
+
+    const response = await client.complete({
+      model: "test-model",
+      messages: [{ role: "user", content: "browse" }],
+      responseFormat: "text",
+    })
+
+    expect(response.text).toBe("Use the browser.")
+    expect(response.toolCalls).toEqual([
+      { id: "call_1", name: "browser_navigate", arguments: { url: "https://example.com" } },
+      { id: "call_2", name: "browser_click", arguments: "{not-json" },
+    ])
+  })
+
   it("retries transient chat completion failures up to maxRetry", async () => {
     const statuses = [500, 429]
     const client = new OpenAICompatibleClient({
