@@ -1,4 +1,4 @@
-import type { ModelMessage, ModelRequest, ModelResponse } from "@open-web-agent/core"
+import type { ModelMessage, ModelRequest, ModelResponse, ModelToolCall } from "@open-web-agent/core"
 import type { FetchLike } from "./openai-compatible-client"
 import { isTransientModelProviderError, ModelProviderHttpError, retryModelCall } from "./retry"
 import { shouldRetryWithoutTemperature, withoutTemperatureParameter } from "./temperature-fallback"
@@ -55,6 +55,7 @@ export class OpenAIResponsesClient {
     return {
       id: raw.id ?? null,
       text: readResponseText(raw),
+      toolCalls: readResponseToolCalls(raw),
       raw,
       usage: usage
         ? {
@@ -99,13 +100,25 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 function toResponsesBody(request: ModelRequest): Record<string, unknown> {
   const instructions = request.messages.filter((message) => message.role === "system").map((message) => message.content)
-  const input = request.messages.filter((message) => message.role !== "system").map(toResponsesInputMessage)
+  const input = request.messages.filter((message) => message.role !== "system").flatMap(toResponsesInputItems)
 
   return {
     ...(request.extraBody ?? {}),
     model: request.model,
     input,
     ...(instructions.length > 0 ? { instructions: instructions.map(formatContent).join("\n\n") } : {}),
+    ...(request.tools
+      ? {
+          tools: request.tools.map((tool) => ({
+            type: "function",
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.inputSchema,
+            ...(tool.strict !== undefined ? { strict: tool.strict } : {}),
+          })),
+        }
+      : {}),
+    ...(request.toolChoice ? { tool_choice: request.toolChoice } : {}),
     ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
     ...(request.topP !== undefined ? { top_p: request.topP } : {}),
     ...(request.maxTokens !== undefined ? { max_output_tokens: request.maxTokens } : {}),
@@ -117,11 +130,26 @@ function toResponsesBody(request: ModelRequest): Record<string, unknown> {
   }
 }
 
-function toResponsesInputMessage(message: ModelMessage): Record<string, unknown> {
-  return {
-    role: message.role,
-    content: message.content,
+function toResponsesInputItems(message: ModelMessage): Record<string, unknown>[] {
+  if (message.role === "assistant" && message.toolCalls) {
+    const textItems =
+      typeof message.content === "string" && message.content.length > 0
+        ? [{ role: "assistant", content: message.content }]
+        : []
+    return [
+      ...textItems,
+      ...message.toolCalls.map((call) => ({
+        type: "function_call",
+        call_id: call.id,
+        name: call.name,
+        arguments: JSON.stringify(call.arguments),
+      })),
+    ]
   }
+  if (message.role === "tool") {
+    return [{ type: "function_call_output", call_id: message.toolCallId, output: formatContent(message.content) }]
+  }
+  return [{ role: message.role, content: message.content }]
 }
 
 function formatContent(content: ModelMessage["content"]): string {
@@ -142,6 +170,34 @@ function readResponseText(raw: ResponsesApiResponse): string {
     }
   }
   return text.join("")
+}
+
+function readResponseToolCalls(raw: ResponsesApiResponse): ModelToolCall[] {
+  const output = Array.isArray(raw.output) ? raw.output : []
+  return output.flatMap((item) => {
+    if (
+      !isRecord(item) ||
+      item.type !== "function_call" ||
+      typeof item.call_id !== "string" ||
+      typeof item.name !== "string"
+    ) {
+      return []
+    }
+    const rawArguments = typeof item.arguments === "string" ? item.arguments : "{}"
+    return [{
+      id: item.call_id,
+      name: item.name,
+      arguments: parseToolArguments(rawArguments),
+    }]
+  })
+}
+
+function parseToolArguments(value: string): unknown {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
 }
 
 function trimTrailingSlash(value: string): string {

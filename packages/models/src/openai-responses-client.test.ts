@@ -151,6 +151,109 @@ describe("OpenAIResponsesClient", () => {
     expect(response.text).toBe("from output content")
   })
 
+  it("serializes function tools and replays calls with correlated outputs", async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const client = new OpenAIResponsesClient({
+      baseUrl: "https://provider.test/v1",
+      accessToken: "oauth-token",
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return Response.json({ id: "resp_1", output_text: "done" })
+      },
+    })
+
+    await client.complete({
+      model: "gpt-test",
+      messages: [
+        { role: "system", content: "Use browser tools." },
+        { role: "user", content: "Open example.com" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            { id: "call_1", name: "browser_navigate", arguments: { url: "https://example.com" } },
+          ],
+        },
+        {
+          role: "tool",
+          content: '{"ok":true}',
+          toolCallId: "call_1",
+          name: "browser_navigate",
+        },
+      ],
+      tools: [
+        {
+          name: "browser_navigate",
+          description: "Navigate",
+          inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
+          strict: true,
+        },
+      ],
+      toolChoice: "auto",
+      responseFormat: "text",
+    })
+
+    expect(bodies[0]).toMatchObject({
+      instructions: "Use browser tools.",
+      tools: [
+        {
+          type: "function",
+          name: "browser_navigate",
+          description: "Navigate",
+          parameters: { type: "object" },
+          strict: true,
+        },
+      ],
+      tool_choice: "auto",
+      input: [
+        { role: "user", content: "Open example.com" },
+        {
+          type: "function_call",
+          call_id: "call_1",
+          name: "browser_navigate",
+          arguments: '{"url":"https://example.com"}',
+        },
+        { type: "function_call_output", call_id: "call_1", output: '{"ok":true}' },
+      ],
+    })
+  })
+
+  it("parses function_call output items", async () => {
+    const client = new OpenAIResponsesClient({
+      baseUrl: "https://provider.test/v1",
+      accessToken: "oauth-token",
+      fetch: async () =>
+        Response.json({
+          id: "resp_tools",
+          output: [
+            {
+              type: "function_call",
+              call_id: "call_1",
+              name: "browser_navigate",
+              arguments: '{"url":"https://example.com"}',
+            },
+            {
+              type: "function_call",
+              call_id: "call_2",
+              name: "browser_click",
+              arguments: "{not-json",
+            },
+          ],
+        }),
+    })
+
+    const response = await client.complete({
+      model: "gpt-test",
+      messages: [{ role: "user", content: "browse" }],
+      responseFormat: "text",
+    })
+
+    expect(response.toolCalls).toEqual([
+      { id: "call_1", name: "browser_navigate", arguments: { url: "https://example.com" } },
+      { id: "call_2", name: "browser_click", arguments: "{not-json" },
+    ])
+  })
+
   it("retries transient Responses API failures up to maxRetry", async () => {
     let attempts = 0
     const client = new OpenAIResponsesClient({

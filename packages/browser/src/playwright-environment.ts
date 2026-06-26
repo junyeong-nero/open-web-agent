@@ -17,13 +17,23 @@ import {
   REDACTED_VALUE,
   redactSensitiveData,
   type ActionResult,
+  type BrowserCapability,
   type BrowserEnvironment,
   type BrowserToolCall,
   type BrowserToolDefinition,
+  type ModelToolCall,
   type Observation,
   type RuntimeContext,
   type ToolAdapter,
 } from "@open-web-agent/core"
+import {
+  listPlaywrightBrowserTools,
+  parsePlaywrightModelToolCall,
+  PLAYWRIGHT_SUPPORTED_CAPABILITIES,
+  playwrightModelToolName,
+  playwrightToolRequiresApproval,
+  validatePlaywrightBrowserToolCall,
+} from "./playwright-tool-catalog"
 
 export interface PlaywrightEnvironmentOptions {
   browserName?: "chromium" | "firefox" | "webkit"
@@ -292,14 +302,31 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
   id = "playwright-browser-tools"
   name = "Playwright Browser Tools"
   environmentId = "playwright-browser"
+  supportedCapabilities = PLAYWRIGHT_SUPPORTED_CAPABILITIES
 
   constructor(
     private readonly environment: PlaywrightEnvironment,
     private readonly options: PlaywrightBrowserToolAdapterOptions = {},
   ) {}
 
-  listTools(): BrowserToolDefinition[] {
-    return [...PLAYWRIGHT_BROWSER_TOOL_DEFINITIONS]
+  listTools(capabilities: BrowserCapability[]): BrowserToolDefinition[] {
+    return listPlaywrightBrowserTools(capabilities)
+  }
+
+  parseToolCall(call: ModelToolCall, capabilities: BrowserCapability[]): BrowserToolCall {
+    return parsePlaywrightModelToolCall(call, capabilities)
+  }
+
+  validateToolCall(call: BrowserToolCall, capabilities: BrowserCapability[]): BrowserToolCall {
+    return validatePlaywrightBrowserToolCall(call, capabilities)
+  }
+
+  modelToolName(call: BrowserToolCall): string {
+    return playwrightModelToolName(call)
+  }
+
+  requiresApproval(call: BrowserToolCall): boolean {
+    return playwrightToolRequiresApproval(call)
   }
 
   async execute(call: BrowserToolCall, ctx: RuntimeContext): Promise<ActionResult> {
@@ -440,77 +467,6 @@ export class PlaywrightBrowserToolAdapter implements ToolAdapter {
     return withAbort(promise, ctx.abortSignal, () => this.environment.close(ctx))
   }
 }
-
-const PLAYWRIGHT_BROWSER_TOOL_DEFINITIONS: BrowserToolDefinition[] = [
-  {
-    type: "navigate",
-    description: "Open an absolute URL in the current browser page.",
-    parameters: [{ name: "url", type: "string", required: true, description: "Absolute URL to open." }],
-    example: { id: "tool_1", type: "navigate", url: "https://example.com" },
-  },
-  {
-    type: "click",
-    description: "Click an interactive element or coordinate on the current page.",
-    parameters: [
-      { name: "target", type: "ActionTarget", required: true, description: "Element or coordinates to click." },
-    ],
-    example: { id: "tool_2", type: "click", target: { selector: 'button[type="submit"]' } },
-  },
-  {
-    type: "type",
-    description: "Fill text into an editable element on the current page.",
-    parameters: [
-      { name: "target", type: "ActionTarget", required: true, description: "Editable element to fill." },
-      { name: "value", type: "string", required: true, description: "Text to enter." },
-    ],
-    example: { id: "tool_3", type: "type", target: { selector: 'input[name="query"]' }, value: "tomorrow weather" },
-  },
-  {
-    type: "scroll",
-    description: "Scroll the current page by pixel deltas.",
-    parameters: [
-      { name: "deltaX", type: "number", required: false, description: "Horizontal scroll delta in pixels." },
-      { name: "deltaY", type: "number", required: true, description: "Vertical scroll delta in pixels." },
-    ],
-    example: { id: "tool_4", type: "scroll", deltaX: 0, deltaY: 700 },
-  },
-  {
-    type: "wait",
-    description: "Wait for a fixed number of milliseconds.",
-    parameters: [{ name: "ms", type: "positive integer", required: true, description: "Milliseconds to wait." }],
-    example: { id: "tool_5", type: "wait", ms: 1000 },
-  },
-  {
-    type: "press_key",
-    description: "Press a keyboard key in the current page.",
-    parameters: [{ name: "key", type: "string", required: true, description: "Playwright key name to press." }],
-    example: { id: "tool_6", type: "press_key", key: "Enter" },
-  },
-  {
-    type: "screenshot",
-    description: "Capture a full-page screenshot for visual inspection.",
-    parameters: [],
-    example: { id: "tool_7", type: "screenshot" },
-  },
-  {
-    type: "extract_text",
-    description: "Extract visible page text from the current browser observation.",
-    parameters: [],
-    example: { id: "tool_8", type: "extract_text" },
-  },
-  {
-    type: "go_back",
-    description: "Navigate back in browser history.",
-    parameters: [],
-    example: { id: "tool_9", type: "go_back" },
-  },
-  {
-    type: "go_forward",
-    description: "Navigate forward in browser history.",
-    parameters: [],
-    example: { id: "tool_10", type: "go_forward" },
-  },
-]
 
 export function resolvePlaywrightHeadless(options: Pick<PlaywrightEnvironmentOptions, "headless">): boolean {
   return options.headless ?? false

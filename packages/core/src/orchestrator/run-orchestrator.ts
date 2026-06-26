@@ -1,6 +1,7 @@
 import type { AgentDecision } from "../contracts/agent"
-import type { ActionResult, BrowserToolCall, Observation } from "../contracts/browser"
+import type { ActionResult, BrowserAction, BrowserCapability, BrowserToolCall, Observation } from "../contracts/browser"
 import type { RunEvent, RunEventType } from "../contracts/event"
+import type { ModelToolResult } from "../contracts/model"
 import type { BrowserEnvironment, ToolAdapter } from "../contracts/plugin"
 import type { EventBus } from "../events/event-bus"
 import { makeEventId, makeRunId, makeStepId } from "../ids/ids"
@@ -8,6 +9,7 @@ import type { PluginRegistry } from "../registry/plugin-registry"
 import { redactSensitiveData } from "../redaction/sensitive-data"
 import { JsonlEventStore } from "../storage/jsonl-event-store"
 import { eventsPath, runPath } from "../storage/paths"
+import { assertSupportedBrowserCapabilities } from "../browser/tool-validation"
 import type { AgentState, RunResult, RuntimeContext, SessionState } from "./run-state"
 
 export interface RunOrchestratorOptions {
@@ -17,6 +19,7 @@ export interface RunOrchestratorOptions {
   agentId: string
   modelId?: string
   environmentId: string
+  browserCapabilities?: BrowserCapability[]
   maxSteps: number
   now?: () => Date
 }
@@ -78,6 +81,9 @@ export class RunOrchestrator {
     const environmentId = input.environmentId ?? this.options.environmentId
     const agent = this.options.registry.getAgent(agentId)
     const environment = this.options.registry.getEnvironment(environmentId)
+    const browserCapabilities = this.options.browserCapabilities ?? ["core"]
+    const toolAdapter = this.options.registry.listToolAdapters().find((adapter) => adapter.environmentId === environmentId)
+    const browserTools = toolAdapter?.listTools(browserCapabilities) ?? []
     const runDir = runPath(this.options.home, input.session.projectHash, input.session.id, runId)
     const eventStore = new JsonlEventStore(eventsPath(this.options.home, input.session.projectHash, input.session.id, runId))
     let sequence = 0
@@ -110,7 +116,8 @@ export class RunOrchestrator {
       agentId,
       modelId,
       environmentId,
-      browserTools: listBrowserToolsForEnvironment(this.options.registry, environmentId),
+      browserCapabilities: [...browserCapabilities],
+      browserTools,
       eventBus: this.options.eventBus,
       abortSignal: abortController.signal,
       now: this.now,
@@ -128,11 +135,21 @@ export class RunOrchestrator {
 
     try {
       throwIfAborted(abortController.signal)
+      if (toolAdapter) {
+        assertSupportedBrowserCapabilities(browserCapabilities, toolAdapter.supportedCapabilities)
+      }
       await environment.reset(ctx)
       await agent.initialize(ctx)
 
       await emit("session.created", { session: input.session })
-      await emit("run.started", { prompt: input.prompt, agentId, modelId: modelId ?? null, environmentId })
+      await emit("run.started", {
+        prompt: input.prompt,
+        agentId,
+        modelId: modelId ?? null,
+        environmentId,
+        browserCapabilities,
+        browserTools: browserTools.map((tool) => tool.name),
+      })
 
       state.lastObservation = await environment.observe(ctx)
       await emit("observation.captured", { observation: state.lastObservation })
@@ -142,12 +159,14 @@ export class RunOrchestrator {
         const stepId = makeStepId()
         await emit("agent.step.started", { stepIndex }, stepId)
 
-        const decision = await agent.step(state, ctx)
+        const rawDecision = await agent.step(state, ctx)
+        const decision = normalizeBrowserDecision(rawDecision, toolAdapter, ctx.browserCapabilities, environmentId)
         const step = {
           id: stepId,
           decision,
           observation: state.lastObservation,
           actionResults: [] as ActionResult[],
+          modelToolResults: [] as ModelToolResult[],
         }
 
         await emit("agent.step.completed", { decision }, stepId)
@@ -161,12 +180,15 @@ export class RunOrchestrator {
           return { runId, status: "completed", finalAnswer }
         }
 
+        if (!toolAdapter) throw new Error(`Unknown tool adapter for environment: ${environmentId}`)
         const actionObservation = await this.executeBrowserActions(
           decision,
           stepId,
           step.actionResults,
+          step.modelToolResults,
           ctx,
           environment,
+          toolAdapter,
         )
         state.lastObservation = actionObservation ?? (await environment.observe(ctx))
         step.observation = state.lastObservation
@@ -190,10 +212,11 @@ export class RunOrchestrator {
     decision: Extract<AgentDecision, { type: "browser_actions" }>,
     stepId: string,
     actionResults: ActionResult[],
+    modelToolResults: ModelToolResult[],
     ctx: RuntimeContext,
     environment: BrowserEnvironment,
+    toolAdapter: ToolAdapter,
   ): Promise<Observation | null> {
-    const toolAdapter = this.options.registry.getToolAdapterForEnvironment(ctx.environmentId ?? this.options.environmentId)
     let latestObservation: Observation | null = null
 
     for (const action of decision.actions) {
@@ -213,16 +236,42 @@ export class RunOrchestrator {
           },
         }
         actionResults.push(result)
+        for (const toolCall of action.toolCalls) {
+          const validatedCall = toolAdapter.validateToolCall(toolCall, ctx.browserCapabilities)
+          modelToolResults.push({
+            toolCallId: validatedCall.id,
+            name: toolAdapter.modelToolName(validatedCall),
+            output: {
+              ok: false,
+              message: APPROVAL_REQUIRED_MESSAGE,
+              approvalRequired: true,
+              actionId: action.id,
+            },
+            isError: true,
+          })
+        }
         if (result.observation) latestObservation = result.observation
         actionFailed = true
       } else {
         for (const toolCall of action.toolCalls) {
           throwIfAborted(ctx.abortSignal)
-          await ctx.emit("browser.tool.started", { actionId: action.id, toolCall }, stepId)
-          const result = await executeBrowserTool(toolAdapter, toolCall, ctx, environment)
+          const validatedCall = toolAdapter.validateToolCall(toolCall, ctx.browserCapabilities)
+          await ctx.emit("browser.tool.started", { actionId: action.id, toolCall: validatedCall }, stepId)
+          const result = await executeBrowserTool(toolAdapter, validatedCall, ctx, environment)
           actionResults.push(result)
+          modelToolResults.push({
+            toolCallId: validatedCall.id,
+            name: toolAdapter.modelToolName(validatedCall),
+            output: {
+              ok: result.ok,
+              message: result.message,
+              observation: result.observation,
+              metadata: result.metadata,
+            },
+            isError: !result.ok,
+          })
           if (result.observation) latestObservation = result.observation
-          await ctx.emit("browser.tool.completed", { actionId: action.id, toolCall, result }, stepId)
+          await ctx.emit("browser.tool.completed", { actionId: action.id, toolCall: validatedCall, result }, stepId)
 
           if (!result.ok) {
             actionFailed = true
@@ -239,8 +288,25 @@ export class RunOrchestrator {
   }
 }
 
-function listBrowserToolsForEnvironment(registry: PluginRegistry, environmentId: string) {
-  return registry.listToolAdapters().find((adapter) => adapter.environmentId === environmentId)?.listTools() ?? []
+function normalizeBrowserDecision(
+  decision: AgentDecision,
+  adapter: ToolAdapter | undefined,
+  capabilities: BrowserCapability[],
+  environmentId: string,
+): AgentDecision {
+  if (decision.type !== "browser_actions") return decision
+  if (!adapter) throw new Error(`Unknown tool adapter for environment: ${environmentId}`)
+  return {
+    ...decision,
+    actions: decision.actions.map((action): BrowserAction => {
+      const toolCalls = action.toolCalls.map((call) => adapter.validateToolCall(call, capabilities))
+      return {
+        ...action,
+        requiresApproval: toolCalls.some((call) => adapter.requiresApproval(call)),
+        toolCalls,
+      }
+    }),
+  }
 }
 
 async function executeBrowserTool(

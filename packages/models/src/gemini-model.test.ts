@@ -16,7 +16,20 @@ describe("GeminiModel", () => {
     })
 
     const response = await model.complete(
-      { model: "gemini-test", messages: [{ role: "user", content: "hi" }], temperature: 0, responseFormat: "text" },
+      {
+        model: "gemini-test",
+        messages: [{ role: "user", content: "hi" }],
+        tools: [
+          {
+            name: "browser_navigate",
+            description: "Navigate",
+            inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
+          },
+        ],
+        toolChoice: "auto",
+        temperature: 0,
+        responseFormat: "text",
+      },
       { abortSignal: abort.signal } as RuntimeContext,
     )
 
@@ -26,6 +39,10 @@ describe("GeminiModel", () => {
     expect(calls[0]?.init.signal).toBe(abort.signal)
     expect(calls[0]?.init.headers).toMatchObject({
       authorization: "Bearer gemini-key",
+    })
+    expect(JSON.parse(String(calls[0]?.init.body))).toMatchObject({
+      tools: [{ type: "function", function: { name: "browser_navigate" } }],
+      tool_choice: "auto",
     })
     expect(response.text).toBe("ok")
   })

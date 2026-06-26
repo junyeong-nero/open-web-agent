@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { resolveOwaHome } from "@open-web-agent/core"
+import { BrowserCapabilitySchema, resolveOwaHome, type BrowserCapability } from "@open-web-agent/core"
 import { parse, stringify } from "yaml"
 import { resolveCodexAuthPath } from "./codex-auth"
 
@@ -13,6 +13,7 @@ export interface ModelConfig {
   defaultBrowserId: string | null
   browserHeadless: boolean
   browserPreventFocus: boolean
+  browserCapabilities: BrowserCapability[]
   reasoningEffort: string
   contextWindowTokens: number
   maxRetry: number
@@ -79,6 +80,7 @@ const defaultMaxRetry = 0
 const defaultMaxSteps = 100
 const defaultBrowserHeadless = false
 const defaultBrowserPreventFocus = false
+const defaultBrowserCapabilities: BrowserCapability[] = ["core"]
 
 export function resolveModelConfigPath(env: NodeJS.ProcessEnv = process.env, homeDir = homedir()): string {
   return join(resolveOwaHome(env, homeDir), "config.yaml")
@@ -101,6 +103,10 @@ export function readModelConfig(env: NodeJS.ProcessEnv = process.env, options: R
       readBooleanEnv(env.OPEN_WEB_AGENT_BROWSER_PREVENT_FOCUS, "OPEN_WEB_AGENT_BROWSER_PREVENT_FOCUS") ??
       fileConfig.browserPreventFocus ??
       defaultBrowserPreventFocus,
+    browserCapabilities:
+      readBrowserCapabilitiesEnv(env.OPEN_WEB_AGENT_BROWSER_CAPABILITIES) ??
+      fileConfig.browserCapabilities ??
+      defaultBrowserCapabilities,
     reasoningEffort: env.OPEN_WEB_AGENT_REASONING_EFFORT || fileConfig.reasoningEffort || defaultReasoningEffort,
     contextWindowTokens: readContextWindowTokens(env.OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS) ?? fileConfig.contextWindowTokens ?? defaultContextWindowTokens,
     maxRetry: readMaxRetry(env.OPEN_WEB_AGENT_MAX_RETRY) ?? fileConfig.maxRetry ?? defaultMaxRetry,
@@ -231,6 +237,7 @@ function readConfigFile(configPath: string): Partial<ModelConfig> {
     defaultBrowserId: readOptionalString(parsed, configPath, "browser", "browser_id", "environment_id", "default_browser", "defaultBrowserId"),
     browserHeadless: readOptionalBoolean(parsed, configPath, "browser_headless", "browserHeadless", "headless"),
     browserPreventFocus: readOptionalBoolean(parsed, configPath, "browser_prevent_focus", "browserPreventFocus", "prevent_browser_focus", "preventBrowserFocus"),
+    browserCapabilities: readBrowserCapabilitiesConfig(parsed, configPath),
     reasoningEffort: readOptionalString(parsed, configPath, "reasoning_effort", "reasoningEffort"),
     contextWindowTokens: readOptionalPositiveInteger(parsed, configPath, "context_window_tokens", "contextWindowTokens"),
     maxRetry: readOptionalNonNegativeInteger(parsed, configPath, "max_retry", "maxRetry"),
@@ -359,6 +366,33 @@ function readBooleanEnv(value: string | undefined, name: string): boolean | unde
   if (["1", "true", "yes", "on"].includes(normalized)) return true
   if (["0", "false", "no", "off"].includes(normalized)) return false
   throw new Error(`Invalid ${name}: must be a boolean`)
+}
+
+function normalizeBrowserCapabilities(values: string[]): BrowserCapability[] {
+  const normalized = ["core", ...values.map((value) => value.trim()).filter(Boolean)]
+  const unique = [...new Set(normalized)]
+  return unique.map((value) => {
+    const parsed = BrowserCapabilitySchema.safeParse(value)
+    if (!parsed.success) throw new Error(`Unknown browser capability: ${value}`)
+    return parsed.data
+  })
+}
+
+function readBrowserCapabilitiesEnv(value: string | undefined): BrowserCapability[] | undefined {
+  if (value == null || value.trim().length === 0) return undefined
+  return normalizeBrowserCapabilities(value.split(","))
+}
+
+function readBrowserCapabilitiesConfig(
+  record: Record<string, unknown>,
+  configPath: string,
+): BrowserCapability[] | undefined {
+  const value = readOptionalValue(record, "browser_capabilities", "browserCapabilities")
+  if (value == null) return undefined
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw new Error(`Invalid Open Web Agent config at ${configPath}: browser_capabilities must be a string array`)
+  }
+  return normalizeBrowserCapabilities(value)
 }
 
 function readOptionalStop(record: Record<string, unknown>, configPath: string): string | string[] | undefined {

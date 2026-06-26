@@ -64,6 +64,7 @@ function ctx(
     runDir: "/tmp/run",
     agentId: "python-test-agent",
     environmentId: "test-browser",
+    browserCapabilities: ["core"],
     browserTools,
     eventBus: new EventBus(),
     abortSignal: signal,
@@ -87,14 +88,24 @@ function ctx(
 
 const defaultBrowserTools: BrowserToolDefinition[] = [
   {
+    name: "browser_navigate",
     type: "navigate",
+    capability: "core",
     description: "Open an absolute URL in the current browser page.",
+    inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false },
+    readOnly: false,
+    requiresApproval: false,
     parameters: [{ name: "url", type: "string", required: true, description: "Absolute URL to open." }],
     example: { id: "tool_1", type: "navigate", url: "https://example.com" },
   },
   {
+    name: "browser_click",
     type: "click",
+    capability: "core",
     description: "Click an interactive element or coordinate on the current page.",
+    inputSchema: { type: "object", properties: { target: { type: "object" } }, required: ["target"], additionalProperties: false },
+    readOnly: false,
+    requiresApproval: false,
     parameters: [{ name: "target", type: "ActionTarget", required: true, description: "Element or coordinates to click." }],
     example: { id: "tool_2", type: "click", target: { selector: 'button[type="submit"]' } },
   },
@@ -118,6 +129,7 @@ class FakeModel implements ModelPlugin {
     return {
       id: "fake-response",
       text: "model delegated answer",
+      toolCalls: [],
       raw: { ok: true },
       usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
       latencyMs: 4,
@@ -139,6 +151,7 @@ class SequenceModel extends FakeModel {
     return {
       id: `fake-response-${this.requests.length}`,
       text: this.responses.shift() ?? this.responses.at(-1) ?? "",
+      toolCalls: [],
       raw: { ok: true },
       usage: null,
       latencyMs: 0,
@@ -184,6 +197,7 @@ if __name__ == "__main__":
         return {
           id: "json-response",
           text: JSON.stringify({ answer: "model json answer" }),
+          toolCalls: [],
           raw: { ok: true },
           usage: null,
           latencyMs: 0,
@@ -236,6 +250,7 @@ if __name__ == "__main__":
         return {
           id: "json-response",
           text: JSON.stringify({ answer: "model json answer" }),
+          toolCalls: [],
           raw: { ok: true },
           usage: null,
           latencyMs: 0,
@@ -579,6 +594,7 @@ if __name__ == "__main__":
             text: JSON.stringify({
               items: [{ id: "search", title: "Search for schedule", status: "active" }],
             }),
+            toolCalls: [],
             raw: {},
             usage: null,
             latencyMs: 0,
@@ -595,6 +611,7 @@ if __name__ == "__main__":
               finalAnswer: "corrected",
               confidence: 1,
             }),
+            toolCalls: [],
             raw: {},
             usage: null,
             latencyMs: 0,
@@ -616,6 +633,7 @@ if __name__ == "__main__":
               },
             ],
           }),
+          toolCalls: [],
           raw: {},
           usage: null,
           latencyMs: 0,

@@ -47,6 +47,17 @@ export const ActionTargetSchema = z.object({
     .default(null),
 })
 
+export const BrowserCapabilitySchema = z.enum([
+  "core",
+  "network",
+  "storage",
+  "testing",
+  "vision",
+  "pdf",
+  "devtools",
+  "config",
+])
+
 export const BrowserToolTypeSchema = z.enum([
   "navigate",
   "click",
@@ -67,24 +78,44 @@ export const BrowserToolParameterSchema = z.object({
   description: z.string(),
 })
 
+export const NavigateArgumentsSchema = z.object({ url: BrowserNavigationUrlSchema }).strict()
+export const ClickArgumentsSchema = z.object({ target: ActionTargetSchema }).strict()
+export const TypeArgumentsSchema = z.object({ target: ActionTargetSchema, value: z.string() }).strict()
+export const ScrollArgumentsSchema = z
+  .object({
+    deltaX: z.number().default(0),
+    deltaY: z.number(),
+  })
+  .strict()
+export const WaitArgumentsSchema = z.object({ ms: z.number().int().positive() }).strict()
+export const PressKeyArgumentsSchema = z.object({ key: z.string().min(1) }).strict()
+export const EmptyBrowserToolArgumentsSchema = z.object({}).strict()
+
 export const BrowserToolDefinitionSchema = z.object({
+  name: z.string().min(1),
   type: BrowserToolTypeSchema,
+  capability: BrowserCapabilitySchema,
   description: z.string(),
+  inputSchema: z.record(z.string(), z.unknown()),
+  readOnly: z.boolean(),
+  requiresApproval: z.boolean().default(false),
   parameters: z.array(BrowserToolParameterSchema),
   example: z.record(z.string(), z.unknown()),
 })
 
+const BrowserToolCallBaseSchema = z.object({ id: z.string().min(1) })
+
 export const BrowserToolCallSchema = z.discriminatedUnion("type", [
-  z.object({ id: z.string(), type: z.literal("navigate"), url: BrowserNavigationUrlSchema }),
-  z.object({ id: z.string(), type: z.literal("click"), target: ActionTargetSchema }),
-  z.object({ id: z.string(), type: z.literal("type"), target: ActionTargetSchema, value: z.string() }),
-  z.object({ id: z.string(), type: z.literal("scroll"), deltaX: z.number().default(0), deltaY: z.number() }),
-  z.object({ id: z.string(), type: z.literal("wait"), ms: z.number().int().positive() }),
-  z.object({ id: z.string(), type: z.literal("press_key"), key: z.string() }),
-  z.object({ id: z.string(), type: z.literal("screenshot") }),
-  z.object({ id: z.string(), type: z.literal("extract_text") }),
-  z.object({ id: z.string(), type: z.literal("go_back") }),
-  z.object({ id: z.string(), type: z.literal("go_forward") }),
+  BrowserToolCallBaseSchema.extend({ type: z.literal("navigate"), ...NavigateArgumentsSchema.shape }).strict(),
+  BrowserToolCallBaseSchema.extend({ type: z.literal("click"), ...ClickArgumentsSchema.shape }).strict(),
+  BrowserToolCallBaseSchema.extend({ type: z.literal("type"), ...TypeArgumentsSchema.shape }).strict(),
+  BrowserToolCallBaseSchema.extend({ type: z.literal("scroll"), ...ScrollArgumentsSchema.shape }).strict(),
+  BrowserToolCallBaseSchema.extend({ type: z.literal("wait"), ...WaitArgumentsSchema.shape }).strict(),
+  BrowserToolCallBaseSchema.extend({ type: z.literal("press_key"), ...PressKeyArgumentsSchema.shape }).strict(),
+  BrowserToolCallBaseSchema.extend({ type: z.literal("screenshot") }).strict(),
+  BrowserToolCallBaseSchema.extend({ type: z.literal("extract_text") }).strict(),
+  BrowserToolCallBaseSchema.extend({ type: z.literal("go_back") }).strict(),
+  BrowserToolCallBaseSchema.extend({ type: z.literal("go_forward") }).strict(),
 ])
 
 export const BrowserActionSchema = z.object({
@@ -112,6 +143,7 @@ export const ActionResultSchema = z.object({
 })
 
 export type BrowserToolCall = z.infer<typeof BrowserToolCallSchema>
+export type BrowserCapability = z.infer<typeof BrowserCapabilitySchema>
 export type BrowserToolType = z.infer<typeof BrowserToolTypeSchema>
 export type BrowserToolParameter = z.infer<typeof BrowserToolParameterSchema>
 export type BrowserToolDefinition = z.infer<typeof BrowserToolDefinitionSchema>

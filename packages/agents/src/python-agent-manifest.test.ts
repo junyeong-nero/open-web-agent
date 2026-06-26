@@ -35,6 +35,7 @@ function ctx(): RuntimeContext {
     session: state().session,
     runId: "run_1",
     runDir: "/tmp/run",
+    browserCapabilities: ["core"],
     browserTools: [],
     eventBus: new EventBus(),
     abortSignal: new AbortController().signal,
@@ -60,6 +61,7 @@ class FakeModel implements ModelPlugin {
     return {
       id: "fake-response",
       text: "manifest model answer",
+      toolCalls: [],
       raw: {},
       usage: null,
       latencyMs: 0,

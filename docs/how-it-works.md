@@ -43,6 +43,12 @@ Built-in runtime pieces include:
 
 Agents do not hold provider clients directly. They call a `RuntimeSelectedModel` shim that dispatches to the selected model for the run and emits `model.called` and `model.completed` events.
 
+## Native Browser Tool Calling
+
+The runtime sends the active browser tools to compatible model APIs as function definitions. Provider responses are normalized into OWA model tool calls, validated locally with Zod, converted to the existing `BrowserToolCall` contract, and executed sequentially. Tool results are correlated by call ID and included in the next model request.
+
+The existing `AgentDecision` JSON format remains a compatibility fallback for older models and external agents. Fallback calls pass through the same active-capability and argument validation before execution.
+
 ## Package Boundaries
 
 | Package | Role |

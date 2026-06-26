@@ -1,4 +1,5 @@
 import type {
+  BrowserCapability,
   EventBus,
   Observation,
   PluginRegistry,
@@ -7,6 +8,7 @@ import type {
   RuntimeContext,
   SessionState,
 } from "@open-web-agent/core"
+import { assertSupportedBrowserCapabilities } from "@open-web-agent/core"
 
 interface BrowserSessionBinding {
   session: SessionState
@@ -18,6 +20,7 @@ export interface BrowserSessionManagerOptions {
   eventBus: EventBus
   registry: PluginRegistry
   defaultEnvironmentId: string
+  browserCapabilities: BrowserCapability[]
   now?: () => Date
 }
 
@@ -110,6 +113,7 @@ export class BrowserSessionManager {
       runId,
       runDir: "",
       environmentId,
+      browserCapabilities: [...this.options.browserCapabilities],
       browserTools: this.listBrowserTools(environmentId),
       eventBus: this.options.eventBus,
       abortSignal: new AbortController().signal,
@@ -128,8 +132,9 @@ export class BrowserSessionManager {
   }
 
   private listBrowserTools(environmentId: string): RuntimeContext["browserTools"] {
-    return (
-      this.options.registry.listToolAdapters().find((adapter) => adapter.environmentId === environmentId)?.listTools() ?? []
-    )
+    const toolAdapter = this.options.registry.listToolAdapters().find((adapter) => adapter.environmentId === environmentId)
+    if (!toolAdapter) return []
+    assertSupportedBrowserCapabilities(this.options.browserCapabilities, toolAdapter.supportedCapabilities)
+    return toolAdapter.listTools(this.options.browserCapabilities)
   }
 }

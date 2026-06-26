@@ -1,4 +1,4 @@
-import type { ModelRequest, ModelResponse } from "@open-web-agent/core"
+import type { ModelMessage, ModelRequest, ModelResponse, ModelToolCall, ModelToolDefinition } from "@open-web-agent/core"
 import { isTransientModelProviderError, ModelProviderHttpError, retryModelCall } from "./retry"
 import { shouldRetryWithoutTemperature, withoutTemperatureParameter } from "./temperature-fallback"
 
@@ -18,7 +18,16 @@ export interface ModelClientCompleteOptions {
 
 interface ChatCompletionResponse {
   id?: string | null
-  choices?: Array<{ message?: { content?: string | null } }>
+  choices?: Array<{
+    message?: {
+      content?: string | null
+      tool_calls?: Array<{
+        id?: string
+        type?: string
+        function?: { name?: string; arguments?: string }
+      }>
+    }
+  }>
   usage?: {
     prompt_tokens?: number | null
     completion_tokens?: number | null
@@ -55,6 +64,7 @@ export class OpenAICompatibleClient {
     return {
       id: raw.id ?? null,
       text: raw.choices?.[0]?.message?.content ?? "",
+      toolCalls: readChatToolCalls(raw),
       raw,
       usage: usage
         ? {
@@ -101,7 +111,9 @@ function toChatCompletionsBody(request: ModelRequest): Record<string, unknown> {
   return {
     ...(request.extraBody ?? {}),
     model: request.model,
-    messages: request.messages,
+    messages: request.messages.map(toChatMessage),
+    ...(request.tools ? { tools: request.tools.map(toChatTool) } : {}),
+    ...(request.toolChoice ? { tool_choice: request.toolChoice } : {}),
     ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
     ...(request.topP !== undefined ? { top_p: request.topP } : {}),
     ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
@@ -111,6 +123,58 @@ function toChatCompletionsBody(request: ModelRequest): Record<string, unknown> {
     ...(request.stop !== undefined ? { stop: request.stop } : {}),
     ...(request.responseFormat === "json" ? { response_format: { type: "json_object" } } : {}),
   }
+}
+
+function toChatMessage(message: ModelMessage): Record<string, unknown> {
+  if (message.role === "assistant" && message.toolCalls) {
+    return {
+      role: "assistant",
+      content: message.content,
+      tool_calls: message.toolCalls.map((call) => ({
+        id: call.id,
+        type: "function",
+        function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+      })),
+    }
+  }
+  if (message.role === "tool") {
+    return {
+      role: "tool",
+      content: message.content,
+      tool_call_id: message.toolCallId,
+      name: message.name,
+    }
+  }
+  return { role: message.role, content: message.content }
+}
+
+function toChatTool(tool: ModelToolDefinition): Record<string, unknown> {
+  return {
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema,
+      ...(tool.strict !== undefined ? { strict: tool.strict } : {}),
+    },
+  }
+}
+
+function parseToolArguments(value: string | undefined): unknown {
+  if (value == null) return {}
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
+}
+
+function readChatToolCalls(raw: ChatCompletionResponse): ModelToolCall[] {
+  return (raw.choices?.[0]?.message?.tool_calls ?? []).map((call) => ({
+    id: call.id ?? "",
+    name: call.function?.name ?? "",
+    arguments: parseToolArguments(call.function?.arguments),
+  }))
 }
 
 function trimTrailingSlash(value: string): string {

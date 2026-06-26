@@ -92,6 +92,7 @@ describe("readModelConfig", () => {
       defaultBrowserId: "env-browser",
       browserHeadless: true,
       browserPreventFocus: true,
+      browserCapabilities: ["core"],
       reasoningEffort: "high",
       contextWindowTokens: 256000,
       maxRetry: 3,
@@ -127,6 +128,40 @@ describe("readModelConfig", () => {
     ).toBe(false)
   })
 
+  it("defaults browser capabilities to core", () => {
+    expect(readModelConfig({}, { configPath: "/tmp/missing-open-web-agent-config.yaml" }).browserCapabilities).toEqual([
+      "core",
+    ])
+  })
+
+  it("reads and deduplicates browser capabilities from YAML", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-capabilities-"))
+    const configPath = join(dir, "config.yaml")
+    await writeFile(configPath, ["browser_capabilities:", "  - storage", "  - core", "  - storage", ""].join("\n"))
+
+    expect(readModelConfig({}, { configPath }).browserCapabilities).toEqual(["core", "storage"])
+  })
+
+  it("lets the environment override YAML browser capabilities", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "owa-capabilities-"))
+    const configPath = join(dir, "config.yaml")
+    await writeFile(configPath, ["browser_capabilities:", "  - storage", ""].join("\n"))
+
+    expect(
+      readModelConfig({ OPEN_WEB_AGENT_BROWSER_CAPABILITIES: "testing, core,testing" }, { configPath })
+        .browserCapabilities,
+    ).toEqual(["core", "testing"])
+  })
+
+  it("rejects unknown browser capabilities", () => {
+    expect(() =>
+      readModelConfig(
+        { OPEN_WEB_AGENT_BROWSER_CAPABILITIES: "core,telepathy" },
+        { configPath: "/tmp/missing-open-web-agent-config.yaml" },
+      ),
+    ).toThrow("Unknown browser capability: telepathy")
+  })
+
   it("reads provider keys and default model from a YAML config file", async () => {
     const dir = await mkdtemp(join(tmpdir(), "owa-model-config-"))
     const configPath = join(dir, "config.yaml")
@@ -159,6 +194,7 @@ describe("readModelConfig", () => {
       defaultBrowserId: "yaml-browser",
       browserHeadless: true,
       browserPreventFocus: true,
+      browserCapabilities: ["core"],
       reasoningEffort: "low",
       contextWindowTokens: 64000,
       maxRetry: 2,
@@ -225,6 +261,7 @@ describe("readModelConfig", () => {
       defaultBrowserId: null,
       browserHeadless: false,
       browserPreventFocus: false,
+      browserCapabilities: ["core"],
       reasoningEffort: "medium",
       contextWindowTokens: 128000,
       maxRetry: 0,
@@ -296,6 +333,7 @@ describe("readModelConfig", () => {
       defaultBrowserId: "env-browser",
       browserHeadless: true,
       browserPreventFocus: true,
+      browserCapabilities: ["core"],
       reasoningEffort: "medium",
       contextWindowTokens: 128000,
       maxRetry: 4,

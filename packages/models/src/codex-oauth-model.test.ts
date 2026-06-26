@@ -27,6 +27,7 @@ describe("CodexOAuthModel", () => {
       runDir: "/tmp/run",
       modelId: "codex-oauth",
       environmentId: "playwright-browser",
+      browserCapabilities: ["core"],
       browserTools: [],
       abortSignal: new AbortController().signal,
       eventBus: new EventBus(),
@@ -44,7 +45,20 @@ describe("CodexOAuthModel", () => {
     }
 
     const response = await model.complete(
-      { model: "", messages: [{ role: "user", content: "hi" }], temperature: 0, responseFormat: "text" },
+      {
+        model: "",
+        messages: [{ role: "user", content: "hi" }],
+        tools: [
+          {
+            name: "browser_navigate",
+            description: "Navigate",
+            inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"] },
+          },
+        ],
+        toolChoice: "auto",
+        temperature: 0,
+        responseFormat: "text",
+      },
       ctx,
     )
 
@@ -59,7 +73,12 @@ describe("CodexOAuthModel", () => {
     expect(calls[0]?.url).toBe("https://api.openai.com/v1/responses")
     expect(calls[0]?.init.signal).toBe(ctx.abortSignal)
     expect(calls[0]?.init.headers).toMatchObject({ authorization: "Bearer oauth-token" })
-    expect(JSON.parse(String(calls[0]?.init.body))).toMatchObject({ model: "gpt-test", temperature: 0.2 })
+    expect(JSON.parse(String(calls[0]?.init.body))).toMatchObject({
+      model: "gpt-test",
+      temperature: 0.2,
+      tools: [{ type: "function", name: "browser_navigate" }],
+      tool_choice: "auto",
+    })
     expect(response.text).toBe("codex oauth answer")
   })
 

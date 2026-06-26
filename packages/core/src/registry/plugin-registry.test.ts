@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test"
+import { BrowserToolCallSchema } from "../contracts/browser"
 import type { AgentPlugin, BrowserEnvironment, ModelPlugin, ToolAdapter } from "../contracts/plugin"
 import { PluginRegistry } from "./plugin-registry"
 
@@ -30,7 +31,7 @@ const model: ModelPlugin = {
   name: "Model 1",
   provider: "test",
   async complete() {
-    return { id: "response-1", text: "done", raw: {}, usage: null, latencyMs: 0 }
+    return { id: "response-1", text: "done", toolCalls: [], raw: {}, usage: null, latencyMs: 0 }
   },
 }
 
@@ -38,8 +39,21 @@ const toolAdapter: ToolAdapter = {
   id: "tool-adapter-1",
   name: "Tool Adapter 1",
   environmentId: "env-1",
+  supportedCapabilities: ["core"],
   listTools() {
     return []
+  },
+  parseToolCall(call) {
+    return BrowserToolCallSchema.parse({ id: call.id, type: "extract_text" })
+  },
+  validateToolCall(call) {
+    return BrowserToolCallSchema.parse(call)
+  },
+  modelToolName() {
+    return "browser_extract_text"
+  },
+  requiresApproval() {
+    return false
   },
   async execute() {
     return { ok: true, message: "executed", observation: null, metadata: {} }
