@@ -132,7 +132,8 @@ export class BrowserSessionManager {
   }
 
   private listBrowserTools(environmentId: string): RuntimeContext["browserTools"] {
-    const toolAdapter = this.options.registry.getToolAdapterForEnvironment(environmentId)
+    const toolAdapter = this.options.registry.listToolAdapters().find((adapter) => adapter.environmentId === environmentId)
+    if (!toolAdapter) return []
     assertSupportedBrowserCapabilities(this.options.browserCapabilities, toolAdapter.supportedCapabilities)
     return toolAdapter.listTools(this.options.browserCapabilities)
   }

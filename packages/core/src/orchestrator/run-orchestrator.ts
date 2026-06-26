@@ -82,8 +82,8 @@ export class RunOrchestrator {
     const agent = this.options.registry.getAgent(agentId)
     const environment = this.options.registry.getEnvironment(environmentId)
     const browserCapabilities = this.options.browserCapabilities ?? ["core"]
-    const toolAdapter = this.options.registry.getToolAdapterForEnvironment(environmentId)
-    const browserTools = toolAdapter.listTools(browserCapabilities)
+    const toolAdapter = this.options.registry.listToolAdapters().find((adapter) => adapter.environmentId === environmentId)
+    const browserTools = toolAdapter?.listTools(browserCapabilities) ?? []
     const runDir = runPath(this.options.home, input.session.projectHash, input.session.id, runId)
     const eventStore = new JsonlEventStore(eventsPath(this.options.home, input.session.projectHash, input.session.id, runId))
     let sequence = 0
@@ -135,7 +135,9 @@ export class RunOrchestrator {
 
     try {
       throwIfAborted(abortController.signal)
-      assertSupportedBrowserCapabilities(browserCapabilities, toolAdapter.supportedCapabilities)
+      if (toolAdapter) {
+        assertSupportedBrowserCapabilities(browserCapabilities, toolAdapter.supportedCapabilities)
+      }
       await environment.reset(ctx)
       await agent.initialize(ctx)
 
@@ -158,7 +160,7 @@ export class RunOrchestrator {
         await emit("agent.step.started", { stepIndex }, stepId)
 
         const rawDecision = await agent.step(state, ctx)
-        const decision = normalizeBrowserDecision(rawDecision, toolAdapter, ctx.browserCapabilities)
+        const decision = normalizeBrowserDecision(rawDecision, toolAdapter, ctx.browserCapabilities, environmentId)
         const step = {
           id: stepId,
           decision,
@@ -178,6 +180,7 @@ export class RunOrchestrator {
           return { runId, status: "completed", finalAnswer }
         }
 
+        if (!toolAdapter) throw new Error(`Unknown tool adapter for environment: ${environmentId}`)
         const actionObservation = await this.executeBrowserActions(
           decision,
           stepId,
@@ -287,10 +290,12 @@ export class RunOrchestrator {
 
 function normalizeBrowserDecision(
   decision: AgentDecision,
-  adapter: ToolAdapter,
+  adapter: ToolAdapter | undefined,
   capabilities: BrowserCapability[],
+  environmentId: string,
 ): AgentDecision {
   if (decision.type !== "browser_actions") return decision
+  if (!adapter) throw new Error(`Unknown tool adapter for environment: ${environmentId}`)
   return {
     ...decision,
     actions: decision.actions.map((action): BrowserAction => {
