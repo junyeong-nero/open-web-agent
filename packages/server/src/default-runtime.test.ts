@@ -6,6 +6,18 @@ import { readModelConfig } from "@open-web-agent/models"
 import { startDefaultRuntime } from "./default-runtime"
 
 describe("startDefaultRuntime", () => {
+  it("fails startup when a configured capability is not implemented by Playwright", async () => {
+    const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
+
+    await expect(
+      startDefaultRuntime({
+        home,
+        configPath: join(home, "missing-config.yaml"),
+        env: isolatedEnv(home, { OPEN_WEB_AGENT_BROWSER_CAPABILITIES: "storage" }),
+      }),
+    ).rejects.toThrow("Unsupported browser capability: storage")
+  })
+
   it("registers selectable agents and browsers even without model keys", async () => {
     const home = await mkdtemp(join(tmpdir(), "owa-default-runtime-"))
     const runtime = await startDefaultRuntime({

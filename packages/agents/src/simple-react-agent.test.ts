@@ -103,6 +103,7 @@ function ctx(browserTools: RuntimeContext["browserTools"] = defaultBrowserTools)
     session: state().session,
     runId: "run_1",
     runDir: "/tmp/run",
+    browserCapabilities: ["core"],
     browserTools,
     eventBus: new EventBus(),
     abortSignal: new AbortController().signal,

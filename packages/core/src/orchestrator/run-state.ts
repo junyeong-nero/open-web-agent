@@ -1,5 +1,5 @@
 import type { AgentDecision } from "../contracts/agent"
-import type { ActionResult, BrowserToolDefinition, Observation } from "../contracts/browser"
+import type { ActionResult, BrowserCapability, BrowserToolDefinition, Observation } from "../contracts/browser"
 import type { RunEvent, RunEventType } from "../contracts/event"
 import type { EventBus } from "../events/event-bus"
 
@@ -37,6 +37,7 @@ export interface RuntimeContext {
   agentId?: string
   modelId?: string
   environmentId?: string
+  browserCapabilities: BrowserCapability[]
   browserTools: BrowserToolDefinition[]
   eventBus: EventBus
   abortSignal: AbortSignal

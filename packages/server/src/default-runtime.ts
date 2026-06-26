@@ -3,6 +3,7 @@ import { PlaywrightBrowserToolAdapter, PlaywrightEnvironment } from "@open-web-a
 import {
   EventBus,
   PluginRegistry,
+  assertSupportedBrowserCapabilities,
   resolveOwaHome,
   RunOrchestrator,
   type ModelPlugin,
@@ -163,7 +164,9 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     preventFocus: modelConfig.browserPreventFocus,
   })
   registry.registerEnvironment(playwrightEnvironment)
-  registry.registerToolAdapter(new PlaywrightBrowserToolAdapter(playwrightEnvironment, { allowPrivateNetworkNavigation }))
+  const playwrightToolAdapter = new PlaywrightBrowserToolAdapter(playwrightEnvironment, { allowPrivateNetworkNavigation })
+  assertSupportedBrowserCapabilities(modelConfig.browserCapabilities, playwrightToolAdapter.supportedCapabilities)
+  registry.registerToolAdapter(playwrightToolAdapter)
   const registeredEnvironmentIds = registry.listEnvironments().map((environment) => environment.id)
   const configuredDefaultEnvironmentId = resolveRegisteredId(registeredEnvironmentIds, modelConfig.defaultBrowserId)
   const defaultEnvironmentId = configuredDefaultEnvironmentId ?? registeredEnvironmentIds[0]
@@ -174,6 +177,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     eventBus,
     registry,
     defaultEnvironmentId,
+    browserCapabilities: modelConfig.browserCapabilities,
   })
   const orchestrator = new RunOrchestrator({
     home,
@@ -182,6 +186,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     agentId: defaultAgentId,
     modelId: defaultModelId,
     environmentId: defaultEnvironmentId,
+    browserCapabilities: modelConfig.browserCapabilities,
     maxSteps: modelConfig.maxSteps,
   })
   const storage = new SQLiteStore(join(home, "metadata.sqlite"))

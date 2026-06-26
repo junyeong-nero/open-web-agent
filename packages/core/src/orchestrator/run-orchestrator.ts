@@ -1,5 +1,5 @@
 import type { AgentDecision } from "../contracts/agent"
-import type { ActionResult, BrowserToolCall, Observation } from "../contracts/browser"
+import type { ActionResult, BrowserCapability, BrowserToolCall, Observation } from "../contracts/browser"
 import type { RunEvent, RunEventType } from "../contracts/event"
 import type { BrowserEnvironment, ToolAdapter } from "../contracts/plugin"
 import type { EventBus } from "../events/event-bus"
@@ -8,6 +8,7 @@ import type { PluginRegistry } from "../registry/plugin-registry"
 import { redactSensitiveData } from "../redaction/sensitive-data"
 import { JsonlEventStore } from "../storage/jsonl-event-store"
 import { eventsPath, runPath } from "../storage/paths"
+import { assertSupportedBrowserCapabilities } from "../browser/tool-validation"
 import type { AgentState, RunResult, RuntimeContext, SessionState } from "./run-state"
 
 export interface RunOrchestratorOptions {
@@ -17,6 +18,7 @@ export interface RunOrchestratorOptions {
   agentId: string
   modelId?: string
   environmentId: string
+  browserCapabilities?: BrowserCapability[]
   maxSteps: number
   now?: () => Date
 }
@@ -78,6 +80,9 @@ export class RunOrchestrator {
     const environmentId = input.environmentId ?? this.options.environmentId
     const agent = this.options.registry.getAgent(agentId)
     const environment = this.options.registry.getEnvironment(environmentId)
+    const browserCapabilities = this.options.browserCapabilities ?? ["core"]
+    const toolAdapter = this.options.registry.getToolAdapterForEnvironment(environmentId)
+    const browserTools = toolAdapter.listTools(browserCapabilities)
     const runDir = runPath(this.options.home, input.session.projectHash, input.session.id, runId)
     const eventStore = new JsonlEventStore(eventsPath(this.options.home, input.session.projectHash, input.session.id, runId))
     let sequence = 0
@@ -110,7 +115,8 @@ export class RunOrchestrator {
       agentId,
       modelId,
       environmentId,
-      browserTools: listBrowserToolsForEnvironment(this.options.registry, environmentId),
+      browserCapabilities: [...browserCapabilities],
+      browserTools,
       eventBus: this.options.eventBus,
       abortSignal: abortController.signal,
       now: this.now,
@@ -128,11 +134,19 @@ export class RunOrchestrator {
 
     try {
       throwIfAborted(abortController.signal)
+      assertSupportedBrowserCapabilities(browserCapabilities, toolAdapter.supportedCapabilities)
       await environment.reset(ctx)
       await agent.initialize(ctx)
 
       await emit("session.created", { session: input.session })
-      await emit("run.started", { prompt: input.prompt, agentId, modelId: modelId ?? null, environmentId })
+      await emit("run.started", {
+        prompt: input.prompt,
+        agentId,
+        modelId: modelId ?? null,
+        environmentId,
+        browserCapabilities,
+        browserTools: browserTools.map((tool) => tool.name),
+      })
 
       state.lastObservation = await environment.observe(ctx)
       await emit("observation.captured", { observation: state.lastObservation })
@@ -237,10 +251,6 @@ export class RunOrchestrator {
 
     return latestObservation
   }
-}
-
-function listBrowserToolsForEnvironment(registry: PluginRegistry, environmentId: string) {
-  return registry.listToolAdapters().find((adapter) => adapter.environmentId === environmentId)?.listTools(["core"]) ?? []
 }
 
 async function executeBrowserTool(

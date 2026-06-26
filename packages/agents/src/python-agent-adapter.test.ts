@@ -64,6 +64,7 @@ function ctx(
     runDir: "/tmp/run",
     agentId: "python-test-agent",
     environmentId: "test-browser",
+    browserCapabilities: ["core"],
     browserTools,
     eventBus: new EventBus(),
     abortSignal: signal,

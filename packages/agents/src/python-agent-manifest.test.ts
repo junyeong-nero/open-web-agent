@@ -35,6 +35,7 @@ function ctx(): RuntimeContext {
     session: state().session,
     runId: "run_1",
     runDir: "/tmp/run",
+    browserCapabilities: ["core"],
     browserTools: [],
     eventBus: new EventBus(),
     abortSignal: new AbortController().signal,

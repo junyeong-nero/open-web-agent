@@ -27,6 +27,7 @@ describe("CodexOAuthModel", () => {
       runDir: "/tmp/run",
       modelId: "codex-oauth",
       environmentId: "playwright-browser",
+      browserCapabilities: ["core"],
       browserTools: [],
       abortSignal: new AbortController().signal,
       eventBus: new EventBus(),

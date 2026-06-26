@@ -37,6 +37,7 @@ export function createApp(deps: CreateAppDeps): Hono {
       eventBus: deps.eventBus,
       registry: deps.registry,
       defaultEnvironmentId: deps.orchestrator.defaultEnvironmentId,
+      browserCapabilities: ["core"],
     })
 
   app.use("*", async (c, next) => {

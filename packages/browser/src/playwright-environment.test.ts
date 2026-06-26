@@ -21,6 +21,7 @@ async function context(
     },
     runId,
     runDir: await mkdtemp(join(tmpdir(), "owa-playwright-env-")),
+    browserCapabilities: ["core"],
     browserTools: [],
     eventBus: new EventBus(),
     abortSignal,
