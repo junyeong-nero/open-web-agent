@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { readModelConfig } from "@open-web-agent/models"
-import { startDefaultRuntime } from "./default-runtime"
+import { startDefaultRuntime, type StartedDefaultRuntime } from "./default-runtime"
 
 describe("startDefaultRuntime", () => {
   it("fails startup when a configured capability is not implemented by Playwright", async () => {
@@ -1056,6 +1056,105 @@ describe("startDefaultRuntime", () => {
     }
   })
 
+  it("runs a native browser tool call and feeds its result back to the model", async () => {
+    const originalFetch = globalThis.fetch
+    const fixtureServer = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () =>
+        new Response("<!doctype html><title>Native Tool Fixture</title><main>Native tool result</main>", {
+          headers: { "content-type": "text/html" },
+        }),
+    })
+    const providerRequests: Array<Record<string, unknown>> = []
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input instanceof Request ? input.url : input)
+      if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) {
+        return originalFetch(input, init)
+      }
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>
+      providerRequests.push(body)
+      if (providerRequests.length === 1) {
+        return Response.json({
+          id: "chatcmpl_tool",
+          choices: [
+            {
+              message: {
+                content: "Open the fixture.",
+                tool_calls: [
+                  {
+                    id: "call_native_1",
+                    type: "function",
+                    function: {
+                      name: "browser_navigate",
+                      arguments: JSON.stringify({ url: `http://127.0.0.1:${fixtureServer.port}/` }),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        })
+      }
+      return Response.json({
+        id: "chatcmpl_final",
+        choices: [{ message: { content: "Native Tool Fixture" } }],
+      })
+    }) as typeof fetch
+
+    const home = await mkdtemp(join(tmpdir(), "owa-native-tools-"))
+    const runtime = await startDefaultRuntime({
+      home,
+      configPath: join(home, "missing-config.yaml"),
+      env: isolatedEnv(home, {
+        OPENAI_API_KEY: "test-openai-key",
+        OPEN_WEB_AGENT_MODEL: "gpt-test",
+        OPEN_WEB_AGENT_BROWSER_HEADLESS: "true",
+        OPEN_WEB_AGENT_ALLOW_PRIVATE_NETWORK_NAVIGATION: "true",
+      }),
+    })
+
+    try {
+      const result = await runPrompt(runtime, {
+        prompt: "Open the fixture and report its title",
+        agentId: "simple-react-agent",
+        modelId: "openai",
+        environmentId: "playwright-browser",
+      })
+
+      expect(result).toEqual({
+        type: "run.completed",
+        payload: { finalAnswer: "Native Tool Fixture" },
+      })
+      expect(providerRequests[0]).toMatchObject({
+        tools: expect.arrayContaining([
+          expect.objectContaining({
+            type: "function",
+            function: expect.objectContaining({ name: "browser_navigate" }),
+          }),
+        ]),
+      })
+      expect(providerRequests[1]).toMatchObject({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: "assistant",
+            tool_calls: [
+              expect.objectContaining({
+                id: "call_native_1",
+                function: expect.objectContaining({ name: "browser_navigate" }),
+              }),
+            ],
+          }),
+          expect.objectContaining({ role: "tool", tool_call_id: "call_native_1" }),
+        ]),
+      })
+    } finally {
+      fixtureServer.stop(true)
+      await runtime.stop()
+      globalThis.fetch = originalFetch
+    }
+  })
+
   it("lets env configure model-backed agent call timeouts", async () => {
     const originalFetch = globalThis.fetch
     globalThis.fetch = (async (input, init) => {
@@ -1152,6 +1251,34 @@ async function fetchPlugins(url: string): Promise<{
   const response = await fetch(`${url}/plugins`)
   expect(response.ok).toBe(true)
   return response.json()
+}
+
+async function runPrompt(
+  runtime: StartedDefaultRuntime,
+  input: { prompt: string; agentId: string; modelId: string; environmentId: string },
+): Promise<{ type: string; payload: Record<string, unknown> }> {
+  const terminalEvent = new Promise<{ type: string; payload: Record<string, unknown> }>((resolve) => {
+    const unsubscribe = runtime.eventBus.subscribe((event) => {
+      if (event.type === "run.completed" || event.type === "run.failed" || event.type === "run.cancelled") {
+        unsubscribe()
+        resolve({ type: event.type, payload: event.payload })
+      }
+    })
+  })
+  const sessionResponse = await fetch(`${runtime.url}/sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ projectPath: "/tmp/project" }),
+  })
+  expect(sessionResponse.ok).toBe(true)
+  const session = (await sessionResponse.json()) as { sessionId: string }
+  const runResponse = await fetch(`${runtime.url}/runs`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessionId: session.sessionId, ...input }),
+  })
+  expect(runResponse.ok).toBe(true)
+  return terminalEvent
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
