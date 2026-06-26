@@ -17,6 +17,8 @@ agent: "see-act"
 browser: "playwright-browser"
 browser_headless: false
 browser_prevent_focus: true
+browser_capabilities:
+  - core
 reasoning_effort: "medium"
 context_window_tokens: 128000
 max_retry: 2
@@ -44,6 +46,8 @@ parameters:
 
 `browser_headless` controls whether the local Playwright browser launches headlessly. The shorter `headless` key is accepted as an alias. In the TUI, use `/headless on` or `/headless off` to persist and apply this setting.
 
+`browser_capabilities` controls which browser tool groups are exposed to the selected model. `core` is always enabled and currently contains navigation, interaction, waiting, screenshots, text extraction, and history navigation. The names `network`, `storage`, `testing`, `vision`, `pdf`, `devtools`, and `config` are reserved, but this release rejects them until their tools are implemented.
+
 ## Environment Variables
 
 Environment variables take precedence over YAML:
@@ -55,6 +59,7 @@ OPEN_WEB_AGENT_AGENT
 OPEN_WEB_AGENT_BROWSER
 OPEN_WEB_AGENT_BROWSER_HEADLESS
 OPEN_WEB_AGENT_BROWSER_PREVENT_FOCUS
+OPEN_WEB_AGENT_BROWSER_CAPABILITIES
 OPEN_WEB_AGENT_REASONING_EFFORT
 OPEN_WEB_AGENT_CONTEXT_WINDOW_TOKENS
 OPEN_WEB_AGENT_MAX_RETRY
@@ -70,6 +75,8 @@ CODEX_ACCESS_TOKEN
 ```
 
 `OPEN_WEB_AGENT_ALLOW_PRIVATE_NETWORK_NAVIGATION` defaults to false. Set it only for trusted local development or tests that intentionally navigate to loopback or private-network fixtures.
+
+`OPEN_WEB_AGENT_BROWSER_CAPABILITIES` is a comma-separated override for `browser_capabilities`, for example `core` or `core,testing`. `core` is always included.
 
 `max_steps` controls how many agent loop steps a run can take before failing with `Max steps exceeded`. It defaults to 100. `OPEN_WEB_AGENT_MAX_STEPS` overrides the YAML value.
 
