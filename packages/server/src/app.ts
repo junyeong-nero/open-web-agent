@@ -5,6 +5,7 @@ import { BrowserSessionManager } from "./browser-session-manager"
 import { registerConfigRoutes } from "./routes/config"
 import { registerEventRoutes } from "./routes/events"
 import { registerHealthRoutes } from "./routes/health"
+import { registerOpenCodeRoutes } from "./routes/opencode"
 import { registerPluginRoutes } from "./routes/plugins"
 import { registerRunRoutes, type RunRecord } from "./routes/runs"
 import { registerSessionRoutes } from "./routes/sessions"
@@ -64,6 +65,14 @@ export function createApp(deps: CreateAppDeps): Hono {
     onBrowserHeadlessChanged: deps.onBrowserHeadlessChanged,
   })
   registerPluginRoutes(app, { registry: deps.registry, defaults: deps.runtimeDefaults })
+  registerOpenCodeRoutes(app, {
+    eventBus: deps.eventBus,
+    registry: deps.registry,
+    sessions: deps.sessions,
+    runs,
+    storage: deps.storage,
+    defaults: deps.runtimeDefaults,
+  })
 
   return app
 }

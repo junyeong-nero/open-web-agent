@@ -1020,6 +1020,143 @@ describe("createApp", () => {
     expect(body.models).toEqual([])
   })
 
+  it("serves OpenCode bootstrap data from OWA runtime state", async () => {
+    const { request } = await setup(0, undefined, true, true)
+
+    expect(await (await request("/opencode/global/health")).json()).toEqual({ ok: true })
+    expect(await (await request("/opencode/config")).json()).toEqual({})
+    expect(await (await request("/opencode/agent")).json()).toEqual([
+      expect.objectContaining({ name: "test-agent", mode: "primary" }),
+      expect.objectContaining({ name: "alternate-agent", mode: "primary" }),
+      expect.objectContaining({ name: "context-agent", mode: "primary" }),
+    ])
+    expect(await (await request("/opencode/config/providers")).json()).toMatchObject({
+      providers: [expect.objectContaining({ id: "test" })],
+    })
+    expect(await (await request("/opencode/provider")).json()).toMatchObject({
+      connected: ["test"],
+    })
+    expect(await (await request("/opencode/command")).json()).toEqual([])
+    expect(await (await request("/opencode/lsp")).json()).toEqual([])
+    expect(await (await request("/opencode/mcp")).json()).toEqual({})
+    expect(await (await request("/opencode/formatter")).json()).toEqual([])
+    expect(await (await request("/opencode/session/status")).json()).toEqual({})
+  })
+
+  it("lists and reads sessions through OpenCode routes", async () => {
+    const { request } = await setup()
+    const created = await request("/sessions", {
+      method: "POST",
+      body: JSON.stringify({ projectPath: "/tmp/project", title: "OWA session" }),
+    }).then((response) => response.json() as Promise<{ sessionId: string }>)
+
+    const list = await request("/opencode/session").then((response) => response.json())
+    expect(list).toEqual([expect.objectContaining({ id: created.sessionId, title: "OWA session", directory: "/tmp/project" })])
+
+    const session = await request(`/opencode/session/${created.sessionId}`).then((response) => response.json())
+    expect(session).toMatchObject({ id: created.sessionId, title: "OWA session", directory: "/tmp/project" })
+
+    expect(await request(`/opencode/session/${created.sessionId}/message`).then((response) => response.json())).toEqual([])
+    expect(await request(`/opencode/session/${created.sessionId}/todo`).then((response) => response.json())).toEqual([])
+    expect(await request(`/opencode/session/${created.sessionId}/diff`).then((response) => response.json())).toEqual([])
+  })
+
+  it("returns OpenCode unknown session errors for session detail routes", async () => {
+    const { request } = await setup()
+
+    for (const path of [
+      "/opencode/session/ses_missing",
+      "/opencode/session/ses_missing/message",
+      "/opencode/session/ses_missing/todo",
+      "/opencode/session/ses_missing/diff",
+    ]) {
+      const response = await request(path)
+
+      expect(response.status).toBe(404)
+      expect(await response.json()).toEqual({ error: { message: "Unknown session" } })
+    }
+  })
+
+  it("hides soft-deleted in-memory sessions from OpenCode reads", async () => {
+    const { request, sessions } = await setup()
+    const created = await request("/sessions", {
+      method: "POST",
+      body: JSON.stringify({ projectPath: "/tmp/project", title: "Deleted session" }),
+    }).then((response) => response.json() as Promise<{ sessionId: string }>)
+    const session = sessions.get(created.sessionId)
+    if (!session) throw new Error("Expected session to exist")
+    sessions.set(session.id, { ...session, deletedAt: "2026-06-17T00:00:00.000Z" })
+
+    const response = await request(`/opencode/session/${created.sessionId}`)
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ error: { message: "Unknown session" } })
+  })
+
+  it("reports OpenCode session status as busy while a run is running", async () => {
+    const { request, eventBus } = await setup(50)
+    const sessionId = await createSession(request)
+    const cancelled = waitForEvent(eventBus, "run.cancelled")
+
+    const run = await json<{ runId: string }>(
+      await request("/runs", {
+        method: "POST",
+        body: JSON.stringify({ sessionId, prompt: "example.com에 접속해서 페이지 제목을 알려줘" }),
+      }),
+    )
+
+    expect(await request("/opencode/session/status").then((response) => response.json())).toEqual({
+      [sessionId]: { type: "busy" },
+    })
+
+    await json<{ cancelled: boolean }>(await request(`/runs/${run.runId}/cancel`, { method: "POST" }))
+    await cancelled
+  })
+
+  it("reads storage-backed OpenCode sessions and messages", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "owa-server-opencode-store-"))
+    const storage = new SQLiteStore(join(directory, "metadata.sqlite"))
+    storage.migrate()
+    storage.upsertSession({
+      id: "ses_persisted",
+      projectPath: "/tmp/persisted-project",
+      projectHash: "persisted_hash",
+      environmentId: "test-browser",
+      title: "Persisted session",
+      pinned: false,
+      deletedAt: null,
+      createdAt: "2026-06-17T00:00:00.000Z",
+    })
+    storage.appendMessage({
+      id: "msg_persisted",
+      sessionId: "ses_persisted",
+      role: "user",
+      content: "hello from storage",
+      createdAt: "2026-06-17T00:00:01.000Z",
+    })
+
+    try {
+      const { request } = await setup(0, storage)
+
+      expect(await request("/opencode/session").then((response) => response.json())).toEqual([
+        expect.objectContaining({ id: "ses_persisted", title: "Persisted session", directory: "/tmp/persisted-project" }),
+      ])
+      expect(await request("/opencode/session/ses_persisted").then((response) => response.json())).toMatchObject({
+        id: "ses_persisted",
+        title: "Persisted session",
+        directory: "/tmp/persisted-project",
+      })
+      expect(await request("/opencode/session/ses_persisted/message").then((response) => response.json())).toEqual([
+        expect.objectContaining({
+          info: expect.objectContaining({ id: "msg_persisted", role: "user", sessionID: "ses_persisted" }),
+          parts: [expect.objectContaining({ text: "hello from storage" })],
+        }),
+      ])
+    } finally {
+      storage.close()
+    }
+  })
+
   it("PATCH /config/model persists a selected model provider for future sessions", async () => {
     const dir = await mkdtemp(join(tmpdir(), "owa-server-config-"))
     const configPath = join(dir, ".config.yaml")
