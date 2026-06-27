@@ -8,7 +8,7 @@ describe("workspace validation commands", () => {
       scripts?: Record<string, string>
     }
 
-    expect(packageJson.scripts?.test).toBe("OPEN_WEB_AGENT_BROWSER_HEADLESS=true bun test packages/*/src")
+    expect(packageJson.scripts?.test).toBe("OPEN_WEB_AGENT_BROWSER_HEADLESS=true bun test ./packages/*/src")
   })
 
   it("keeps typecheck output declaration-only so Bun does not discover emitted tests", async () => {

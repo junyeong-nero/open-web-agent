@@ -7,5 +7,10 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@opencode-ai/core": "workspace:*",
+    "@opencode-ai/sdk": "workspace:*",
+    "@opencode-ai/tui": "workspace:*",
+    "effect": "catalog:"
+  }
 }

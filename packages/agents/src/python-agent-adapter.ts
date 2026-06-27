@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process"
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { z } from "zod"
 import {
   AgentDecisionSchema,
@@ -26,6 +26,10 @@ export interface PythonAgentAdapterOptions {
 }
 
 type PythonAgentMethod = "initialize" | "step" | "finalize"
+type PythonChildProcess = ChildProcessWithoutNullStreams & {
+  on(event: "error", listener: (error: Error) => void): PythonChildProcess
+  on(event: "close", listener: (code: number | null, signal: NodeJS.Signals | null) => void): PythonChildProcess
+}
 
 interface PythonAgentRetryContext {
   attempt: number
@@ -192,7 +196,7 @@ export class PythonAgentAdapter implements AgentPlugin {
         cwd: this.cwd,
         env: { ...process.env, ...this.env },
         stdio: ["pipe", "pipe", "pipe"],
-      })
+      }) as PythonChildProcess
       let stdout = ""
       let stderr = ""
       let settled = false
@@ -270,7 +274,7 @@ export class PythonAgentAdapter implements AgentPlugin {
         cwd: this.cwd,
         env: { ...process.env, ...this.env },
         stdio: ["pipe", "pipe", "pipe"],
-      })
+      }) as PythonChildProcess
       let stdoutBuffer = ""
       let stderr = ""
       let finalResponse: unknown

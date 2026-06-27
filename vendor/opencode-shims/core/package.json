@@ -1,0 +1,19 @@
+{
+  "name": "@opencode-ai/core",
+  "version": "1.17.11",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./global": "./src/global.ts",
+    "./flag/flag": "./src/flag/flag.ts",
+    "./installation/version": "./src/installation/version.ts",
+    "./util/flock": "./src/util/flock.ts",
+    "./util/glob": "./src/util/glob.ts",
+    "./util/which": "./src/util/which.ts"
+  },
+  "dependencies": {
+    "effect": "catalog:",
+    "minimatch": "10.0.3",
+    "which": "6.0.1"
+  }
+}

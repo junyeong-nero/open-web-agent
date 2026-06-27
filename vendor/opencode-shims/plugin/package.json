@@ -1,0 +1,9 @@
+{
+  "name": "@opencode-ai/plugin",
+  "version": "1.17.11",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./tui": "./src/tui.ts"
+  }
+}
