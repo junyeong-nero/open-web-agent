@@ -1,3 +1,13 @@
+export {
+  projectAgents,
+  projectMessages,
+  projectProviderConfig,
+  projectProviderList,
+  projectSession,
+  resolveModelId,
+  type OpenCodeModelSelection,
+  type ProjectionDefaults,
+} from "./projections"
 export type {
   OpenCodeAgent,
   OpenCodeAssistantMessage,
