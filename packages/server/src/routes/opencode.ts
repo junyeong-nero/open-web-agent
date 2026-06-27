@@ -107,9 +107,26 @@ export function registerOpenCodeRoutes(app: Hono, deps: OpenCodeRouteDeps): void
   app.get("/opencode/config/providers", (c) =>
     c.json(projectProviderConfig(deps.registry.listModels(), deps.defaults?.modelId)),
   )
+  app.get("/opencode/path", (c) => c.json(projectPathInfo(readDirectory(c))))
+  app.get("/opencode/project/current", (c) => c.json(projectCurrent(readDirectory(c))))
+  app.get("/opencode/project/:projectId/directories", (c) => c.json([{ directory: readDirectory(c) }]))
   app.get("/opencode/provider", (c) => c.json(projectProviderList(deps.registry.listModels(), deps.defaults?.modelId)))
   app.get("/opencode/provider/auth", (c) => c.json({}))
   app.get("/opencode/agent", (c) => c.json(projectAgents(deps.registry.listAgents(), deps.defaults?.agentId)))
+  app.get("/opencode/api/location", (c) => c.json(readLocation(c)))
+  app.get("/opencode/api/agent", (c) =>
+    c.json(withLocation(c, deps.registry.listAgents().map((agent) => projectV2Agent(agent)))),
+  )
+  app.get("/opencode/api/model", (c) =>
+    c.json(withLocation(c, deps.registry.listModels().map((model) => projectV2Model(model)))),
+  )
+  app.get("/opencode/api/provider", (c) =>
+    c.json(withLocation(c, projectV2Providers(deps.registry.listModels()))),
+  )
+  app.get("/opencode/api/integration", (c) => c.json(withLocation(c, [])))
+  app.get("/opencode/api/reference", (c) => c.json(withLocation(c, [])))
+  app.get("/opencode/api/command", (c) => c.json(withLocation(c, [])))
+  app.get("/opencode/api/skill", (c) => c.json(withLocation(c, [])))
 
   for (const route of [
     "/opencode/session/:sessionId/fork",
@@ -124,6 +141,9 @@ export function registerOpenCodeRoutes(app: Hono, deps: OpenCodeRouteDeps): void
   app.get("/opencode/lsp", (c) => c.json([]))
   app.get("/opencode/mcp", (c) => c.json({}))
   app.get("/opencode/mcp/resource", (c) => c.json({}))
+  app.get("/opencode/experimental/resource", (c) => c.json({}))
+  app.get("/opencode/experimental/workspace", (c) => c.json([]))
+  app.get("/opencode/experimental/workspace/status", (c) => c.json([]))
   app.get("/opencode/formatter", (c) => c.json([]))
   app.get("/opencode/vcs", (c) => c.json(null))
   app.get("/opencode/experimental/capabilities", (c) => c.json({ backgroundSubagents: false }))
@@ -288,4 +308,86 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function unsupported(c: Context) {
   return c.json({ error: { message: "Unsupported by OWA OpenCode compatibility layer" } }, 501)
+}
+
+function readDirectory(c: Context): string {
+  const value = c.req.query("location[directory]") ?? c.req.query("directory")
+  return resolve(value ?? process.cwd())
+}
+
+function readLocation(c: Context) {
+  const workspaceID = c.req.query("location[workspace]") ?? c.req.query("workspace")
+  return {
+    directory: readDirectory(c),
+    ...(workspaceID ? { workspaceID } : {}),
+  }
+}
+
+function withLocation(c: Context, data: unknown[]) {
+  return {
+    location: readLocation(c),
+    data,
+  }
+}
+
+function projectPathInfo(directory: string) {
+  const root = process.env.OWA_HOME ?? directory
+  return {
+    home: process.env.HOME ?? root,
+    state: root,
+    config: root,
+    worktree: directory,
+    directory,
+  }
+}
+
+function projectCurrent(directory: string) {
+  return {
+    id: hashProjectPath(directory),
+    worktree: directory,
+    name: directory.split("/").filter(Boolean).at(-1) ?? directory,
+    time: { created: 0, updated: 0 },
+    sandboxes: [],
+  }
+}
+
+function projectV2Agent(agent: ReturnType<PluginRegistry["listAgents"]>[number]) {
+  return {
+    id: agent.id,
+    request: { headers: {}, body: {} },
+    description: agent.description,
+    mode: "primary",
+    hidden: false,
+    permissions: [],
+  }
+}
+
+function projectV2Model(model: ReturnType<PluginRegistry["listModels"]>[number]) {
+  return {
+    id: model.id,
+    providerID: model.provider,
+    name: model.modelName ?? model.name,
+    api: { id: model.provider, type: "native", settings: {} },
+    capabilities: { tools: true, input: ["text"], output: ["text"] },
+    request: { headers: {}, body: {} },
+    variants: [],
+    time: { released: 0 },
+    cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+    status: "active",
+    enabled: true,
+    limit: { context: model.contextWindowTokens ?? 0, output: 0 },
+  }
+}
+
+function projectV2Providers(models: ReturnType<PluginRegistry["listModels"]>) {
+  const providers = new Map<string, { id: string; name: string; api: unknown; request: { headers: {}; body: {} } }>()
+  for (const model of models) {
+    providers.set(model.provider, {
+      id: model.provider,
+      name: model.provider,
+      api: { type: "native", settings: {} },
+      request: { headers: {}, body: {} },
+    })
+  }
+  return [...providers.values()]
 }

@@ -1199,6 +1199,56 @@ describe("createApp", () => {
     expect(await (await request("/opencode/session/status")).json()).toEqual({})
   })
 
+  it("serves OpenCode v2 bootstrap catalog data for the vendored TUI", async () => {
+    const { request } = await setup(0, undefined, true, true)
+    const directory = "/tmp/project"
+
+    expect(await (await request(`/opencode/path?directory=${encodeURIComponent(directory)}`)).json()).toMatchObject({
+      directory,
+    })
+
+    const project = await request(`/opencode/project/current?directory=${encodeURIComponent(directory)}`).then(
+      (response) => response.json() as Promise<{ id: string; worktree: string; sandboxes: string[] }>,
+    )
+    expect(project).toMatchObject({ worktree: directory, sandboxes: [] })
+    expect(project.id).toBeTruthy()
+    expect(await request(`/opencode/project/${project.id}/directories?directory=${encodeURIComponent(directory)}`).then((response) => response.json())).toEqual([
+      { directory },
+    ])
+
+    expect(await request(`/opencode/api/location?location[directory]=${encodeURIComponent(directory)}`).then((response) => response.json())).toEqual({
+      directory,
+    })
+    expect(await request(`/opencode/api/agent?location[directory]=${encodeURIComponent(directory)}`).then((response) => response.json())).toMatchObject({
+      location: { directory },
+      data: expect.arrayContaining([expect.objectContaining({ id: "test-agent", mode: "primary" })]),
+    })
+    expect(await request(`/opencode/api/model?location[directory]=${encodeURIComponent(directory)}`).then((response) => response.json())).toMatchObject({
+      location: { directory },
+      data: expect.arrayContaining([expect.objectContaining({ id: "test-model", providerID: "test" })]),
+    })
+    expect(await request(`/opencode/api/provider?location[directory]=${encodeURIComponent(directory)}`).then((response) => response.json())).toMatchObject({
+      location: { directory },
+      data: expect.arrayContaining([expect.objectContaining({ id: "test" })]),
+    })
+
+    for (const path of [
+      "/opencode/api/integration",
+      "/opencode/api/reference",
+      "/opencode/api/command",
+      "/opencode/api/skill",
+    ]) {
+      expect(await request(`${path}?location[directory]=${encodeURIComponent(directory)}`).then((response) => response.json())).toEqual({
+        location: { directory },
+        data: [],
+      })
+    }
+
+    expect(await request(`/opencode/experimental/resource?directory=${encodeURIComponent(directory)}`).then((response) => response.json())).toEqual({})
+    expect(await request(`/opencode/experimental/workspace?directory=${encodeURIComponent(directory)}`).then((response) => response.json())).toEqual([])
+    expect(await request(`/opencode/experimental/workspace/status?directory=${encodeURIComponent(directory)}`).then((response) => response.json())).toEqual([])
+  })
+
   it("creates sessions through the OpenCode route", async () => {
     const { request } = await setup()
 
