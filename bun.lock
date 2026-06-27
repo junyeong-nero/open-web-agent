@@ -43,6 +43,7 @@
       "dependencies": {
         "@open-web-agent/core": "workspace:*",
         "@open-web-agent/eval": "workspace:*",
+        "@open-web-agent/opencode-tui": "workspace:*",
         "@open-web-agent/server": "workspace:*",
         "@open-web-agent/tui": "workspace:*",
       },
@@ -76,6 +77,10 @@
         "@open-web-agent/core": "workspace:*",
         "@open-web-agent/storage": "workspace:*",
       },
+    },
+    "packages/opencode-tui": {
+      "name": "@open-web-agent/opencode-tui",
+      "version": "0.1.0",
     },
     "packages/server": {
       "name": "@open-web-agent/server",
@@ -187,6 +192,8 @@
     "@open-web-agent/models": ["@open-web-agent/models@workspace:packages/models"],
 
     "@open-web-agent/opencode-compat": ["@open-web-agent/opencode-compat@workspace:packages/opencode-compat"],
+
+    "@open-web-agent/opencode-tui": ["@open-web-agent/opencode-tui@workspace:packages/opencode-tui"],
 
     "@open-web-agent/server": ["@open-web-agent/server@workspace:packages/server"],
 

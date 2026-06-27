@@ -10,7 +10,7 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()): P
   const args = parseArgs(argv, cwd)
 
   if (args.mode === "default") {
-    await defaultCommand({ projectPath: args.projectPath, continueLast: args.continueLast, sessionId: args.sessionId })
+    await defaultCommand({ projectPath: args.projectPath, continueLast: args.continueLast, sessionId: args.sessionId, tui: args.tui })
     return
   }
 
@@ -35,7 +35,7 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()): P
     return
   }
 
-  await connectCommand({ serverUrl: args.serverUrl, projectPath: cwd })
+  await connectCommand({ serverUrl: args.serverUrl, projectPath: cwd, tui: args.tui })
 }
 
 if (import.meta.main) {

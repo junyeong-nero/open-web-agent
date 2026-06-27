@@ -72,6 +72,26 @@ describe("parseArgs", () => {
     })
   })
 
+  it("recognizes default mode with opencode tui", () => {
+    expect(parseArgs(["--tui", "opencode"], "/tmp/project")).toEqual({
+      mode: "default",
+      projectPath: "/tmp/project",
+      tui: "opencode",
+    })
+  })
+
+  it("recognizes connect mode with opencode tui", () => {
+    expect(parseArgs(["--connect", "http://127.0.0.1:4096", "--tui", "opencode"], "/tmp/project")).toEqual({
+      mode: "connect",
+      serverUrl: "http://127.0.0.1:4096",
+      tui: "opencode",
+    })
+  })
+
+  it("rejects unknown tui ids", () => {
+    expect(() => parseArgs(["--tui", "unknown"], "/tmp/project")).toThrow("--tui must be owa or opencode")
+  })
+
   it("recognizes continue mode", () => {
     expect(parseArgs(["--continue"], "/tmp/project")).toEqual({
       mode: "default",
