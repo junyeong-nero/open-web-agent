@@ -1364,6 +1364,26 @@ describe("createApp", () => {
     }
   })
 
+  it("returns explicit unsupported errors for OpenCode actions outside the compat milestone", async () => {
+    const { request } = await setup()
+    const created = await request("/sessions", {
+      method: "POST",
+      body: JSON.stringify({ projectPath: "/tmp/project" }),
+    }).then((response) => response.json() as Promise<{ sessionId: string }>)
+
+    for (const [method, path] of [
+      ["POST", `/opencode/session/${created.sessionId}/fork`],
+      ["POST", `/opencode/session/${created.sessionId}/share`],
+      ["POST", "/opencode/global/upgrade"],
+      ["POST", "/opencode/provider/oauth"],
+    ] as const) {
+      const response = await request(path, { method, body: JSON.stringify({}) })
+
+      expect(response.status).toBe(501)
+      expect(await response.json()).toEqual({ error: { message: "Unsupported by OWA OpenCode compatibility layer" } })
+    }
+  })
+
   it("hides soft-deleted in-memory sessions from OpenCode reads", async () => {
     const { request, sessions } = await setup()
     const created = await request("/sessions", {

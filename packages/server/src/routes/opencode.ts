@@ -1,5 +1,5 @@
 import { resolve } from "node:path"
-import type { Hono } from "hono"
+import type { Context, Hono } from "hono"
 import { streamSSE } from "hono/streaming"
 import { hashProjectPath, makeSessionId, type EventBus, type PluginRegistry, type RunOrchestrator, type SessionState } from "@open-web-agent/core"
 import {
@@ -110,6 +110,15 @@ export function registerOpenCodeRoutes(app: Hono, deps: OpenCodeRouteDeps): void
   app.get("/opencode/provider", (c) => c.json(projectProviderList(deps.registry.listModels(), deps.defaults?.modelId)))
   app.get("/opencode/provider/auth", (c) => c.json({}))
   app.get("/opencode/agent", (c) => c.json(projectAgents(deps.registry.listAgents(), deps.defaults?.agentId)))
+
+  for (const route of [
+    "/opencode/session/:sessionId/fork",
+    "/opencode/session/:sessionId/share",
+    "/opencode/global/upgrade",
+    "/opencode/provider/oauth",
+  ]) {
+    app.post(route, unsupported)
+  }
 
   app.get("/opencode/command", (c) => c.json([]))
   app.get("/opencode/lsp", (c) => c.json([]))
@@ -275,4 +284,8 @@ function readModelSelection(value: unknown): OpenCodeModelSelection | undefined 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function unsupported(c: Context) {
+  return c.json({ error: { message: "Unsupported by OWA OpenCode compatibility layer" } }, 501)
 }
