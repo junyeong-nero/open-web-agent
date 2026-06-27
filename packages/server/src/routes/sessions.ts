@@ -1,7 +1,7 @@
 import { resolve } from "node:path"
 import type { Hono } from "hono"
 import { hashProjectPath, makeSessionId, type Observation, type PluginRegistry, type SessionState } from "@open-web-agent/core"
-import type { SQLiteStore, StoredSession } from "@open-web-agent/storage"
+import type { SQLiteStore, StoredMessage, StoredSession } from "@open-web-agent/storage"
 import type { RunRecord } from "./runs"
 import { CreateSessionRequestSchema, UpdateSessionRequestSchema } from "../schemas/api"
 import type { BrowserSessionManager } from "../browser-session-manager"
@@ -13,6 +13,7 @@ export interface SessionRouteDeps {
   registry: PluginRegistry
   browserSessions: BrowserSessionManager
   storage?: SQLiteStore
+  messages?: Map<string, StoredMessage[]>
   now?: () => Date
 }
 
@@ -95,6 +96,7 @@ export function registerSessionRoutes(app: Hono, deps: SessionRouteDeps): void {
     const deletedAt = (deps.now ?? (() => new Date()))().toISOString()
     await deps.browserSessions.close(session)
     deps.sessions.delete(sessionId)
+    deps.messages?.delete(sessionId)
     deps.storage?.deleteSession(sessionId, deletedAt)
 
     return c.body(null, 204)

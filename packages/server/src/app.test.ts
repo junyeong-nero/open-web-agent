@@ -28,6 +28,7 @@ import {
 import { readModelConfig } from "@open-web-agent/models"
 import { SQLiteStore } from "@open-web-agent/storage"
 import { createApp } from "./app"
+import { BrowserSessionManager } from "./browser-session-manager"
 
 async function setup(
   delayMs = 0,
@@ -36,6 +37,12 @@ async function setup(
   includeRuntimePlugins = false,
   modelConfigPath?: string,
   onBrowserHeadlessChanged?: (browserHeadless: boolean) => void | Promise<void>,
+  runtimeDefaults?: {
+    agentId?: string | null
+    modelId?: string | null
+    environmentId?: string | null
+    browserHeadless?: boolean | null
+  },
 ) {
   const eventBus = new EventBus()
   const registry = new PluginRegistry()
@@ -61,7 +68,7 @@ async function setup(
   })
 
   const sessions = new Map()
-  const app = createApp({ eventBus, orchestrator, registry, sessions, storage, modelConfigPath, onBrowserHeadlessChanged })
+  const app = createApp({ eventBus, orchestrator, registry, sessions, storage, modelConfigPath, onBrowserHeadlessChanged, runtimeDefaults })
 
   return {
     app,
@@ -203,6 +210,15 @@ class GatedAttachEnvironment extends TestEnvironment {
 
   releaseFirstAttachSession(): void {
     this.releaseFirstAttach()
+  }
+}
+
+class HangingCaptureBrowserSessionManager extends BrowserSessionManager {
+  captureStarted = false
+
+  override async capture(_session: SessionState, _environmentId?: string | null): Promise<Observation | null> {
+    this.captureStarted = true
+    return new Promise(() => {})
   }
 }
 
@@ -913,6 +929,84 @@ describe("createApp", () => {
     expect(renamed.browser?.title).toBe("After Run Browser")
   })
 
+  it("POST /runs records terminal state before best-effort browser capture", async () => {
+    const eventBus = new EventBus()
+    const registry = new PluginRegistry()
+    const environment = new TestEnvironment()
+    registry.registerAgent(new AlternateAgent())
+    registry.registerEnvironment(environment)
+    registry.registerToolAdapter(new TestBrowserToolAdapter(environment))
+    const orchestrator = new RunOrchestrator({
+      home: await mkdtemp(join(tmpdir(), "owa-server-hanging-capture-")),
+      eventBus,
+      registry,
+      agentId: "alternate-agent",
+      environmentId: "test-browser",
+      maxSteps: 4,
+      now: () => new Date("2026-06-17T00:00:00.000Z"),
+    })
+    const browserSessions = new HangingCaptureBrowserSessionManager({
+      eventBus,
+      registry,
+      defaultEnvironmentId: "test-browser",
+      browserCapabilities: ["core"],
+    })
+    const sessions = new Map<string, SessionState>()
+    const app = createApp({ eventBus, orchestrator, registry, sessions, browserSessions })
+    const request = async (path: string, init?: RequestInit): Promise<Response> => {
+      return await app.fetch(
+        new Request(`http://127.0.0.1${path}`, {
+          ...init,
+          headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+        }),
+      )
+    }
+    const sessionId = await createSession(request)
+
+    const { runId } = await json<{ runId: string }>(
+      await request("/runs", {
+        method: "POST",
+        body: JSON.stringify({ sessionId, prompt: "answer directly", agentId: "alternate-agent" }),
+      }),
+    )
+
+    await waitForRunStatus(request, runId, "completed")
+    await waitForCondition(() => browserSessions.captureStarted, "browser capture to start")
+  })
+
+  it("POST /runs keeps successful terminal state when assistant message persistence fails", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "owa-server-message-failure-"))
+    const storage = new SQLiteStore(join(directory, "metadata.sqlite"))
+    storage.migrate()
+    const appendMessage = storage.appendMessage.bind(storage)
+    storage.appendMessage = (message) => {
+      if (message.role === "assistant") throw new Error("assistant message write failed")
+      appendMessage(message)
+    }
+
+    try {
+      const { request, eventBus } = await setup(0, storage, true)
+      const sessionId = await createSession(request)
+      const completed = waitForEvent(eventBus, "run.completed")
+
+      const { runId } = await json<{ runId: string }>(
+        await request("/runs", {
+          method: "POST",
+          body: JSON.stringify({ sessionId, prompt: "answer directly", agentId: "alternate-agent" }),
+        }),
+      )
+      await completed
+      await sleep(20)
+
+      expect(await json<{ status: string; finalAnswer: string | null }>(await request(`/runs/${runId}`))).toMatchObject({
+        status: "completed",
+        finalAnswer: "alternate answer",
+      })
+    } finally {
+      storage.close()
+    }
+  })
+
   it("POST /runs can select a registered agent", async () => {
     const { request, eventBus } = await setup(0, undefined, true)
     const sessionId = await createSession(request)
@@ -1043,6 +1137,137 @@ describe("createApp", () => {
     expect(await (await request("/opencode/session/status")).json()).toEqual({})
   })
 
+  it("creates sessions through the OpenCode route", async () => {
+    const { request } = await setup()
+
+    const response = await request("/opencode/session?directory=/tmp/project", {
+      method: "POST",
+      body: JSON.stringify({
+        title: "OpenCode-created session",
+        agent: "test-agent",
+        model: { providerID: "runtime", id: "runtime-selected-model" },
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      id: expect.stringMatching(/^ses_/),
+      title: "OpenCode-created session",
+      directory: "/tmp/project",
+    })
+  })
+
+  it("submits prompts through OpenCode message route", async () => {
+    const { request, eventBus } = await setup()
+    const session = await request("/opencode/session?directory=/tmp/project", {
+      method: "POST",
+      body: JSON.stringify({ title: "Prompt session", agent: "test-agent" }),
+    }).then((response) => response.json() as Promise<{ id: string }>)
+    const completed = waitForEvent(eventBus, "run.completed")
+
+    const response = await request(`/opencode/session/${session.id}/message`, {
+      method: "POST",
+      body: JSON.stringify({
+        agent: "test-agent",
+        parts: [{ type: "text", text: "Open example.com" }],
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ ok: true })
+
+    const messages = await request(`/opencode/session/${session.id}/message`).then((result) => result.json())
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        info: expect.objectContaining({ role: "user" }),
+        parts: [expect.objectContaining({ text: "Open example.com" })],
+      }),
+    )
+
+    await completed
+    const completedMessages = await waitForOpenCodeMessage(request, session.id, "assistant")
+    expect(completedMessages).toContainEqual(
+      expect.objectContaining({
+        info: expect.objectContaining({ role: "assistant" }),
+        parts: [expect.objectContaining({ text: '페이지 제목은 "Example Domain"입니다.' })],
+      }),
+    )
+  })
+
+  it("returns OpenCode errors for invalid prompt submissions", async () => {
+    const { request } = await setup()
+    const session = await request("/opencode/session?directory=/tmp/project", {
+      method: "POST",
+      body: JSON.stringify({ title: "Invalid prompt session" }),
+    }).then((response) => response.json() as Promise<{ id: string }>)
+
+    const unknownSession = await request("/opencode/session/ses_missing/message", {
+      method: "POST",
+      body: JSON.stringify({ parts: [{ type: "text", text: "Open example.com" }] }),
+    })
+    expect(unknownSession.status).toBe(404)
+    expect(await unknownSession.json()).toEqual({ error: { message: "Unknown session" } })
+
+    const missingPrompt = await request(`/opencode/session/${session.id}/message`, {
+      method: "POST",
+      body: JSON.stringify({ parts: [{ type: "file", text: "ignored.txt" }] }),
+    })
+    expect(missingPrompt.status).toBe(400)
+    expect(await missingPrompt.json()).toEqual({ error: { message: "Prompt text is required" } })
+
+    const unknownAgent = await request(`/opencode/session/${session.id}/message`, {
+      method: "POST",
+      body: JSON.stringify({ agent: "missing-agent", parts: [{ type: "text", text: "Open example.com" }] }),
+    })
+    expect(unknownAgent.status).toBe(400)
+    expect(await unknownAgent.json()).toEqual({ error: { message: "Unknown agent" } })
+  })
+
+  it("rejects explicit unknown OpenCode model selections", async () => {
+    const { request } = await setup(0, undefined, false, true)
+    const session = await request("/opencode/session?directory=/tmp/project", {
+      method: "POST",
+      body: JSON.stringify({ title: "Unknown model session" }),
+    }).then((response) => response.json() as Promise<{ id: string }>)
+
+    const response = await request(`/opencode/session/${session.id}/message`, {
+      method: "POST",
+      body: JSON.stringify({
+        model: { providerID: "test", modelID: "missing-model" },
+        parts: [{ type: "text", text: "Open example.com" }],
+      }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: { message: "Unknown model" } })
+  })
+
+  it("returns OpenCode unknown browser errors during session and prompt submission", async () => {
+    const badDefault = await setup(0, undefined, false, false, undefined, undefined, { environmentId: "missing-browser" })
+    const createResponse = await badDefault.request("/opencode/session?directory=/tmp/project", {
+      method: "POST",
+      body: JSON.stringify({ title: "Missing browser session" }),
+    })
+    expect(createResponse.status).toBe(400)
+    expect(await createResponse.json()).toEqual({ error: { message: "Unknown browser" } })
+
+    const { request, sessions } = await setup()
+    const session = await request("/opencode/session?directory=/tmp/project", {
+      method: "POST",
+      body: JSON.stringify({ title: "Prompt missing browser" }),
+    }).then((response) => response.json() as Promise<{ id: string }>)
+    const storedSession = sessions.get(session.id)
+    if (!storedSession) throw new Error("Expected session to exist")
+    sessions.set(session.id, { ...storedSession, environmentId: "missing-browser" })
+
+    const messageResponse = await request(`/opencode/session/${session.id}/message`, {
+      method: "POST",
+      body: JSON.stringify({ parts: [{ type: "text", text: "Open example.com" }] }),
+    })
+    expect(messageResponse.status).toBe(400)
+    expect(await messageResponse.json()).toEqual({ error: { message: "Unknown browser" } })
+  })
+
   it("lists and reads sessions through OpenCode routes", async () => {
     const { request } = await setup()
     const created = await request("/sessions", {
@@ -1152,6 +1377,36 @@ describe("createApp", () => {
           parts: [expect.objectContaining({ text: "hello from storage" })],
         }),
       ])
+    } finally {
+      storage.close()
+    }
+  })
+
+  it("persists OpenCode prompt submissions to storage-backed messages", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "owa-server-opencode-submit-store-"))
+    const storage = new SQLiteStore(join(directory, "metadata.sqlite"))
+    storage.migrate()
+
+    try {
+      const { request } = await setup(50, storage)
+      const session = await request("/opencode/session?directory=/tmp/project", {
+        method: "POST",
+        body: JSON.stringify({ title: "Storage prompt session" }),
+      }).then((response) => response.json() as Promise<{ id: string }>)
+
+      const response = await request(`/opencode/session/${session.id}/message`, {
+        method: "POST",
+        body: JSON.stringify({ parts: [{ type: "text", text: "Stored prompt" }] }),
+      })
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ ok: true })
+      expect(await request(`/opencode/session/${session.id}/message`).then((result) => result.json())).toContainEqual(
+        expect.objectContaining({
+          info: expect.objectContaining({ role: "user", sessionID: session.id }),
+          parts: [expect.objectContaining({ text: "Stored prompt" })],
+        }),
+      )
     } finally {
       storage.close()
     }
@@ -1340,4 +1595,31 @@ async function waitForRunStatus(
     await new Promise((resolve) => setTimeout(resolve, 5))
   }
   throw new Error(`Timed out waiting for ${runId} to become ${status}`)
+}
+
+async function waitForOpenCodeMessage(
+  request: (path: string, init?: RequestInit) => Promise<Response>,
+  sessionId: string,
+  role: string,
+): Promise<Array<{ info?: { role?: string } }>> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const messages = (await request(`/opencode/session/${sessionId}/message`).then((result) => result.json())) as Array<{
+      info?: { role?: string }
+    }>
+    if (messages.some((message) => message.info?.role === role)) return messages
+    await sleep(5)
+  }
+  throw new Error(`Timed out waiting for ${role} OpenCode message in ${sessionId}`)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function waitForCondition(condition: () => boolean, description: string): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (condition()) return
+    await sleep(5)
+  }
+  throw new Error(`Timed out waiting for ${description}`)
 }
