@@ -1100,6 +1100,68 @@ describe("createApp", () => {
     expect(text).toContain(`data: ${JSON.stringify(event)}`)
   })
 
+  it("streams OWA run events as OpenCode global events", async () => {
+    const { request, eventBus } = await setup()
+    const response = await request("/opencode/global/event")
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toContain("text/event-stream")
+
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error("SSE body missing")
+    const connectedText = await readUntil(reader, ": connected")
+
+    await eventBus.publish({
+      id: "evt_run_started",
+      runId: "run_123",
+      sessionId: "ses_123",
+      stepId: null,
+      sequence: 0,
+      type: "run.started",
+      payload: {},
+      createdAt: "2026-06-27T00:00:00.000Z",
+    })
+
+    const text = connectedText + (await readUntil(reader, '"type":"session.status"'))
+    await reader.cancel()
+
+    expect(text).toContain("event: event")
+    expect(text).toContain("id: owa_evt_run_started_status")
+    expect(text).toContain('"directory"')
+    expect(text).toContain('"type":"session.status"')
+  })
+
+  it("streams OpenCode payload events on the compact event route", async () => {
+    const { request, eventBus } = await setup()
+    const response = await request("/opencode/event")
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toContain("text/event-stream")
+
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error("SSE body missing")
+    const connectedText = await readUntil(reader, ": connected")
+
+    await eventBus.publish({
+      id: "evt_run_started",
+      runId: "run_123",
+      sessionId: "ses_123",
+      stepId: null,
+      sequence: 0,
+      type: "run.started",
+      payload: {},
+      createdAt: "2026-06-27T00:00:00.000Z",
+    })
+
+    const text = connectedText + (await readUntil(reader, '"type":"session.status"'))
+    await reader.cancel()
+
+    expect(text).toContain("event: event")
+    expect(text).toContain("id: owa_evt_run_started_status")
+    expect(text).not.toContain('"directory"')
+    expect(text).toContain('"type":"session.status"')
+  })
+
   it("GET /plugins lists registered test plugins", async () => {
     const { request } = await setup()
 

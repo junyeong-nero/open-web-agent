@@ -1,11 +1,13 @@
 import { resolve } from "node:path"
 import type { Hono } from "hono"
+import { streamSSE } from "hono/streaming"
 import { hashProjectPath, makeSessionId, type EventBus, type PluginRegistry, type RunOrchestrator, type SessionState } from "@open-web-agent/core"
 import {
   projectAgents,
   projectMessages,
   projectProviderConfig,
   projectProviderList,
+  projectRunEvent,
   projectSession,
   resolveModelId,
   type OpenCodeModelSelection,
@@ -35,6 +37,72 @@ export interface OpenCodeRouteDeps {
 
 export function registerOpenCodeRoutes(app: Hono, deps: OpenCodeRouteDeps): void {
   app.get("/opencode/global/health", (c) => c.json({ ok: true }))
+  app.get("/opencode/global/event", (c) =>
+    streamSSE(c, async (stream) => {
+      let unsubscribe: () => void = () => {}
+      unsubscribe = deps.eventBus.subscribe(async (event) => {
+        const session = findSession(deps, event.sessionId)
+        const directory = session?.projectPath ?? process.cwd()
+        for (const projected of projectRunEvent(event, {
+          directory,
+          agentId: deps.defaults?.agentId,
+          modelId: deps.defaults?.modelId,
+        })) {
+          try {
+            await stream.writeSSE({
+              event: "event",
+              id: projected.payload.id,
+              data: JSON.stringify(projected),
+            })
+          } catch {
+            unsubscribe()
+          }
+        }
+      })
+
+      stream.onAbort(unsubscribe)
+      await stream.write(": connected\n\n")
+
+      while (!stream.aborted && !stream.closed) {
+        await stream.sleep(1000)
+      }
+
+      unsubscribe()
+    }),
+  )
+  app.get("/opencode/event", (c) =>
+    streamSSE(c, async (stream) => {
+      let unsubscribe: () => void = () => {}
+      unsubscribe = deps.eventBus.subscribe(async (event) => {
+        const session = findSession(deps, event.sessionId)
+        const directory = session?.projectPath ?? process.cwd()
+        for (const projected of projectRunEvent(event, {
+          directory,
+          agentId: deps.defaults?.agentId,
+          modelId: deps.defaults?.modelId,
+        })) {
+          try {
+            await stream.writeSSE({
+              event: "event",
+              id: projected.payload.id,
+              data: JSON.stringify(projected.payload),
+            })
+          } catch {
+            unsubscribe()
+          }
+        }
+      })
+
+      stream.onAbort(unsubscribe)
+      await stream.write(": connected\n\n")
+
+      while (!stream.aborted && !stream.closed) {
+        await stream.sleep(1000)
+      }
+
+      unsubscribe()
+    }),
+  )
   app.get("/opencode/config", (c) => c.json({}))
   app.get("/opencode/config/providers", (c) =>
     c.json(projectProviderConfig(deps.registry.listModels(), deps.defaults?.modelId)),
