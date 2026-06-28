@@ -2,6 +2,7 @@ import { resolve } from "node:path"
 import type { Context, Hono } from "hono"
 import { streamSSE } from "hono/streaming"
 import { hashProjectPath, makeSessionId, type EventBus, type PluginRegistry, type RunOrchestrator, type SessionState } from "@open-web-agent/core"
+import { getProviderCapabilities } from "@open-web-agent/models"
 import {
   projectAgents,
   projectMessages,
@@ -363,12 +364,13 @@ function projectV2Agent(agent: ReturnType<PluginRegistry["listAgents"]>[number])
 }
 
 function projectV2Model(model: ReturnType<PluginRegistry["listModels"]>[number]) {
+  const caps = getProviderCapabilities(model.provider)
   return {
     id: model.id,
     providerID: model.provider,
     name: model.modelName ?? model.name,
     api: { id: model.provider, type: "native", settings: {} },
-    capabilities: { tools: true, input: ["text"], output: ["text"] },
+    capabilities: { tools: true, input: caps.input, output: caps.output },
     request: { headers: {}, body: {} },
     variants: [],
     time: { released: 0 },
