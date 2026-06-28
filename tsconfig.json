@@ -7,8 +7,10 @@
     { "path": "./packages/models" },
     { "path": "./packages/storage" },
     { "path": "./packages/eval" },
+    { "path": "./packages/opencode-compat" },
     { "path": "./packages/server" },
     { "path": "./packages/tui" },
+    { "path": "./packages/opencode-tui" },
     { "path": "./packages/cli" }
   ]
 }

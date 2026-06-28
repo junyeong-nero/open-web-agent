@@ -1,29 +1,34 @@
 import { resolve } from "node:path"
 
+export type TuiKind = "owa" | "opencode"
+
 export type CliArgs =
-  | { mode: "default"; projectPath: string; continueLast?: boolean; sessionId?: string }
+  | { mode: "default"; projectPath: string; continueLast?: boolean; sessionId?: string; tui?: TuiKind }
   | { mode: "run"; prompt: string; projectPath: string; continueLast?: boolean; sessionId?: string; agentId?: string }
   | { mode: "serve"; hostname: string; port: number }
   | { mode: "eval"; taskIds: string[]; combinations?: Array<{ agentId: string; modelId: string; environmentId: string }> }
-  | { mode: "connect"; serverUrl: string }
+  | { mode: "connect"; serverUrl: string; tui?: TuiKind }
 
 export function parseArgs(argv: string[], cwd = process.cwd()): CliArgs {
-  if (argv.length === 0) return { mode: "default", projectPath: cwd }
+  const parsedTui = parseLeadingTui(argv)
+  argv = parsedTui.rest
+
+  if (argv.length === 0) return { mode: "default", projectPath: cwd, ...(parsedTui.tui ? { tui: parsedTui.tui } : {}) }
 
   if (argv[0] === "--connect") {
     const serverUrl = argv[1]
     if (!serverUrl) throw new Error("--connect requires a server URL")
-    return { mode: "connect", serverUrl }
+    return { mode: "connect", serverUrl, ...(parsedTui.tui ? { tui: parsedTui.tui } : {}) }
   }
 
   if (argv[0] === "--continue") {
-    return { mode: "default", projectPath: cwd, continueLast: true }
+    return { mode: "default", projectPath: cwd, continueLast: true, ...(parsedTui.tui ? { tui: parsedTui.tui } : {}) }
   }
 
   if (argv[0] === "--session") {
     const sessionId = argv[1]
     if (!sessionId) throw new Error("--session requires a session ID")
-    return { mode: "default", projectPath: cwd, sessionId }
+    return { mode: "default", projectPath: cwd, sessionId, ...(parsedTui.tui ? { tui: parsedTui.tui } : {}) }
   }
 
   if (argv[0] === "run") {
@@ -42,10 +47,29 @@ export function parseArgs(argv: string[], cwd = process.cwd()): CliArgs {
   }
 
   if (argv.length === 1) {
-    return { mode: "default", projectPath: resolve(cwd, argv[0] ?? ".") }
+    return { mode: "default", projectPath: resolve(cwd, argv[0] ?? "."), ...(parsedTui.tui ? { tui: parsedTui.tui } : {}) }
   }
 
   throw new Error(`Unknown arguments: ${argv.join(" ")}`)
+}
+
+function parseTuiValue(value: string): TuiKind {
+  if (value === "owa" || value === "opencode") return value
+  throw new Error("--tui must be owa or opencode")
+}
+
+function parseLeadingTui(argv: string[]): { tui?: TuiKind; rest: string[] } {
+  const rest: string[] = []
+  let tui: TuiKind | undefined
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === "--tui") {
+      tui = parseTuiValue(requiredValue(argv, index, "--tui"))
+      index += 1
+      continue
+    }
+    rest.push(argv[index]!)
+  }
+  return { tui, rest }
 }
 
 function parseEvalArgs(argv: string[]): CliArgs {

@@ -1,26 +1,11 @@
 import type { Hono } from "hono"
-import type { PluginRegistry, RunOrchestrator, RunResult, SessionState } from "@open-web-agent/core"
-import { randomUUID } from "node:crypto"
-import type { SQLiteStore } from "@open-web-agent/storage"
 import { CreateRunRequestSchema } from "../schemas/api"
-import type { BrowserSessionManager } from "../browser-session-manager"
+import { isHttpError, submitRun, type SubmitRunDeps } from "../run-submission"
 import { readJsonBody } from "./json-body"
 
-export interface RunRecord {
-  runId: string
-  sessionId: string
-  status: "running" | RunResult["status"]
-  finalAnswer: string | null
-}
+export type { RunRecord } from "../run-submission"
 
-export interface RunRouteDeps {
-  orchestrator: RunOrchestrator
-  registry: PluginRegistry
-  sessions: Map<string, SessionState>
-  runs: Map<string, RunRecord>
-  storage?: SQLiteStore
-  browserSessions: BrowserSessionManager
-}
+export interface RunRouteDeps extends SubmitRunDeps {}
 
 export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
   app.post("/runs", async (c) => {
@@ -29,121 +14,12 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
     const parsed = CreateRunRequestSchema.safeParse(body.value)
     if (!parsed.success) return c.json({ error: "Invalid run request" }, 400)
 
-    const session = deps.sessions.get(parsed.data.sessionId) ?? deps.storage?.getSession(parsed.data.sessionId)
-    if (!session || session.deletedAt) return c.json({ error: "Unknown session" }, 404)
-    deps.sessions.set(session.id, session)
-    if (hasRunningRun(session.id, deps.runs)) return c.json({ error: "Session has a running run" }, 409)
-
-    if (parsed.data.agentId && !deps.registry.listAgents().some((agent) => agent.id === parsed.data.agentId)) {
-      return c.json({ error: "Unknown agent" }, 400)
-    }
-    if (parsed.data.modelId && !deps.registry.listModels().some((model) => model.id === parsed.data.modelId)) {
-      return c.json({ error: "Unknown model" }, 400)
-    }
-    const environmentId = parsed.data.environmentId ?? session.environmentId ?? deps.browserSessions.defaultEnvironmentId
-    if (!deps.registry.listEnvironments().some((environment) => environment.id === environmentId)) {
-      return c.json({ error: "Unknown browser" }, 400)
-    }
-
-    const runSession: SessionState =
-      session.environmentId === environmentId ? session : { ...session, environmentId }
-    if (runSession !== session) {
-      deps.sessions.set(runSession.id, runSession)
-      deps.storage?.upsertSession({
-        id: runSession.id,
-        projectPath: runSession.projectPath,
-        projectHash: runSession.projectHash,
-        environmentId: runSession.environmentId ?? null,
-        title: runSession.title ?? null,
-        pinned: runSession.pinned ?? false,
-        deletedAt: runSession.deletedAt ?? null,
-        createdAt: runSession.createdAt,
-      })
-    }
-    const pendingRunId = `pending_${randomUUID().replaceAll("-", "")}`
-    deps.runs.set(pendingRunId, { runId: pendingRunId, sessionId: runSession.id, status: "running", finalAnswer: null })
-
-    let started: ReturnType<RunOrchestrator["startRun"]>
     try {
-      await deps.browserSessions.attach(runSession, environmentId)
-      started = deps.orchestrator.startRun({
-        session: runSession,
-        prompt: parsed.data.prompt,
-        agentId: parsed.data.agentId,
-        modelId: parsed.data.modelId,
-        environmentId,
-      })
+      return c.json(await submitRun(deps, parsed.data))
     } catch (error) {
-      deps.runs.delete(pendingRunId)
+      if (isHttpError(error)) return c.json({ error: error.message }, error.status)
       throw error
     }
-    deps.runs.delete(pendingRunId)
-    deps.runs.set(started.runId, { runId: started.runId, sessionId: runSession.id, status: "running", finalAnswer: null })
-    const createdAt = new Date().toISOString()
-    deps.storage?.upsertRun({
-      id: started.runId,
-      sessionId: runSession.id,
-      status: "running",
-      finalAnswer: null,
-      createdAt,
-      updatedAt: createdAt,
-    })
-    deps.storage?.appendMessage({
-      id: `msg_${randomUUID().replaceAll("-", "")}`,
-      sessionId: runSession.id,
-      role: "user",
-      content: parsed.data.prompt,
-      createdAt,
-    })
-    void started.result
-      .then(async (result) => {
-        await deps.browserSessions.capture(runSession, environmentId).catch(() => null)
-        const updatedAt = new Date().toISOString()
-        deps.runs.set(started.runId, {
-          runId: started.runId,
-          sessionId: runSession.id,
-          status: result.status,
-          finalAnswer: result.finalAnswer,
-        })
-        deps.storage?.upsertRun({
-          id: started.runId,
-          sessionId: runSession.id,
-          status: result.status,
-          finalAnswer: result.finalAnswer,
-          createdAt,
-          updatedAt,
-        })
-        if (result.finalAnswer) {
-          deps.storage?.appendMessage({
-            id: `msg_${randomUUID().replaceAll("-", "")}`,
-            sessionId: runSession.id,
-            role: "assistant",
-            content: result.finalAnswer,
-            createdAt: updatedAt,
-          })
-        }
-      })
-      .catch(async (error) => {
-        await deps.browserSessions.capture(runSession, environmentId).catch(() => null)
-        const updatedAt = new Date().toISOString()
-        const message = error instanceof Error ? error.message : String(error)
-        deps.runs.set(started.runId, {
-          runId: started.runId,
-          sessionId: runSession.id,
-          status: "failed",
-          finalAnswer: message,
-        })
-        deps.storage?.upsertRun({
-          id: started.runId,
-          sessionId: runSession.id,
-          status: "failed",
-          finalAnswer: message,
-          createdAt,
-          updatedAt,
-        })
-      })
-
-    return c.json({ runId: started.runId })
   })
 
   app.get("/runs/:runId", (c) => {
@@ -156,11 +32,4 @@ export function registerRunRoutes(app: Hono, deps: RunRouteDeps): void {
   app.post("/runs/:runId/cancel", (c) => {
     return c.json({ cancelled: deps.orchestrator.cancelRun(c.req.param("runId")) })
   })
-}
-
-function hasRunningRun(sessionId: string, runs: Map<string, RunRecord>): boolean {
-  for (const run of runs.values()) {
-    if (run.sessionId === sessionId && run.status === "running") return true
-  }
-  return false
 }
