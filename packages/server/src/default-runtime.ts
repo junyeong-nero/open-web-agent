@@ -15,8 +15,6 @@ import {
 import {
   ClaudeModel,
   CodexOAuthModel,
-  createOpenAIModelPool,
-  createOpenRouterModelPool,
   GeminiModel,
   OpenAIModel,
   OpenRouterModel,
@@ -72,12 +70,6 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
         contextWindowTokens: modelConfig.contextWindowTokens,
         maxRetry: modelConfig.maxRetry,
       }),
-      ...createOpenRouterModelPool({
-        apiKey: modelConfig.openrouterApiKey,
-        defaultParameters: modelConfig.parameters,
-        reasoningEffort: modelConfig.reasoningEffort,
-        maxRetry: modelConfig.maxRetry,
-      }),
     )
   }
   if (modelConfig.openaiApiKey) {
@@ -88,12 +80,6 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
         defaultParameters: modelConfig.parameters,
         reasoningEffort: modelConfig.reasoningEffort,
         contextWindowTokens: modelConfig.contextWindowTokens,
-        maxRetry: modelConfig.maxRetry,
-      }),
-      ...createOpenAIModelPool({
-        apiKey: modelConfig.openaiApiKey,
-        defaultParameters: modelConfig.parameters,
-        reasoningEffort: modelConfig.reasoningEffort,
         maxRetry: modelConfig.maxRetry,
       }),
     )

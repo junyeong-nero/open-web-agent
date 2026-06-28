@@ -58,28 +58,12 @@ describe("startDefaultRuntime", () => {
       expect(modelIds).toEqual(
         expect.arrayContaining([
           "openrouter",
-          "openrouter:anthropic/claude-sonnet-4.6",
-          "openrouter:google/gemini-3.5-flash",
           "openai",
-          "openai:gpt-5.5",
-          "openai:gpt-5.3-codex",
           "gemini",
           "claude",
         ]),
       )
       expect(modelIds.indexOf("openrouter")).toBeLessThan(modelIds.indexOf("openai"))
-      expect(plugins.models.find((model) => model.id === "openai:gpt-5.5")).toMatchObject({
-        name: "OpenAI",
-        provider: "openai",
-        modelName: "gpt-5.5",
-        contextWindowTokens: 1_000_000,
-      })
-      expect(plugins.models.find((model) => model.id === "openrouter:google/gemini-3.5-flash")).toMatchObject({
-        name: "OpenRouter",
-        provider: "openrouter",
-        modelName: "google/gemini-3.5-flash",
-        contextWindowTokens: 1_048_576,
-      })
       expect(plugins.models.find((model) => model.id === "gemini")).toMatchObject({
         provider: "gemini",
         modelName: "test-model",
@@ -171,7 +155,7 @@ describe("startDefaultRuntime", () => {
     try {
       const plugins = await fetchPlugins(runtime.url)
 
-      expect(plugins.models.find((model) => model.id === "openai:gpt-5.4-mini")).toMatchObject({
+      expect(plugins.models.find((model) => model.id === "openai")).toMatchObject({
         provider: "openai",
         modelName: "gpt-5.4-mini",
       })
@@ -564,7 +548,7 @@ describe("startDefaultRuntime", () => {
       const plugins = await fetchPlugins(runtime.url)
 
       expect(plugins.models.map((model) => model.id)).toEqual(
-        expect.arrayContaining(["openrouter", "openrouter:openrouter/fusion", "openai", "openai:gpt-5.5", "gemini", "claude"]),
+        expect.arrayContaining(["openrouter", "openai", "gemini", "claude"]),
       )
       expect(plugins.models[0]).toMatchObject({
         id: "openrouter",
@@ -672,7 +656,7 @@ describe("startDefaultRuntime", () => {
           sessionId: session.sessionId,
           prompt: "delegate through runtime",
           agentId: "runtime-model-agent",
-          modelId: "openai:gpt-5.5",
+          modelId: "openai",
           environmentId: "playwright-browser",
         }),
       })
@@ -685,7 +669,7 @@ describe("startDefaultRuntime", () => {
         payload: { finalAnswer: "delegated runtime model answer" },
       })
       expect(modelEvents).toEqual(["model.called", "model.completed"])
-      expect((providerRequests[0] as { model?: string }).model).toBe("gpt-5.5")
+      expect((providerRequests[0] as { model?: string }).model).toBe("gpt-test")
       expect((providerRequests[0] as { messages: Array<{ content: string }> }).messages[0]?.content).toBe(
         "delegate through runtime",
       )
