@@ -8,7 +8,7 @@ export interface BrowserNavigationPolicyOptions {
 
 export const BrowserNavigationUrlSchema = z
   .string()
-  .url()
+  .regex(/^https?:\/\//, "Navigate URLs must use http(s)")
   .refine(
     (value) => isAllowedBrowserNavigationUrl(value, { allowPrivateNetworkNavigation: true }),
     "Navigate URLs must use http(s)",
