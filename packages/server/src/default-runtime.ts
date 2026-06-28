@@ -13,14 +13,14 @@ import {
   type SessionState,
 } from "@open-web-agent/core"
 import {
-  ClaudeModel,
   CodexOAuthModel,
-  GeminiModel,
-  OpenAIModel,
-  OpenRouterModel,
+  createModelPlugin,
+  getCatalogModelsByProvider,
+  MODEL_CATALOG,
+  OpenAICompatibleClient,
   readCodexOAuthToken,
   readModelConfig,
-  resolveProviderDefaultModel,
+  withChatReasoningEffort,
 } from "@open-web-agent/models"
 import { SQLiteStore } from "@open-web-agent/storage"
 import { join } from "node:path"
@@ -60,53 +60,81 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
 
   const models: ModelPlugin[] = []
 
-  if (modelConfig.openrouterApiKey) {
-    models.push(
-      new OpenRouterModel({
-        apiKey: modelConfig.openrouterApiKey,
-        defaultModel: resolveProviderDefaultModel("openrouter", modelConfig.defaultModel, modelConfig.defaultModelProvider),
-        defaultParameters: modelConfig.parameters,
-        reasoningEffort: modelConfig.reasoningEffort,
-        contextWindowTokens: modelConfig.contextWindowTokens,
-        maxRetry: modelConfig.maxRetry,
-      }),
-    )
-  }
   if (modelConfig.openaiApiKey) {
-    models.push(
-      new OpenAIModel({
-        apiKey: modelConfig.openaiApiKey,
-        defaultModel: resolveProviderDefaultModel("openai", modelConfig.defaultModel, modelConfig.defaultModelProvider),
-        defaultParameters: modelConfig.parameters,
-        reasoningEffort: modelConfig.reasoningEffort,
-        contextWindowTokens: modelConfig.contextWindowTokens,
-        maxRetry: modelConfig.maxRetry,
-      }),
-    )
-  }
-  if (modelConfig.geminiApiKey) {
-    models.push(
-      new GeminiModel({
-        apiKey: modelConfig.geminiApiKey,
-        defaultModel: resolveProviderDefaultModel("gemini", modelConfig.defaultModel, modelConfig.defaultModelProvider),
-        defaultParameters: modelConfig.parameters,
-        reasoningEffort: modelConfig.reasoningEffort,
-        contextWindowTokens: modelConfig.contextWindowTokens,
-        maxRetry: modelConfig.maxRetry,
-      }),
-    )
+    const client = new OpenAICompatibleClient({
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: modelConfig.openaiApiKey,
+      maxRetry: modelConfig.maxRetry,
+    })
+    for (const entry of getCatalogModelsByProvider("openai")) {
+      models.push(
+        createModelPlugin(
+          { id: entry.id, name: entry.name, provider: "openai", modelName: entry.modelName, reasoningEffort: modelConfig.reasoningEffort, contextWindowTokens: entry.contextWindowTokens },
+          (request, ctx) => client.complete(
+            withChatReasoningEffort({ ...request, ...modelConfig.parameters, model: entry.modelName }, modelConfig.reasoningEffort),
+            { signal: ctx.abortSignal },
+          ),
+        ),
+      )
+    }
   }
   if (modelConfig.anthropicApiKey) {
-    models.push(
-      new ClaudeModel({
-        apiKey: modelConfig.anthropicApiKey,
-        defaultModel: resolveProviderDefaultModel("claude", modelConfig.defaultModel, modelConfig.defaultModelProvider),
-        defaultParameters: modelConfig.parameters,
-        reasoningEffort: modelConfig.reasoningEffort,
-        contextWindowTokens: modelConfig.contextWindowTokens,
-        maxRetry: modelConfig.maxRetry,
-      }),
-    )
+    const client = new OpenAICompatibleClient({
+      baseUrl: "https://api.anthropic.com/v1",
+      apiKey: modelConfig.anthropicApiKey,
+      maxRetry: modelConfig.maxRetry,
+    })
+    for (const entry of getCatalogModelsByProvider("claude")) {
+      models.push(
+        createModelPlugin(
+          { id: entry.id, name: entry.name, provider: "claude", modelName: entry.modelName, contextWindowTokens: entry.contextWindowTokens },
+          (request, ctx) => client.complete(
+            { ...request, ...modelConfig.parameters, model: entry.modelName },
+            { signal: ctx.abortSignal },
+          ),
+        ),
+      )
+    }
+  }
+  if (modelConfig.geminiApiKey) {
+    const client = new OpenAICompatibleClient({
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+      apiKey: modelConfig.geminiApiKey,
+      maxRetry: modelConfig.maxRetry,
+    })
+    for (const entry of getCatalogModelsByProvider("gemini")) {
+      models.push(
+        createModelPlugin(
+          { id: entry.id, name: entry.name, provider: "gemini", modelName: entry.modelName, contextWindowTokens: entry.contextWindowTokens },
+          (request, ctx) => client.complete(
+            { ...request, ...modelConfig.parameters, model: entry.modelName },
+            { signal: ctx.abortSignal },
+          ),
+        ),
+      )
+    }
+  }
+  if (modelConfig.openrouterApiKey) {
+    const client = new OpenAICompatibleClient({
+      baseUrl: "https://openrouter.ai/api/v1",
+      apiKey: modelConfig.openrouterApiKey,
+      maxRetry: modelConfig.maxRetry,
+      defaultHeaders: {
+        "http-referer": "https://github.com/open-web-agent/open-web-agent",
+        "x-title": "Open Web Agent",
+      },
+    })
+    for (const entry of MODEL_CATALOG) {
+      models.push(
+        createModelPlugin(
+          { id: `openrouter/${entry.modelName}`, name: `${entry.name} (via OpenRouter)`, provider: "openrouter", modelName: entry.modelName, reasoningEffort: modelConfig.reasoningEffort, contextWindowTokens: entry.contextWindowTokens },
+          (request, ctx) => client.complete(
+            withChatReasoningEffort({ ...request, ...modelConfig.parameters, model: entry.modelName }, modelConfig.reasoningEffort),
+            { signal: ctx.abortSignal },
+          ),
+        ),
+      )
+    }
   }
 
   const codexOAuthToken = readCodexOAuthToken(env, { authPath: modelConfig.codexAuthPath })
@@ -127,7 +155,7 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
     registry.registerModel(model)
   }
 
-  const defaultModelId = registry.listModels()[0]?.id
+  const defaultModelId = resolveDefaultModelId(registry, modelConfig)
   const defaultRuntimeModel = defaultModelId ? registry.getModel(defaultModelId) : undefined
   const selectedModel = new RuntimeSelectedModel(registry, defaultModelId)
   const modelBackedAgentOptions = {
@@ -223,8 +251,34 @@ export async function startDefaultRuntime(options: StartDefaultRuntimeOptions = 
 function orderModels(models: ModelPlugin[], defaultModelProvider: string | null): ModelPlugin[] {
   if (!defaultModelProvider) return models
   const selected = models.find((model) => model.id === defaultModelProvider)
-  if (!selected) return models
+  if (!selected) {
+    const providerPrefix = defaultModelProvider.split("/")[0]
+    const providerModels = models.filter((model) => model.provider === providerPrefix)
+    const otherModels = models.filter((model) => model.provider !== providerPrefix)
+    return [...providerModels, ...otherModels]
+  }
   return [selected, ...models.filter((model) => model.id !== defaultModelProvider)]
+}
+
+function resolveDefaultModelId(registry: PluginRegistry, config: { defaultModelProvider: string | null; defaultModel: string }): string | undefined {
+  const models = registry.listModels()
+  if (models.length === 0) return undefined
+
+  if (config.defaultModelProvider) {
+    const exact = models.find((m) => m.id === config.defaultModelProvider)
+    if (exact) return exact.id
+
+    const providerPrefix = config.defaultModelProvider.split("/")[0]
+    const byProvider = models.find((m) => m.provider === providerPrefix)
+    if (byProvider) return byProvider.id
+  }
+
+  if (config.defaultModel) {
+    const byName = models.find((m) => m.modelName === config.defaultModel)
+    if (byName) return byName.id
+  }
+
+  return models[0].id
 }
 
 function resolveRegisteredId(ids: string[], configuredId: string | null): string | null {
