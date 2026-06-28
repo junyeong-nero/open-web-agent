@@ -527,12 +527,19 @@ function providerSortPriority(provider: string): number {
 const providerDisplayNames: Record<string, string> = {
   claude: "Claude",
   "codex-oauth": "OpenAI OAuth",
+  cohere: "Cohere",
+  deepseek: "DeepSeek",
   gemini: "Gemini",
+  meta: "Meta",
+  mistral: "Mistral",
+  nvidia: "NVIDIA",
   openai: "OpenAI",
   openrouter: "OpenRouter",
+  perplexity: "Perplexity",
+  xai: "xAI",
 }
 
-const modelProviderOrder = ["openai", "claude", "gemini", "codex-oauth", "openrouter"]
+const modelProviderOrder = ["openai", "claude", "gemini", "deepseek", "mistral", "xai", "nvidia", "meta", "cohere", "perplexity", "codex-oauth", "openrouter"]
 
 const freeModelBadge = "Free"
 
