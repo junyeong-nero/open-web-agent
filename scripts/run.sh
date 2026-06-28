@@ -1,1 +1,1 @@
-bun run packages/cli/src/index.ts
+bun run packages/cli/src/index.ts --tui opencode
