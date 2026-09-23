@@ -1,68 +1,122 @@
 # Open Web Agent
 
-![Open Web Agent — bring your own agent, model, and browser](docs/assets/open-web-agent-runtime-banner.png)
+A small browser agent that is also a browser MCP server.
 
-**Open Web Agent is not another browser agent. It is a composable runtime for building, running, and inspecting them.**
+- **`owa mcp`**: exposes Playwright browser tools to any MCP client (Claude Code, Cursor, …) over stdio.
+- **`owa run "<task>"`**: runs the built-in agent loop on the *same* tools and prints the answer.
+- **`owa mcp --agent`**: also exposes `browser_task`. Your coding agent can hand off a whole web task to the built-in agent, running on a model you choose, and only the final answer comes back into its context.
 
-Bring your own agent, model provider, and browser environment while keeping one execution loop, one event model, and replayable traces.
+Models plug in by **API format** (OpenAI Chat Completions or Anthropic Messages) or by a module you write yourself. No provider SDKs are involved. The runtime depends only on `playwright` and `zod`, and the source is about 1.3k lines.
 
-## Compose Your Runtime
+Why this shape? See [docs/positioning.md](docs/positioning.md) for how it compares with playwright-mcp, agent-browser, browser-use, Stagehand, and others.
 
-Open Web Agent separates a web agent into interchangeable runtime boundaries:
-
-| Boundary | What you can plug in | Included today |
-|---|---|---|
-| **Agent** | Reasoning loops and decision policies | ReAct, SeeAct, and project-local Python agents |
-| **Model** | Hosted or custom model providers | OpenAI, OpenRouter, Gemini, Claude, and Codex OAuth |
-| **Browser** | Browser environments and typed tool adapters | Playwright |
-
-Swap one boundary without rewriting the rest of the runtime. Open Web Agent keeps orchestration, typed browser actions, cancellation, live events, session persistence, JSONL traces, and replay infrastructure consistent across runs.
-
-The plugin contracts are defined in TypeScript. Project-local Python agents can also call the runtime-selected model, so model selection, lifecycle events, and traces remain centralized.
-
-## Product Preview
-
-The CLI starts a loopback-only Hono server, runs real browser automation, streams every run event over SSE to an OpenTUI client, and persists traces for debugging and replay.
-
-![Open Web Agent TUI and Playwright browser](docs/assets/open-web-agent-tui-browser.png)
-
-## Quick Start
-
-Install dependencies with Bun:
+## Quick start
 
 ```bash
 bun install
+bunx playwright install chromium        # first time only
+
+export OPENAI_API_KEY=...
+bun run owa run "What is the top story on news.ycombinator.com right now?" --model openai:gpt-5-mini
 ```
 
-Start the TUI from the current project directory:
+`bun link` puts `owa` on your PATH.
+
+### Use it as an MCP server
 
 ```bash
-bun run packages/cli/src/index.ts
+claude mcp add owa -- bun /path/to/open-web-agent/src/cli.ts mcp
+# with delegation to a cheaper model:
+claude mcp add owa -e OPENROUTER_API_KEY=... -- bun /path/to/open-web-agent/src/cli.ts mcp --agent --model openrouter:qwen/qwen3-coder
 ```
 
-Run a headless one-shot task:
+Any other MCP client can use the equivalent JSON config:
+
+```json
+{ "mcpServers": { "owa": { "command": "bun", "args": ["/path/to/open-web-agent/src/cli.ts", "mcp"] } } }
+```
+
+## Models
+
+`--model provider:model` (or `OWA_MODEL`). Provider names are shorthands for an API format, a base URL, and a key environment variable:
+
+| provider | API format | key env |
+|---|---|---|
+| `openai` | openai | `OPENAI_API_KEY` |
+| `anthropic` | anthropic | `ANTHROPIC_API_KEY` |
+| `openrouter` | openai | `OPENROUTER_API_KEY` |
+| `gemini` | openai (Gemini's OpenAI endpoint) | `GEMINI_API_KEY` |
+| `ollama` | openai (`localhost:11434`) | — |
+
+To reach any other OpenAI- or Anthropic-compatible endpoint (vLLM, LM Studio, a gateway, …), pass the URL and the format:
 
 ```bash
-OPENAI_API_KEY=sk-... \
-  bun run packages/cli/src/index.ts run "Open example.com and summarize the page"
+owa run "..." --base-url http://localhost:8000/v1 --api openai --model my-model   # OWA_API_KEY for auth
 ```
 
-Development aliases point at the same TUI entry:
+To plug in anything else, write a module that default-exports a `ModelAdapter`, or a function that returns one:
+
+```ts
+// my-model.ts
+import type { ModelAdapter } from "open-web-agent"
+
+export default (config): ModelAdapter => ({
+  name: "my-model",
+  async complete({ system, messages, tools, signal }) {
+    // call your model here; return { text?, toolCalls: [{ id, name, arguments }] }
+  },
+})
+```
 
 ```bash
-bun run dev
-bun run owa
+owa run "..." --model-module ./my-model.ts
 ```
 
-Without provider credentials, model-backed runs report that no model is configured.
+## Tools
 
-## Documentation
+| tool | what it does |
+|---|---|
+| `browser_navigate`, `browser_go_back` | open a URL / go back |
+| `browser_snapshot` | accessibility snapshot with `[ref=eN]` element handles |
+| `browser_click`, `browser_type`, `browser_select_option`, `browser_hover`, `browser_press_key`, `browser_scroll` | act on refs; each returns a fresh snapshot |
+| `browser_wait_for` | wait for text to appear or disappear, or for a number of seconds |
+| `browser_get_text` | visible text of the page or of one element |
+| `browser_screenshot` | PNG of the viewport or full page |
+| `browser_evaluate` | run JavaScript in the page (**opt-in**: `--caps unsafe`) |
 
-- [How it works](docs/how-it-works.md) — runtime flow, plugin boundaries, local server, and API routes.
-- [CLI and TUI](docs/cli.md) — source commands, slash commands, agents, models, and browsers.
-- [Configuration](docs/configuration.md) — YAML, environment variables, credentials, and local data paths.
-- [Python agents](docs/python-agents.md) — project-local agent manifests and runtime protocols.
-- [Evaluation](docs/evaluation.md) — replay fixture comparisons.
-- [Development](docs/development.md) — typecheck and test commands for contributors.
+The agent keeps only the newest snapshot and screenshot in its context. It stops after repeated failed steps, and when it runs out of steps it makes one last call to get a best-effort answer.
 
-The phased build plan remains in [docs/plan/](docs/plan/).
+## Options
+
+```
+--headless                   OWA_HEADLESS=1
+--browser chromium|firefox|webkit
+--cdp http://127.0.0.1:9222  attach to your running Chrome instead of launching one
+--user-data-dir <dir>        persistent profile (logins survive restarts)
+--executable-path <path>
+--caps core,unsafe
+--max-steps <n>              default 30
+--trace run.jsonl            append agent events as JSONL
+--json                       (run) print the full result as JSON
+```
+
+## Library
+
+```ts
+import { BrowserSession, runAgent, resolveModel } from "open-web-agent"
+
+const browser = new BrowserSession({ headless: true })
+const result = await runAgent({
+  task: "Find the price of the Pro plan on example.com",
+  model: await resolveModel({ model: "anthropic:claude-sonnet-5" }),
+  browser,
+})
+await browser.close()
+```
+
+## Development
+
+```bash
+bun run typecheck
+bun run test          # launches headless Chromium against a local fixture server
+```
