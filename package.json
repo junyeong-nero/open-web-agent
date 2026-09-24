@@ -1,53 +1,28 @@
 {
   "name": "open-web-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
+  "description": "A small browser agent and browser MCP server",
   "type": "module",
-  "workspaces": {
-    "packages": [
-      "packages/*",
-      "vendor/opencode/packages/sdk/js",
-      "vendor/opencode/packages/tui",
-      "vendor/opencode-shims/core",
-      "vendor/opencode-shims/plugin",
-      "vendor/opencode-shims/ui"
-    ],
-    "catalog": {
-      "@opentui/core": "0.3.4",
-      "@opentui/keymap": "0.3.4",
-      "@opentui/solid": "0.3.4",
-      "@tsconfig/bun": "1.0.9",
-      "@tsconfig/node22": "22.0.2",
-      "@types/bun": "1.3.13",
-      "@types/cross-spawn": "6.0.6",
-      "@types/node": "24.12.2",
-      "@typescript/native-preview": "7.0.0-dev.20251207.1",
-      "cross-spawn": "7.0.6",
-      "diff": "8.0.2",
-      "effect": "4.0.0-beta.83",
-      "fuzzysort": "3.1.0",
-      "opentui-spinner": "0.0.7",
-      "remeda": "2.26.0",
-      "solid-js": "1.9.10",
-      "typescript": "5.8.2"
-    }
+  "bin": {
+    "owa": "./src/cli.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc -b",
-    "test": "OPEN_WEB_AGENT_BROWSER_HEADLESS=true bun test ./packages/*/src",
-    "dev": "bun run packages/cli/src/index.ts",
-    "owa": "bun run packages/cli/src/index.ts"
+    "owa": "bun run src/cli.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "bun test src"
+  },
+  "dependencies": {
+    "playwright": "1.61.0",
+    "zod": "4.4.3"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@types/bun": "1.3.14",
     "bun-types": "1.3.14",
     "typescript": "6.0.3"
-  },
-  "dependencies": {
-    "@opentui/core": "0.4.1",
-    "@opentui/solid": "0.4.1",
-    "hono": "4.12.25",
-    "solid-js": "1.9.13",
-    "zod": "4.4.3"
   }
 }
