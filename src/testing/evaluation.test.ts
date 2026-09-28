@@ -61,3 +61,24 @@ it("checks form, async and recovery tasks against actual browser state", async (
     }
   } finally { fixture.stop() }
 }, 30_000)
+
+it("passes the tab-return evaluation only after selecting the preserved original tab", async () => {
+  const fixture = startFixtureServer()
+  let homeTabId = ""
+  try {
+    const run = await evaluateCase(EVALUATION_CASES.find(c => c.id === "tab-return")!, scriptedModel([
+      () => ({ toolCalls: [{ id: "1", name: "browser_navigate", arguments: { url: fixture.url } }] }),
+      req => {
+        const snapshot = lastToolText(req.messages)
+        homeTabId = snapshot.match(/Page tab: (t\d+)/)![1]
+        return { toolCalls: [{ id: "2", name: "browser_type", arguments: { ref: refFor(snapshot, /textbox "Search"/), text: "comparison-note" } }] }
+      },
+      req => ({ toolCalls: [{ id: "3", name: "browser_click", arguments: { ref: refFor(lastToolText(req.messages), /link "Pricing in new tab"/) } }] }),
+      () => ({ toolCalls: [{ id: "4", name: "browser_select_tab", arguments: { tabId: homeTabId } }] }),
+      () => ({ text: "$42 per month; preserved comparison-note", toolCalls: [] }),
+    ]), fixture.url)
+    expect(run.passed).toBe(true)
+    expect(Object.values(run.checks).every(Boolean)).toBe(true)
+    expect(run.toolErrors).toBe(0)
+  } finally { fixture.stop() }
+}, 10_000)

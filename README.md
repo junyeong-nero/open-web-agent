@@ -6,7 +6,7 @@ A small browser agent that is also a browser MCP server.
 - **`owa run "<task>"`**: runs the built-in agent loop on the *same* tools and prints the answer.
 - **`owa mcp --agent`**: also exposes `browser_task`. Your coding agent can hand off a whole web task to the built-in agent, running on a model you choose, and only the final answer comes back into its context.
 
-Models plug in by **API format** (OpenAI Chat Completions or Anthropic Messages) or by a module you write yourself. No provider SDKs are involved. The runtime depends only on `playwright` and `zod`, and the source is about 1.3k lines.
+Models plug in by **API format** (OpenAI Chat Completions or Anthropic Messages) or by a module you write yourself. No provider SDKs are involved. The runtime depends only on `playwright` and `zod`, and the runtime source is about 1.5k lines.
 
 Why this shape? See [docs/positioning.md](docs/positioning.md) for how it compares with playwright-mcp, agent-browser, browser-use, Stagehand, and others.
 
@@ -94,6 +94,7 @@ owa run "..." --model-module ./my-model.ts
 
 | tool | what it does |
 |---|---|
+| `browser_tabs`, `browser_select_tab` | list open tabs and select one without reloading |
 | `browser_navigate`, `browser_go_back` | open a URL / go back |
 | `browser_snapshot` | accessibility snapshot with `[ref=eN]` element handles |
 | `browser_click`, `browser_type`, `browser_select_option`, `browser_hover`, `browser_press_key`, `browser_scroll` | act on refs; each returns a fresh snapshot |
@@ -176,3 +177,9 @@ Only the newest `browser_get_text` body is sent back to the model; older bodies 
 Three consecutive steps with identical actions and observed state stop with `no_progress`.
 Waits, scrolling, failed tools and results without observed state are excluded to avoid treating
 normal waiting as a loop. This simple detector does not detect every multi-step cycle.
+
+Tab snapshots include a stable `Page tab: tN` identifier. `browser_tabs` lists IDs, titles, URLs
+and the selected tab; `browser_select_tab` accepts `{ "tabId": "t1" }`, preserves existing page
+state, and returns a fresh snapshot. Use refs from that new snapshot for subsequent actions.
+Unknown/closed IDs fail explicitly; IDs are not reused when the session restarts. New tabs still
+become current automatically, and closing the current tab still selects another open tab.

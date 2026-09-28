@@ -56,6 +56,22 @@ async function act(session: BrowserSession, summary: string, action: (page: Page
 
 export const TOOLS: BrowserTool[] = [
   tool({
+    name: "browser_tabs",
+    description: "List open tabs with stable IDs, titles, URLs and the current tab. Tab IDs are distinct from element refs.",
+    schema: z.object({}),
+    readOnly: true,
+    run: async (session) => ({ text: JSON.stringify(await session.tabs(), null, 2) }),
+  }),
+  tool({
+    name: "browser_select_tab",
+    description: "Select an existing tab by its ID from browser_tabs or Page tab in a snapshot. Returns fresh refs for that tab without navigating or reloading it.",
+    schema: z.object({ tabId: z.string().regex(/^t[1-9]\d*$/).describe("Tab ID, e.g. t1 (not an element ref)") }),
+    run: async (session, { tabId }) => {
+      await session.selectTab(tabId)
+      return { text: `Selected tab ${tabId}`, snapshot: await session.snapshot() }
+    },
+  }),
+  tool({
     name: "browser_navigate",
     description: "Open a URL in the current tab.",
     schema: z.object({ url: z.string().describe("Absolute URL, e.g. https://example.com") }),

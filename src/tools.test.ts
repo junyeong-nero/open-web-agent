@@ -78,3 +78,44 @@ describe("browser tools", () => {
     }
   })
 })
+
+it("lists stable tab IDs and switches without losing the original form state", async () => {
+  await call("browser_navigate", { url: fixture.url })
+  const original = await session.page()
+  await original.locator("#q").fill("preserve-me")
+  const initial = JSON.parse((await call("browser_tabs")).text)
+  const homeId = initial.find((tab: any) => tab.current).id
+  const snapshot = (await call("browser_snapshot")).snapshot!
+  await call("browser_click", { ref: refFor(snapshot, /link "Pricing in new tab"/) })
+  const pricingPage = await session.page()
+  await pricingPage.waitForLoadState("domcontentloaded")
+  const tabs = JSON.parse((await call("browser_tabs")).text)
+  const priceId = tabs.find((tab: any) => tab.current).id
+  expect(tabs).toHaveLength(2)
+  expect(priceId).not.toBe(homeId)
+  expect(tabs.find((tab: any) => tab.id === homeId).url).toBe(fixture.url + "/")
+  const returned = await call("browser_select_tab", { tabId: homeId })
+  expect(returned.snapshot).toContain("Fixture Home")
+  expect(returned.snapshot).toContain(`Page tab: ${homeId}`)
+  expect(await original.locator("#q").inputValue()).toBe("preserve-me")
+  expect(await session.page()).toBe(original)
+  await call("browser_type", { ref: refFor(returned.snapshot!, /textbox "Search"/), text: "selected-tab" })
+  expect(await original.locator("#q").inputValue()).toBe("selected-tab")
+  await pricingPage.close()
+  expect((await call("browser_select_tab", { tabId: priceId })).text).toContain("Unknown or closed tab")
+  expect((await call("browser_select_tab", { tabId: "t999999" })).isError).toBe(true)
+  expect((await call("browser_select_tab", { tabId: "e1" })).isError).toBe(true)
+  expect(await session.page()).toBe(original)
+  expect(JSON.parse((await call("browser_tabs")).text)).toHaveLength(1)
+})
+
+it("does not reuse closed tab IDs after a browser session restarts", async () => {
+  const browser = new BrowserSession({ headless: true })
+  try {
+    const oldId = (await browser.tabs())[0].id
+    await browser.close()
+    const newId = (await browser.tabs())[0].id
+    expect(newId).not.toBe(oldId)
+    await expect(browser.selectTab(oldId)).rejects.toThrow("Unknown or closed tab")
+  } finally { await browser.close() }
+}, 10_000)
