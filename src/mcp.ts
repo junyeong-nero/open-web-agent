@@ -1,5 +1,6 @@
 import { createInterface } from "node:readline"
 import { z } from "zod"
+import { interruptible } from "./cancel"
 import { runAgent, taskIncomplete } from "./agent"
 import type { BrowserSession } from "./browser"
 import type { ModelAdapter } from "./model/types"
@@ -21,17 +22,20 @@ export interface McpServerOptions {
   /** When set, exposes `browser_task`, which delegates a whole task to the built-in agent on this model. */
   agentModel?: ModelAdapter
   agentMaxSteps?: number
+  agentTimeoutMs?: number
 }
 
 const BrowserTaskSchema = z.object({
   task: z.string().describe("What to do and what to return, e.g. 'Find the price of the Pro plan on example.com'"),
   maxSteps: z.number().int().positive().max(100).optional(),
+  timeoutMs: z.number().int().positive().max(2_147_483_647).optional(),
 })
 
 /** Minimal MCP server: initialize, ping, tools/list, tools/call. Transport-agnostic. */
 export function createMcpServer(options: McpServerOptions) {
   // Browser tools share one page, so calls run strictly one at a time.
   let queue: Promise<unknown> = Promise.resolve()
+  const controllers = new Map<string | number, AbortController>()
   const serial = <T>(work: () => Promise<T>): Promise<T> => {
     const next = queue.then(work, work)
     queue = next.catch(() => {})
@@ -55,7 +59,7 @@ export function createMcpServer(options: McpServerOptions) {
     return { tools }
   }
 
-  const callBrowserTask = async (args: unknown): Promise<ToolResult> => {
+  const callBrowserTask = async (args: unknown, signal?: AbortSignal): Promise<ToolResult> => {
     const parsed = BrowserTaskSchema.safeParse(args ?? {})
     if (!parsed.success) return { text: z.prettifyError(parsed.error), isError: true }
     let result: Awaited<ReturnType<typeof runAgent>>
@@ -66,6 +70,8 @@ export function createMcpServer(options: McpServerOptions) {
         browser: options.session,
         tools: options.tools,
         maxSteps: parsed.data.maxSteps ?? options.agentMaxSteps,
+        timeoutMs: parsed.data.timeoutMs ?? options.agentTimeoutMs,
+        signal,
       })
     } catch (error) {
       return { text: `browser_task failed: ${error instanceof Error ? error.message : String(error)}`, isError: true }
@@ -77,14 +83,20 @@ export function createMcpServer(options: McpServerOptions) {
     }
   }
 
-  const callToolRequest = async (params: Record<string, unknown> | undefined) => {
+  const callToolRequest = async (params: Record<string, unknown> | undefined, signal?: AbortSignal) => {
     const name = String(params?.name ?? "")
     const args = params?.arguments
-    const result = await serial(() =>
-      name === "browser_task" && options.agentModel
-        ? callBrowserTask(args)
-        : callTool(options.tools, options.session, name, args),
-    )
+    const result = await serial(async () => {
+      if (name === "browser_task" && options.agentModel) return callBrowserTask(args, signal)
+      if (signal?.aborted) return { text: "Request cancelled before execution", isError: true }
+      if (!signal) return callTool(options.tools, options.session, name, args)
+      try {
+        return await interruptible(() => callTool(options.tools, options.session, name, args), signal, pending => options.session.cancelPending(pending))
+      } catch (error) {
+        if (signal.aborted) return { text: "Request cancelled", isError: true }
+        throw error
+      }
+    })
     const content: unknown[] = [{ type: "text", text: result.snapshot ? `${result.text}\n\n${result.snapshot}` : result.text }]
     if (result.image) content.push({ type: "image", mimeType: result.image.mimeType, data: result.image.data })
     return { content, isError: result.isError ?? false, ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}) }
@@ -94,18 +106,27 @@ export function createMcpServer(options: McpServerOptions) {
     /** Handle one JSON-RPC message; returns the response, or undefined for notifications. */
     async handle(message: JsonRpcRequest): Promise<Record<string, unknown> | undefined> {
       const isNotification = message.id === undefined
+      if (isNotification && message.method === "notifications/cancelled") {
+        const id = message.params?.requestId
+        if (typeof id === "string" || typeof id === "number") controllers.get(id)?.abort(new Error("Request cancelled by MCP client"))
+        return
+      }
+      const controller = message.method === "tools/call" && message.id != null ? new AbortController() : undefined
+      if (controller) controllers.set(message.id as string | number, controller)
       try {
-        const result = await dispatch(message)
+        const result = await dispatch(message, controller?.signal)
         return isNotification ? undefined : { jsonrpc: "2.0", id: message.id, result }
       } catch (error) {
         if (isNotification) return undefined
         const code = error instanceof MethodNotFound ? -32601 : -32603
         return { jsonrpc: "2.0", id: message.id, error: { code, message: error instanceof Error ? error.message : String(error) } }
+      } finally {
+        if (controller) controllers.delete(message.id as string | number)
       }
     },
   }
 
-  async function dispatch(message: JsonRpcRequest): Promise<unknown> {
+  async function dispatch(message: JsonRpcRequest, signal?: AbortSignal): Promise<unknown> {
     switch (message.method) {
       case "initialize": {
         const requested = String(message.params?.protocolVersion ?? "")
@@ -122,7 +143,7 @@ export function createMcpServer(options: McpServerOptions) {
       case "tools/list":
         return listTools()
       case "tools/call":
-        return callToolRequest(message.params)
+        return callToolRequest(message.params, signal)
       default:
         if (message.method.startsWith("notifications/")) return {}
         throw new MethodNotFound(message.method)

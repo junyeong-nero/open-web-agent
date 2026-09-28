@@ -90,7 +90,7 @@ export async function evaluateCase(testCase: EvaluationCase, model: ModelAdapter
   const events: AgentEvent[] = []
   const report: EvaluationRun = { caseId: testCase.id, passed: false, checks: {}, durationMs: 0, toolCalls: 0, toolErrors: 0 }
   try {
-    report.result = await runAgent({ task: testCase.task(baseUrl), model, browser, maxSteps, signal: AbortSignal.timeout(120_000), onEvent: event => events.push(event) })
+    report.result = await runAgent({ task: testCase.task(baseUrl), model, browser, maxSteps, timeoutMs: 120_000, onEvent: event => events.push(event) })
     report.checks = report.result.status === "completed"
       ? await testCase.verify({ browser, result: report.result, events })
       : { executionCompleted: false }

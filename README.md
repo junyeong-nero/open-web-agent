@@ -158,3 +158,21 @@ CLI exit code. An unknown outcome is not treated as an execution error, but is n
 For an explicit real-model evaluation (separate from unit tests), run `bun run eval --live --model
 openai:gpt-6-luna --model-options '{"reasoning_effort":"none"}'`. See [evaluation instructions](docs/evaluation.md)
 for cases, JSON reports and the direct-operation versus delegation comparison procedure.
+
+### Task limits and cancellation
+
+Agent tasks have a five-minute deadline by default. Set `--timeout-ms` for CLI runs or the MCP
+server default; `browser_task` also accepts `timeoutMs`. Library callers can pass `timeoutMs`
+and an `AbortSignal`. MCP `notifications/cancelled` is handled immediately, even for queued
+requests. Results use `stopReason: timeout` or `cancelled` and retain already-collected usage,
+observed URLs and any available partial model text. Stopping does not make another model call.
+
+Cancellation during a browser operation closes the owned browser (or disconnects a CDP session)
+and waits for the old operation to settle before releasing the queue. A subsequent task can reopen
+the session. Cancellation cannot undo actions already performed; browser launch/cleanup can extend
+past the requested deadline. Cancelling only a model request leaves the browser available.
+
+Only the newest `browser_get_text` body is sent back to the model; older bodies become placeholders.
+Three consecutive steps with identical actions and observed state stop with `no_progress`.
+Waits, scrolling, failed tools and results without observed state are excluded to avoid treating
+normal waiting as a loop. This simple detector does not detect every multi-step cycle.
