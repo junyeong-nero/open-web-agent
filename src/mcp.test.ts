@@ -61,3 +61,23 @@ describe("owa mcp (via the official MCP SDK client)", () => {
     expect(text(result)).toContain("status: completed")
   }, 30_000)
 })
+
+
+it("passes model options to the delegated model through the MCP CLI", async () => {
+  const bodies: any[] = []
+  const endpoint = Bun.serve({
+    hostname: "127.0.0.1", port: 0,
+    async fetch(request) {
+      bodies.push(await request.json())
+      return Response.json({ choices: [{ message: { content: "configured" } }] })
+    },
+  })
+  try {
+    const client = await connect("--agent", "--model", "ollama:local", "--api", "openai", "--base-url", `http://127.0.0.1:${endpoint.port}`, "--model-options", '{"reasoning_effort":"none"}')
+    const result = await client.callTool({ name: "browser_task", arguments: { task: "Reply configured" } })
+    expect(result.isError).toBe(false)
+    expect(text(result)).toContain("configured")
+    expect(bodies[0].reasoning_effort).toBe("none")
+    expect(bodies[0].tools.length).toBeGreaterThan(0)
+  } finally { endpoint.stop(true) }
+})

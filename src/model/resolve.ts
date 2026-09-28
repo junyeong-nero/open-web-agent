@@ -31,6 +31,8 @@ export interface ModelConfig {
   /** Path to a module whose default export is a ModelAdapter or `(config) => ModelAdapter`. */
   module?: string
   maxTokens?: number
+  /** Additional API request fields, supplied explicitly without model-specific defaults. */
+  extraBody?: Record<string, unknown>
 }
 
 export function modelConfigFromEnv(env: Record<string, string | undefined> = process.env): ModelConfig {
@@ -41,7 +43,32 @@ export function modelConfigFromEnv(env: Record<string, string | undefined> = pro
     baseUrl: env.OWA_BASE_URL,
     apiKey: env.OWA_API_KEY,
     module: env.OWA_MODEL_MODULE,
+    extraBody: parseModelOptions(env.OWA_MODEL_OPTIONS),
   }
+}
+
+const RESERVED_OPTIONS = ["model", "messages", "tools", "system", "stream", "api_key", "apiKey", "authorization", "headers"]
+
+export function parseModelOptions(value: string | undefined): Record<string, unknown> | undefined {
+  if (value === undefined) return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    // Do not echo JSON or parser errors: the supplied value may contain credentials.
+    throw new Error("--model-options / OWA_MODEL_OPTIONS must be a JSON object")
+  }
+  return validateModelOptions(parsed)
+}
+
+function validateModelOptions(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("--model-options / OWA_MODEL_OPTIONS must be a JSON object")
+  }
+  for (const key of RESERVED_OPTIONS) {
+    if (Object.hasOwn(value, key)) throw new Error(`Model options cannot set "${key}"; use the dedicated model/auth configuration and let the agent manage messages and tools`)
+  }
+  return value as Record<string, unknown>
 }
 
 export function parseApi(value: string | undefined): ApiFormat | undefined {
@@ -63,6 +90,7 @@ export async function resolveModel(
   config: ModelConfig,
   env: Record<string, string | undefined> = process.env,
 ): Promise<ModelAdapter> {
+  const extraBody = config.extraBody === undefined ? undefined : validateModelOptions(config.extraBody)
   if (config.module) return loadModelModule(config.module, config)
 
   if (!config.model) {
@@ -86,8 +114,8 @@ export async function resolveModel(
   }
 
   return api === "anthropic"
-    ? anthropicMessages({ model: spec.model, baseUrl, apiKey, maxTokens: config.maxTokens })
-    : openaiChat({ model: spec.model, baseUrl, apiKey })
+    ? anthropicMessages({ model: spec.model, baseUrl, apiKey, maxTokens: config.maxTokens, extraBody })
+    : openaiChat({ model: spec.model, baseUrl, apiKey, extraBody })
 }
 
 async function loadModelModule(path: string, config: ModelConfig): Promise<ModelAdapter> {

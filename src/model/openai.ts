@@ -5,6 +5,7 @@ import {
   type ModelAdapter,
   type ModelRequest,
   type ModelResponse,
+  ModelHttpError,
   parseToolArguments,
   postJson,
 } from "./types"
@@ -44,7 +45,12 @@ export function openaiChat(options: OpenAIChatOptions): ModelAdapter {
       const headers: Record<string, string> = { ...options.headers }
       if (options.apiKey) headers.authorization = `Bearer ${options.apiKey}`
 
-      const json = (await postJson(fetchImpl, name, `${baseUrl}/chat/completions`, headers, body, request.signal)) as {
+      const json = (await postJson(fetchImpl, name, `${baseUrl}/chat/completions`, headers, body, request.signal).catch((error: unknown) => {
+        if (error instanceof ModelHttpError && error.status === 400 && /set reasoning_effort to ["']none["']/i.test(error.body)) {
+          error.message += `\nTry --model-options '{"reasoning_effort":"none"}' (or OWA_MODEL_OPTIONS) if supported by this endpoint. No model options are changed automatically.`
+        }
+        throw error
+      })) as {
         choices?: Array<{ message?: { content?: string | null; tool_calls?: OpenAIToolCall[] } }>
         usage?: { prompt_tokens?: number; completion_tokens?: number }
       }
