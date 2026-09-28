@@ -20,6 +20,7 @@ Model (flag > env):
                                openrouter:qwen/qwen3-coder, gemini:gemini-2.5-flash, ollama:qwen3:8b
   --api <openai|anthropic>     OWA_API       wire format for custom endpoints
   --base-url <url>             OWA_BASE_URL  any OpenAI- or Anthropic-compatible endpoint
+  --model-options <json>       OWA_MODEL_OPTIONS  extra API request fields (JSON object)
   --model-module <path>        OWA_MODEL_MODULE  module default-exporting a ModelAdapter
   API keys: OWA_API_KEY, or OPENAI_API_KEY / ANTHROPIC_API_KEY / OPENROUTER_API_KEY / GEMINI_API_KEY
 
@@ -46,6 +47,7 @@ export async function main(argv: string[]): Promise<number> {
       api: { type: "string" },
       "base-url": { type: "string" },
       "model-module": { type: "string" },
+      "model-options": { type: "string" },
       headless: { type: "boolean" },
       browser: { type: "string" },
       cdp: { type: "string" },
@@ -65,7 +67,10 @@ export async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = positionals
   if (values.help || !command) return print(HELP)
 
-  const env = modelConfigFromEnv()
+  const env = modelConfigFromEnv({
+    ...process.env,
+    OWA_MODEL_OPTIONS: values["model-options"] ?? process.env.OWA_MODEL_OPTIONS,
+  })
   const modelConfig: ModelConfig = {
     ...env,
     model: values.model ?? env.model,

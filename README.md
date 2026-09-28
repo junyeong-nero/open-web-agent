@@ -54,6 +54,24 @@ To reach any other OpenAI- or Anthropic-compatible endpoint (vLLM, LM Studio, a 
 owa run "..." --base-url http://localhost:8000/v1 --api openai --model my-model   # OWA_API_KEY for auth
 ```
 
+Pass additional API request fields with `--model-options` or `OWA_MODEL_OPTIONS`:
+
+```bash
+owa run "Read the heading on https://example.com" --model openai:gpt-6-luna \
+  --model-options '{"reasoning_effort":"none"}' --headless
+
+export OWA_MODEL_OPTIONS='{"temperature":0}'
+```
+
+The CLI JSON object replaces the entire environment object; `{}` clears environment options.
+Options also apply to `owa mcp --agent`. They pass unchanged to either API adapter (or
+as `config.extraBody` to a custom module), so supported fields and values depend on your endpoint.
+No reasoning defaults are inferred from the model name. For the library, pass `extraBody` to `resolveModel`.
+Additional fields override adapter defaults such as Anthropic's `max_tokens`, but `model`,
+`messages`, `tools`, `system`, `stream`, and authentication fields (`api_key`, `apiKey`,
+`authorization`, `headers`) are reserved. Use the existing model and API key settings for these.
+Invalid JSON and non-object values fail before making a model request without echoing their values.
+
 To plug in anything else, write a module that default-exports a `ModelAdapter`, or a function that returns one:
 
 ```ts

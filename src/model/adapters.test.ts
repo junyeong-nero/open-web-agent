@@ -77,3 +77,25 @@ describe("anthropicMessages", () => {
     expect(response.toolCalls).toEqual([{ id: "t1", name: "browser_snapshot", arguments: {} }])
   })
 })
+
+describe("model request diagnostics", () => {
+  it("suggests explicit reasoning options for the reported compatibility error", async () => {
+    const { fetchImpl } = recordingFetch({ error: { message: "Function tools with reasoning_effort are not supported. Set reasoning_effort to 'none'." } }, 400)
+    await expect(openaiChat({ model: "m", fetch: fetchImpl }).complete(request)).rejects.toThrow('--model-options \'{"reasoning_effort":"none"}\'')
+  })
+
+  it("redacts API keys echoed by an endpoint from the error and its body", async () => {
+    for (const create of [openaiChat, anthropicMessages]) {
+      const { fetchImpl } = recordingFetch({ error: "Invalid key: test-secret-token" }, 401)
+      try {
+        await create({ model: "m", apiKey: "test-secret-token", fetch: fetchImpl }).complete(request)
+        throw new Error("Expected request to fail")
+      } catch (error) {
+        expect(error).toBeInstanceOf(ModelHttpError)
+        expect(String(error)).not.toContain("test-secret-token")
+        expect((error as ModelHttpError).body).not.toContain("test-secret-token")
+        expect(String(error)).toContain("[redacted]")
+      }
+    }
+  })
+})

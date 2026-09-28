@@ -66,7 +66,16 @@ export async function postJson(
     signal,
   })
   const text = await response.text()
-  if (!response.ok) throw new ModelHttpError(response.status, text, adapter)
+  if (!response.ok) {
+    let safeText = text
+    for (const [key, value] of Object.entries(headers)) {
+      if (/^(authorization|x-api-key)$/i.test(key) && value) {
+        const secret = value.replace(/^Bearer\s+/i, "")
+        if (secret) safeText = safeText.replaceAll(secret, "[redacted]")
+      }
+    }
+    throw new ModelHttpError(response.status, safeText, adapter)
+  }
   return JSON.parse(text)
 }
 
