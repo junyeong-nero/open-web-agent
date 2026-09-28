@@ -13,7 +13,8 @@
   "scripts": {
     "owa": "bun run src/cli.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "bun test src"
+    "test": "bun test src",
+    "eval": "bun scripts/evaluate.ts"
   },
   "dependencies": {
     "playwright": "1.61.0",

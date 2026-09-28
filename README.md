@@ -154,3 +154,7 @@ URLs the browser actually visited during the task, not verified citations suppor
 
 Partial/blocked outcomes and execution limits/failures produce MCP `isError: true` and a nonzero
 CLI exit code. An unknown outcome is not treated as an execution error, but is not proof of success.
+
+For an explicit real-model evaluation (separate from unit tests), run `bun run eval --live --model
+openai:gpt-6-luna --model-options '{"reasoning_effort":"none"}'`. See [evaluation instructions](docs/evaluation.md)
+for cases, JSON reports and the direct-operation versus delegation comparison procedure.
