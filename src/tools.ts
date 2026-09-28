@@ -8,6 +8,8 @@ export interface ToolResult {
   text: string
   /** Page state after the tool ran. The agent keeps only the latest one in its context. */
   snapshot?: string
+  /** Large observed page body; only the newest is kept in model context. */
+  pageText?: boolean
   image?: { mimeType: string; data: string }
   isError?: boolean
   structuredContent?: Record<string, unknown>
@@ -173,7 +175,7 @@ export const TOOLS: BrowserTool[] = [
       const target = ref ? await session.locator(ref) : (await session.page()).locator("body")
       const text = (await target.innerText()).replace(/\n{3,}/g, "\n\n").trim()
       const max = session.options.maxSnapshotChars ?? 40_000
-      return { text: text.length > max ? `${text.slice(0, max)}\n… [text truncated at ${max} chars]` : text || "(no text)" }
+      return { pageText: true, text: text.length > max ? `${text.slice(0, max)}\n… [text truncated at ${max} chars]` : text || "(no text)" }
     },
   }),
   tool({

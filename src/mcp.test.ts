@@ -118,3 +118,25 @@ it("marks a step-limited task as incomplete even when its last answer claims suc
   expect(result.structuredContent).toMatchObject({ status: "max_steps", stopReason: "step_limit", answer: "best effort" })
   await session.close()
 })
+
+it("accepts SDK cancellation over stdio and releases the delegated-task queue", async () => {
+  let started!: () => void
+  const entered = new Promise<void>(resolve => { started = resolve })
+  let requests = 0
+  const endpoint = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch() {
+    if (++requests === 1) { started(); return new Promise<Response>(() => {}) }
+    return Response.json({ choices: [{ message: { content: "next task" } }] })
+  } })
+  try {
+    const client = await connect("--agent", "--model", "ollama:local", "--api", "openai", "--base-url", `http://127.0.0.1:${endpoint.port}`)
+    const controller = new AbortController()
+    const first = client.callTool({ name: "browser_task", arguments: { task: "wait" } }, undefined, { signal: controller.signal }).catch(() => "cancelled")
+    await entered
+    controller.abort()
+    expect(await first).toBe("cancelled")
+    const result = await client.callTool({ name: "browser_task", arguments: { task: "next" } })
+    expect(text(result)).toStartWith("next task")
+    expect(result.isError).toBe(false)
+    expect(requests).toBe(2)
+  } finally { endpoint.stop(true) }
+}, 10_000)

@@ -25,6 +25,7 @@ export class BrowserSession {
   private context?: BrowserContext
   private current?: Page
   private opening?: Promise<Page>
+  private interrupted = false
 
   constructor(readonly options: BrowserOptions = {}) {}
 
@@ -38,6 +39,7 @@ export class BrowserSession {
   }
 
   async page(): Promise<Page> {
+    if (this.interrupted) throw new Error("Browser operation cancelled")
     if (this.current && !this.current.isClosed()) return this.current
     this.opening ??= this.open().finally(() => {
       this.opening = undefined
@@ -60,7 +62,17 @@ export class BrowserSession {
     return (await this.page()).locator(`aria-ref=${ref}`)
   }
 
+  /** Quiesce the old action before the serialized queue may start another task. */
+  async cancelPending(pending: Promise<unknown>): Promise<void> {
+    this.interrupted = true
+    try {
+      await this.close()
+      await pending.catch(() => {})
+    } finally { this.interrupted = false }
+  }
+
   async close(): Promise<void> {
+    await this.opening?.catch(() => {})
     const browser = this.browser
     const context = this.context
     this.browser = this.context = this.current = undefined

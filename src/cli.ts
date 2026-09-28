@@ -34,6 +34,7 @@ Browser:
 
 Agent:
   --max-steps <n>              default 30
+  --timeout-ms <n>             total agent deadline, default 300000
   --trace <file.jsonl>         append agent events as JSONL
   --json                       (run) print the result as JSON
 `
@@ -55,6 +56,7 @@ export async function main(argv: string[]): Promise<number> {
       "executable-path": { type: "string" },
       caps: { type: "string" },
       "max-steps": { type: "string" },
+      "timeout-ms": { type: "string" },
       trace: { type: "string" },
       json: { type: "boolean" },
       agent: { type: "boolean" },
@@ -90,9 +92,12 @@ export async function main(argv: string[]): Promise<number> {
   const tools = selectTools(parseCaps(values.caps))
   const maxSteps = values["max-steps"] ? Number.parseInt(values["max-steps"], 10) : undefined
 
+  const timeoutMs = values["timeout-ms"] === undefined ? undefined : Number(values["timeout-ms"])
+  if (timeoutMs !== undefined && (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647)) throw new Error("--timeout-ms must be a positive integer up to 2147483647")
+
   if (command === "mcp") {
     const agentModel = values.agent ? await resolveModel(modelConfig) : undefined
-    const server = createMcpServer({ session, tools, agentModel, agentMaxSteps: maxSteps })
+    const server = createMcpServer({ session, tools, agentModel, agentMaxSteps: maxSteps, agentTimeoutMs: timeoutMs })
     const stop = () => void session.close().finally(() => process.exit(0))
     process.once("SIGINT", stop)
     process.once("SIGTERM", stop)
@@ -119,6 +124,7 @@ export async function main(argv: string[]): Promise<number> {
         browser: session,
         tools,
         maxSteps,
+        timeoutMs,
         signal: controller.signal,
         onEvent: (event) => {
           trace?.(event)

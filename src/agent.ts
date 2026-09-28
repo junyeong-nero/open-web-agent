@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto"
+import { interruptible } from "./cancel"
 import type { BrowserSession } from "./browser"
 import type { Message, ModelAdapter, ToolCall } from "./model/types"
 import { type BrowserTool, callTool, resultContent, selectTools, type ToolResult, toolSpec } from "./tools"
@@ -20,7 +22,7 @@ export type AgentEvent =
 export interface AgentResult {
   status: "completed" | "max_steps" | "failed"
   /** Execution termination, distinct from the model's unverified assessment. */
-  stopReason: "final_answer" | "step_limit" | "tool_failures" | "model_error"
+  stopReason: "final_answer" | "step_limit" | "tool_failures" | "model_error" | "timeout" | "cancelled" | "no_progress"
   answer: string
   outcome: { status: "succeeded" | "partial" | "blocked" | "unknown"; verification: "unverified"; unfinished: string[] }
   /** Last 20 distinct HTTP(S) URLs actually observed; not verified citations. */
@@ -39,6 +41,10 @@ export interface AgentOptions {
   maxSteps?: number
   /** Stop after this many steps in a row where every tool call failed. */
   maxConsecutiveFailures?: number
+  /** Total task deadline, including model requests (default five minutes). */
+  timeoutMs?: number
+  /** Stop after identical action/state steps; waits and scrolls are exempt (default three). */
+  maxRepeatedSteps?: number
   systemPrompt?: string
   signal?: AbortSignal
   onEvent?: (event: AgentEvent) => void
@@ -47,6 +53,11 @@ export interface AgentOptions {
 type Entry = Message | { role: "tool"; toolCallId: string; name: string; result: ToolResult }
 
 export async function runAgent(options: AgentOptions): Promise<AgentResult> {
+  const timeoutMs = options.timeoutMs ?? 300_000
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) throw new Error("timeoutMs must be a positive integer up to 2147483647")
+  const deadline = new AbortController()
+  const timer = setTimeout(() => deadline.abort(new Error("Task deadline exceeded")), timeoutMs)
+  const signal = options.signal ? AbortSignal.any([options.signal, deadline.signal]) : deadline.signal
   const startedAt = performance.now()
   const observedUrls = new Set<string>()
   const observe = () => {
@@ -66,9 +77,12 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   const usage = { inputTokens: 0, outputTokens: 0 }
   const emit = options.onEvent ?? (() => {})
 
-  const entries: Entry[] = [{ role: "user", content: [{ type: "text", text: await taskMessage(options) }] }]
+  const entries: Entry[] = []
   let failures = 0
   let step = 0
+  let previousState = ""
+  let repeatedSteps = 0
+  let partialAnswer = ""
 
   const finish = (status: AgentResult["status"], stopReason: AgentResult["stopReason"], text: string, error?: string): AgentResult => {
     const final = parseFinalAnswer(text)
@@ -77,12 +91,13 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     return result
   }
   const ask = async (withTools: boolean) => {
-    const response = await options.model.complete({
+    const response = await interruptible(() => options.model.complete({
       system,
       messages: render(entries),
       tools: withTools ? specs : [],
-      signal: options.signal,
-    })
+      signal,
+    }), signal)
+    if (response.text) partialAnswer = response.text
     usage.inputTokens += response.usage?.inputTokens ?? 0
     usage.outputTokens += response.usage?.outputTokens ?? 0
     emit({ type: "model", step, text: response.text, toolCalls: response.toolCalls, usage: response.usage })
@@ -91,8 +106,11 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   }
 
   try {
+    signal.throwIfAborted()
+    const initial = await interruptible(() => taskMessage(options), signal, pending => options.browser.cancelPending(pending))
+    entries.push({ role: "user", content: [{ type: "text", text: initial }] })
     while (step < maxSteps) {
-      options.signal?.throwIfAborted()
+      signal.throwIfAborted()
       step += 1
       emit({ type: "step", step })
 
@@ -100,15 +118,25 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       if (response.toolCalls.length === 0) return finish("completed", "final_answer", response.text?.trim() ?? "")
 
       let failed = 0
+      const state = createHash("sha256")
+      let canCompare = true
       for (const call of response.toolCalls) {
-        options.signal?.throwIfAborted()
-        const result = await callTool(tools, options.browser, call.name, call.arguments)
+        signal.throwIfAborted()
+        const result = await interruptible(() => callTool(tools, options.browser, call.name, call.arguments), signal, pending => options.browser.cancelPending(pending))
         observe()
         if (result.isError) failed += 1
+        if (result.isError || ["browser_wait_for", "browser_scroll"].includes(call.name) || (!result.snapshot && !result.pageText)) canCompare = false
+        state.update(JSON.stringify([call.name, call.arguments, result.snapshot, result.pageText ? result.text : undefined]))
         emit({ type: "tool", step, call, result })
         entries.push({ role: "tool", toolCallId: call.id, name: call.name, result })
       }
 
+      const fingerprint = canCompare ? state.digest("hex") : ""
+      repeatedSteps = fingerprint && fingerprint === previousState ? repeatedSteps + 1 : 1
+      previousState = fingerprint
+      if (fingerprint && repeatedSteps >= (options.maxRepeatedSteps ?? 3)) {
+        return finish("failed", "no_progress", partialAnswer, "Stopped after repeated identical actions and page state")
+      }
       failures = failed === response.toolCalls.length ? failures + 1 : 0
       if (failures >= maxFailures) {
         return finish("failed", "tool_failures", `Stopped after ${failures} consecutive steps where every browser action failed.`)
@@ -123,8 +151,11 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     const last = await ask(false)
     return finish("max_steps", "step_limit", last.text?.trim() ?? "")
   } catch (error) {
-    if (options.signal?.aborted) throw error
-    return finish("failed", "model_error", "", error instanceof Error ? error.message : String(error))
+    const message = error instanceof Error ? error.message : String(error)
+    if (signal.aborted) return finish("failed", signal.reason === deadline.signal.reason ? "timeout" : "cancelled", partialAnswer, message)
+    return finish("failed", "model_error", partialAnswer, message)
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -152,11 +183,13 @@ async function taskMessage(options: AgentOptions): Promise<string> {
 /** Keep only the newest snapshot and image in context; older ones are superseded page state. */
 export function render(entries: Entry[]): Message[] {
   const lastSnapshot = entries.findLastIndex((entry) => "result" in entry && entry.result.snapshot !== undefined)
+  const lastPageText = entries.findLastIndex((entry) => "result" in entry && entry.result.pageText)
   const lastImage = entries.findLastIndex((entry) => "result" in entry && entry.result.image !== undefined)
 
   return entries.map((entry, index): Message => {
     if (!("result" in entry)) return entry
     const result: ToolResult = { ...entry.result }
+    if (result.pageText && index !== lastPageText) result.text = "[older page text omitted: superseded by a newer read]"
     if (result.snapshot !== undefined && index !== lastSnapshot) {
       result.snapshot = "[older snapshot omitted: superseded by a newer one]"
     }
