@@ -36,12 +36,18 @@ describe("owa mcp (via the official MCP SDK client)", () => {
 
     const { tools } = await client.listTools()
     expect(tools.map((tool) => tool.name)).toContain("browser_navigate")
+    expect(tools.map((tool) => tool.name)).toContain("browser_tabs")
+    expect(tools.map((tool) => tool.name)).toContain("browser_select_tab")
     expect(tools.map((tool) => tool.name)).not.toContain("browser_task")
     expect(tools.find((tool) => tool.name === "browser_snapshot")?.annotations?.readOnlyHint).toBe(true)
 
     const navigated = await client.callTool({ name: "browser_navigate", arguments: { url: `${fixture.url}/` } })
     expect(navigated.isError).toBe(false)
-    const clicked = await client.callTool({ name: "browser_click", arguments: { ref: refFor(text(navigated), /link "Pricing" \[/) } })
+    const tabs = JSON.parse(text(await client.callTool({ name: "browser_tabs", arguments: {} })))
+    const selected = await client.callTool({ name: "browser_select_tab", arguments: { tabId: tabs[0].id } })
+    expect(text(selected)).toContain("Page tab: " + tabs[0].id)
+
+    const clicked = await client.callTool({ name: "browser_click", arguments: { ref: refFor(text(selected), /link "Pricing" \[/) } })
     expect(text(clicked)).toContain("Page title: Pricing")
 
     const screenshot = await client.callTool({ name: "browser_screenshot", arguments: {} })

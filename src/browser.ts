@@ -26,6 +26,8 @@ export class BrowserSession {
   private current?: Page
   private opening?: Promise<Page>
   private interrupted = false
+  private tabIds = new Map<Page, string>()
+  private nextTabId = 1
 
   constructor(readonly options: BrowserOptions = {}) {}
 
@@ -52,7 +54,28 @@ export class BrowserSession {
     const tree = await page.ariaSnapshot({ mode: "ai" })
     const max = this.options.maxSnapshotChars ?? 40_000
     const body = tree.length > max ? `${tree.slice(0, max)}\n… [snapshot truncated at ${max} chars]` : tree
-    return `Page URL: ${page.url()}\nPage title: ${await page.title()}\nSnapshot:\n${body}`
+    return `Page URL: ${page.url()}\nPage title: ${await page.title()}\nPage tab: ${this.track(page)}\nSnapshot:\n${body}`
+  }
+
+  async tabs(): Promise<Array<{ id: string; title: string; url: string; current: boolean }>> {
+    await this.page()
+    const tabs = []
+    for (const page of this.context!.pages()) {
+      if (page.isClosed()) continue
+      const id = this.track(page)
+      try {
+        tabs.push({ id, title: await page.title(), url: page.url(), current: page === this.current })
+      } catch (error) { if (!page.isClosed()) throw error }
+    }
+    return tabs
+  }
+
+  async selectTab(id: string): Promise<void> {
+    if (this.interrupted) throw new Error("Browser operation cancelled")
+    const page = [...this.tabIds].find(([, tabId]) => tabId === id)?.[0]
+    if (!page || page.isClosed()) throw new Error(`Unknown or closed tab "${id}". Call browser_tabs for current tab IDs.`)
+    await page.bringToFront()
+    this.current = page
   }
 
   async locator(ref: string): Promise<Locator> {
@@ -76,6 +99,7 @@ export class BrowserSession {
     const browser = this.browser
     const context = this.context
     this.browser = this.context = this.current = undefined
+    this.tabIds.clear()
     if (this.options.cdpUrl) {
       await browser?.close().catch(() => {})
       return
@@ -88,18 +112,29 @@ export class BrowserSession {
     const context = await this.openContext()
     this.context = context
     context.on("page", (page) => this.follow(page))
+    for (const page of context.pages()) this.track(page)
     const page = context.pages()[0] ?? (await context.newPage())
     this.follow(page)
     return page
   }
 
   private follow(page: Page): void {
+    this.track(page)
     this.current = page
+  }
+
+  private track(page: Page): string {
+    const existing = this.tabIds.get(page)
+    if (existing) return existing
+    const id = `t${this.nextTabId++}`
+    this.tabIds.set(page, id)
     page.setDefaultTimeout(this.options.actionTimeoutMs ?? 10_000)
     page.on("close", () => {
+      this.tabIds.delete(page)
       if (this.current !== page) return
       this.current = this.context?.pages().at(-1)
     })
+    return id
   }
 
   private async openContext(): Promise<BrowserContext> {

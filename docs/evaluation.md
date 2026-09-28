@@ -12,8 +12,8 @@ Each case starts an isolated headless browser against local fixture pages. The f
 subset, `--runs` (1–10) for repeats, and `--max-steps` (1–100) for a per-case budget.
 Each agent run has a 120-second abort signal and a 1-second element timeout.
 
-The tab-return case deliberately captures the missing explicit tab-selection capability (#91).
-A baseline failure is useful evidence; do not remove that case to improve the headline score.
+The tab-return case captures the original missing tab-selection capability (#91) and now serves
+as its regression check. Keep historical baseline failures when comparing versions.
 
 Checks use DOM state and expected answers, never the model's self-reported success. The report
 includes each verdict/check, execution result, input/output tokens, duration, tool calls/errors,
@@ -50,3 +50,17 @@ the original input was not accessible on that page. The DOM check correctly reje
 Total: 27,553 input / 624 output tokens, 19 tool calls (one deliberate stale-ref error),
 41.2 seconds. These are a single local-fixture baseline, not a statistically reliable success
 rate or a monetary-cost claim.
+
+
+## Tab-selection follow-up (2026-09-28)
+
+Adding tab selection alone still left a failure: the model alternated between tabs after older
+snapshots were removed, then hit its step limit. The agent prompt now instructs it to read needed
+facts with `browser_get_text` before leaving a page, and preserve earlier facts in a short note
+before another text read. This uses the existing bounded context rather than retaining every tab's DOM.
+
+Two consecutive live `gpt-6-luna` tab-return runs with the same options then passed all checks:
+original tab selected, input preserved, pricing tab retained and the final answer correct. They used
+6 and 8 tool calls respectively. These are regression smoke tests, not a broad reliability claim.
+
+The final five-case live run also passed 5/5: 36,570 input / 702 output tokens, 22 tool calls, 42.2 seconds. The single tool error was the deliberately injected stale ref in the recovery case.
