@@ -81,3 +81,40 @@ it("passes model options to the delegated model through the MCP CLI", async () =
     expect(bodies[0].tools.length).toBeGreaterThan(0)
   } finally { endpoint.stop(true) }
 })
+
+it("returns compact structured outcomes and marks incomplete delegation as an error", async () => {
+  const { BrowserSession } = await import("./browser")
+  const { createMcpServer } = await import("./mcp")
+  const { selectTools } = await import("./tools")
+  const { scriptedModel } = await import("./testing/scripted-model")
+  for (const outcome of ["succeeded", "partial", "blocked"]) {
+    const session = new BrowserSession({ headless: true })
+    const server = createMcpServer({ session, tools: selectTools(), agentModel: scriptedModel([
+      () => ({ text: JSON.stringify({ answer: "answer", outcome, unfinished: outcome === "succeeded" ? [] : ["Read price"] }), toolCalls: [] }),
+    ]) })
+    const response = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "browser_task", arguments: { task: "t" } } })
+    const result = response?.result as any
+    expect(result.isError).toBe(outcome !== "succeeded")
+    expect(result.structuredContent.outcome).toMatchObject({ status: outcome, verification: "unverified" })
+    expect(result.structuredContent.stopReason).toBe("final_answer")
+    expect(result.content[0].text).toStartWith("answer")
+    expect(result.structuredContent).not.toHaveProperty("messages")
+    await session.close()
+  }
+})
+
+it("marks a step-limited task as incomplete even when its last answer claims success", async () => {
+  const { BrowserSession } = await import("./browser")
+  const { createMcpServer } = await import("./mcp")
+  const { scriptedModel } = await import("./testing/scripted-model")
+  const session = new BrowserSession({ headless: true })
+  const server = createMcpServer({ session, tools: [], agentModel: scriptedModel([
+    () => ({ toolCalls: [{ id: "1", name: "missing", arguments: {} }] }),
+    () => ({ text: '{"answer":"best effort","outcome":"succeeded","unfinished":[]}', toolCalls: [] }),
+  ]) })
+  const response = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "browser_task", arguments: { task: "t", maxSteps: 1 } } })
+  const result = response?.result as any
+  expect(result.isError).toBe(true)
+  expect(result.structuredContent).toMatchObject({ status: "max_steps", stopReason: "step_limit", answer: "best effort" })
+  await session.close()
+})

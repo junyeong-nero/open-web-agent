@@ -138,3 +138,19 @@ await browser.close()
 bun run typecheck
 bun run test          # launches headless Chromium against a local fixture server
 ```
+
+### Delegated task results
+
+`owa run --json` and MCP `browser_task.structuredContent` return the same compact result:
+`answer`, `status`, `stopReason`, `outcome`, `observedUrls`, `durationMs`, `steps`, and `usage`
+(and `error` for a failed model request). MCP still returns readable text beginning with the answer.
+
+`status: completed` only means the model produced a final answer. `stopReason` distinguishes
+`final_answer`, `step_limit`, `tool_failures`, and `model_error`. The model reports an
+`outcome.status` of `succeeded`, `partial`, or `blocked`, with an `unfinished` list; legacy plain
+text or malformed final JSON produces `unknown`. Every outcome is explicitly `unverified`.
+There is no independent success judge. `observedUrls` contains the last 20 distinct HTTP(S)
+URLs the browser actually visited during the task, not verified citations supporting the answer.
+
+Partial/blocked outcomes and execution limits/failures produce MCP `isError: true` and a nonzero
+CLI exit code. An unknown outcome is not treated as an execution error, but is not proof of success.

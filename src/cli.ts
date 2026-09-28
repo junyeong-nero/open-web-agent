@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { parseArgs } from "node:util"
-import { type AgentEvent, runAgent } from "./agent"
+import { type AgentEvent, runAgent, taskIncomplete } from "./agent"
 import { BrowserSession } from "./browser"
 import { createMcpServer, serveStdio } from "./mcp"
 import { type ModelConfig, modelConfigFromEnv, parseApi, resolveModel } from "./model/resolve"
@@ -125,8 +125,8 @@ export async function main(argv: string[]): Promise<number> {
           logEvent(event)
         },
       })
-      print(values.json ? JSON.stringify(result, null, 2) : result.answer)
-      return result.status === "completed" ? 0 : 1
+      print(values.json ? JSON.stringify(result, null, 2) : result.answer || result.error || "No answer returned")
+      return taskIncomplete(result) ? 1 : 0
     } finally {
       await session.close()
     }

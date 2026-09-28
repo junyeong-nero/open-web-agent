@@ -26,7 +26,7 @@ describe("runAgent", () => {
     const events: AgentEvent[] = []
     const result = await runAgent({ task: "Find the Pro price", model, browser: session, onEvent: (event) => events.push(event) })
 
-    expect(result).toEqual({ status: "completed", answer: "The Pro plan is $42.", steps: 4, usage: { inputTokens: 7, outputTokens: 3 } })
+    expect(result).toMatchObject({ status: "completed", answer: "The Pro plan is $42.", steps: 4, usage: { inputTokens: 7, outputTokens: 3 } })
     expect(events.filter((event) => event.type === "tool").map((event) => event.type === "tool" && event.call.name)).toEqual([
       "browser_navigate",
       "browser_click",
@@ -63,4 +63,26 @@ describe("runAgent", () => {
     expect(result).toMatchObject({ status: "max_steps", answer: "best guess", steps: 1 })
     expect(model.requests[1]?.tools).toEqual([])
   })
+})
+
+it("separates model-reported outcomes from execution and observed URLs", async () => {
+  const result = await runAgent({ task: "Read price", browser: session, model: scriptedModel([
+    () => ({ text: JSON.stringify({ answer: "Cannot access the price", outcome: "blocked", unfinished: ["Read price"], sources: ["https://invented.invalid"] }), toolCalls: [] }),
+  ]) })
+  expect(result).toMatchObject({ status: "completed", stopReason: "final_answer", outcome: { status: "blocked", verification: "unverified", unfinished: ["Read price"] } })
+  expect(result.observedUrls).toEqual([`${fixture.url}/pricing`])
+  expect(result.durationMs).toBeGreaterThanOrEqual(0)
+})
+
+it("does not infer success from plain text or malformed structured answers", async () => {
+  for (const answer of ["Done", '{"answer":"Done","outcome":"succeeded"}']) {
+    const result = await runAgent({ task: "t", browser: session, model: scriptedModel([() => ({ text: answer, toolCalls: [] })]) })
+    expect(result.answer).toBe(answer)
+    expect(result.outcome.status).toBe("unknown")
+  }
+})
+
+it("preserves execution metadata when the model request fails", async () => {
+  const result = await runAgent({ task: "t", browser: session, model: scriptedModel([() => { throw new Error("HTTP 503") }]) })
+  expect(result).toMatchObject({ status: "failed", stopReason: "model_error", error: "HTTP 503", outcome: { status: "unknown" } })
 })

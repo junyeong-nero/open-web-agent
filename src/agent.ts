@@ -9,7 +9,7 @@ export const SYSTEM_PROMPT = `You are a web agent that completes the user's task
 - Prefer navigating directly to a URL when you know it. Use browser_get_text to read long content.
 - If an action fails, look at the new snapshot and try a different approach instead of repeating the same call.
 - Never invent facts: base the answer on what you saw in the browser.
-- When the task is done (or impossible), reply with the final answer as plain text and no tool calls. That ends the run.`
+- When finished, reply without tool calls using JSON: {"answer":"your answer", "outcome":"succeeded|partial|blocked", "unfinished":["any remaining work"]}. This is your own assessment, not independent verification. If you cannot complete the task, say why in answer and list the remaining work. That ends the run.`
 
 export type AgentEvent =
   | { type: "step"; step: number }
@@ -19,7 +19,14 @@ export type AgentEvent =
 
 export interface AgentResult {
   status: "completed" | "max_steps" | "failed"
+  /** Execution termination, distinct from the model's unverified assessment. */
+  stopReason: "final_answer" | "step_limit" | "tool_failures" | "model_error"
   answer: string
+  outcome: { status: "succeeded" | "partial" | "blocked" | "unknown"; verification: "unverified"; unfinished: string[] }
+  /** Last 20 distinct HTTP(S) URLs actually observed; not verified citations. */
+  observedUrls: string[]
+  durationMs: number
+  error?: string
   steps: number
   usage: { inputTokens: number; outputTokens: number }
 }
@@ -40,6 +47,17 @@ export interface AgentOptions {
 type Entry = Message | { role: "tool"; toolCallId: string; name: string; result: ToolResult }
 
 export async function runAgent(options: AgentOptions): Promise<AgentResult> {
+  const startedAt = performance.now()
+  const observedUrls = new Set<string>()
+  const observe = () => {
+    const url = options.browser.currentUrl
+    if (url && /^https?:\/\//.test(url)) {
+      observedUrls.delete(url)
+      observedUrls.add(url)
+      if (observedUrls.size > 20) observedUrls.delete(observedUrls.values().next().value!)
+    }
+  }
+  observe()
   const tools = options.tools ?? selectTools()
   const specs = tools.map(toolSpec)
   const maxSteps = options.maxSteps ?? 30
@@ -52,8 +70,9 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   let failures = 0
   let step = 0
 
-  const finish = (status: AgentResult["status"], answer: string): AgentResult => {
-    const result = { status, answer, steps: step, usage }
+  const finish = (status: AgentResult["status"], stopReason: AgentResult["stopReason"], text: string, error?: string): AgentResult => {
+    const final = parseFinalAnswer(text)
+    const result: AgentResult = { status, stopReason, ...final, observedUrls: [...observedUrls], durationMs: Math.round(performance.now() - startedAt), steps: step, usage, ...(error ? { error } : {}) }
     emit({ type: "done", result })
     return result
   }
@@ -71,36 +90,58 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     return response
   }
 
-  while (step < maxSteps) {
-    options.signal?.throwIfAborted()
-    step += 1
-    emit({ type: "step", step })
-
-    const response = await ask(true)
-    if (response.toolCalls.length === 0) return finish("completed", response.text?.trim() ?? "")
-
-    let failed = 0
-    for (const call of response.toolCalls) {
+  try {
+    while (step < maxSteps) {
       options.signal?.throwIfAborted()
-      const result = await callTool(tools, options.browser, call.name, call.arguments)
-      if (result.isError) failed += 1
-      emit({ type: "tool", step, call, result })
-      entries.push({ role: "tool", toolCallId: call.id, name: call.name, result })
+      step += 1
+      emit({ type: "step", step })
+
+      const response = await ask(true)
+      if (response.toolCalls.length === 0) return finish("completed", "final_answer", response.text?.trim() ?? "")
+
+      let failed = 0
+      for (const call of response.toolCalls) {
+        options.signal?.throwIfAborted()
+        const result = await callTool(tools, options.browser, call.name, call.arguments)
+        observe()
+        if (result.isError) failed += 1
+        emit({ type: "tool", step, call, result })
+        entries.push({ role: "tool", toolCallId: call.id, name: call.name, result })
+      }
+
+      failures = failed === response.toolCalls.length ? failures + 1 : 0
+      if (failures >= maxFailures) {
+        return finish("failed", "tool_failures", `Stopped after ${failures} consecutive steps where every browser action failed.`)
+      }
     }
 
-    failures = failed === response.toolCalls.length ? failures + 1 : 0
-    if (failures >= maxFailures) {
-      return finish("failed", `Stopped after ${failures} consecutive steps where every browser action failed.`)
-    }
+    // Out of steps: one last tool-less call so the caller still gets the best available answer.
+    entries.push({
+      role: "user",
+      content: [{ type: "text", text: "Step limit reached. Reply now with your best final answer from what you have seen." }],
+    })
+    const last = await ask(false)
+    return finish("max_steps", "step_limit", last.text?.trim() ?? "")
+  } catch (error) {
+    if (options.signal?.aborted) throw error
+    return finish("failed", "model_error", "", error instanceof Error ? error.message : String(error))
   }
+}
 
-  // Out of steps: one last tool-less call so the caller still gets the best available answer.
-  entries.push({
-    role: "user",
-    content: [{ type: "text", text: "Step limit reached. Reply now with your best final answer from what you have seen." }],
-  })
-  const last = await ask(false)
-  return finish("max_steps", last.text?.trim() ?? "")
+function parseFinalAnswer(text: string): Pick<AgentResult, "answer" | "outcome"> {
+  try {
+    const parsed = JSON.parse(text)
+    if (parsed && typeof parsed.answer === "string" && ["succeeded", "partial", "blocked"].includes(parsed.outcome)
+      && Array.isArray(parsed.unfinished) && parsed.unfinished.every((item: unknown) => typeof item === "string")) {
+      return { answer: parsed.answer, outcome: { status: parsed.outcome, verification: "unverified", unfinished: parsed.unfinished } }
+    }
+  } catch { /* Legacy/plain-text models still work; do not infer success from prose. */ }
+  return { answer: text, outcome: { status: "unknown", verification: "unverified", unfinished: [] } }
+}
+
+/** A finished model response is not proof that the task succeeded. */
+export function taskIncomplete(result: AgentResult): boolean {
+  return result.status !== "completed" || result.outcome.status === "blocked" || result.outcome.status === "partial"
 }
 
 async function taskMessage(options: AgentOptions): Promise<string> {
