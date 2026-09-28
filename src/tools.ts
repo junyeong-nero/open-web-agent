@@ -10,6 +10,7 @@ export interface ToolResult {
   snapshot?: string
   image?: { mimeType: string; data: string }
   isError?: boolean
+  structuredContent?: Record<string, unknown>
 }
 
 export type Capability = "core" | "unsafe"

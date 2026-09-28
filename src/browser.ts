@@ -28,6 +28,11 @@ export class BrowserSession {
 
   constructor(readonly options: BrowserOptions = {}) {}
 
+  /** The current page URL without launching or changing tabs. */
+  get currentUrl(): string | undefined {
+    return this.current && !this.current.isClosed() ? this.current.url() : undefined
+  }
+
   get started(): boolean {
     return this.current !== undefined
   }

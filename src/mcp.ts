@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline"
 import { z } from "zod"
-import { runAgent } from "./agent"
+import { runAgent, taskIncomplete } from "./agent"
 import type { BrowserSession } from "./browser"
 import type { ModelAdapter } from "./model/types"
 import { type BrowserTool, callTool, type ToolResult, toolSpec } from "./tools"
@@ -71,8 +71,9 @@ export function createMcpServer(options: McpServerOptions) {
       return { text: `browser_task failed: ${error instanceof Error ? error.message : String(error)}`, isError: true }
     }
     return {
-      text: `${result.answer}\n\n[status: ${result.status}, steps: ${result.steps}]`,
-      isError: result.status === "failed",
+      text: `${result.answer || result.error || "No answer returned"}\n\n[status: ${result.status}, steps: ${result.steps}]\n[stop: ${result.stopReason}, outcome: ${result.outcome.status} (unverified), duration: ${result.durationMs}ms, tokens: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out]${result.outcome.unfinished.length ? `\nUnfinished: ${result.outcome.unfinished.join("; ")}` : ""}${result.observedUrls.length ? `\nObserved URLs (not verified citations): ${result.observedUrls.join(", ")}` : ""}`,
+      structuredContent: { ...result },
+      isError: taskIncomplete(result),
     }
   }
 
@@ -86,7 +87,7 @@ export function createMcpServer(options: McpServerOptions) {
     )
     const content: unknown[] = [{ type: "text", text: result.snapshot ? `${result.text}\n\n${result.snapshot}` : result.text }]
     if (result.image) content.push({ type: "image", mimeType: result.image.mimeType, data: result.image.data })
-    return { content, isError: result.isError ?? false }
+    return { content, isError: result.isError ?? false, ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}) }
   }
 
   return {
