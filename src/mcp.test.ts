@@ -131,7 +131,7 @@ it("accepts SDK cancellation over stdio and releases the delegated-task queue", 
   let requests = 0
   const endpoint = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch() {
     if (++requests === 1) { started(); return new Promise<Response>(() => {}) }
-    return Response.json({ choices: [{ message: { content: "next task" } }] })
+    return Response.json({ choices: [{ message: { content: 'next task\n{"outcome":"succeeded","unfinished":[]}' } }] })
   } })
   try {
     const client = await connect("--agent", "--model", "ollama:local", "--api", "openai", "--base-url", `http://127.0.0.1:${endpoint.port}`)

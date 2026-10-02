@@ -162,7 +162,9 @@ bun run test          # launches headless Chromium against a local fixture serve
 `final_answer`, `step_limit`, `tool_failures`, and `model_error`. The model is asked to write the
 user-facing answer first, then a final line containing only
 `{"outcome":"succeeded|partial|blocked","unfinished":["any remaining work"]}`.
-This populates `outcome.status` and its `unfinished` list. Pure JSON replies with `answer`,
+This populates `outcome.status` and its `unfinished` list. When a final answer has no outcome
+line, the agent sends one tool-less follow-up request for it and keeps the original answer.
+Pure JSON replies with `answer`,
 `outcome`, and `unfinished` remain supported; plain text or malformed metadata produces
 `unknown`. Every outcome is explicitly `unverified`.
 There is no independent success judge. `observedUrls` contains the last 20 distinct HTTP(S)

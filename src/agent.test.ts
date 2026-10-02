@@ -64,6 +64,7 @@ describe("runAgent", () => {
     const result = await runAgent({ task: "t", model, browser: session, maxSteps: 1 })
     expect(result).toMatchObject({ status: "max_steps", answer: "best guess", steps: 1 })
     expect(model.requests[1]?.tools).toEqual([])
+    expect(model.requests).toHaveLength(2)
   }, 30_000)
 })
 
@@ -139,3 +140,82 @@ it("retains landing URLs and titles after action and explicit snapshots are omit
   expect(newest).toContain("Page title: Pricing")
   expect(newest).not.toContain("older snapshot omitted")
 }, 30_000)
+
+it("asks once without tools for an outcome and preserves the original answer", async () => {
+  const answer = "The price is $42. https://example.com/pricing"
+  const model = scriptedModel([
+    () => ({ text: answer, toolCalls: [], usage: { inputTokens: 3, outputTokens: 2 } }),
+    (request) => {
+      expect(request.tools).toEqual([])
+      expect(request.messages.at(-2)).toMatchObject({ role: "assistant", text: answer })
+      expect(request.messages.at(-1)).toMatchObject({ role: "user", content: [{ type: "text", text: expect.stringContaining("previous answer") }] })
+      return { text: '{"outcome":"partial","unfinished":["Check shipping"]}', toolCalls: [], usage: { inputTokens: 5, outputTokens: 4 } }
+    },
+  ])
+  const events: AgentEvent[] = []
+  const result = await runAgent({ task: "t", browser: session, model, maxSteps: 1, onEvent: event => events.push(event) })
+  expect(result).toMatchObject({ status: "completed", stopReason: "final_answer", answer, steps: 1, outcome: { status: "partial", unfinished: ["Check shipping"] }, usage: { inputTokens: 8, outputTokens: 6 } })
+  expect(model.requests).toHaveLength(2)
+  expect(events.filter(event => event.type === "model").map(event => event.step)).toEqual([1, 1])
+  expect(events.filter(event => event.type === "step")).toHaveLength(1)
+})
+
+it("does not ask again when an outcome is already recognized", async () => {
+  const model = scriptedModel([() => ({ text: 'Done\n{"outcome":"succeeded","unfinished":[]}', toolCalls: [] })])
+  const result = await runAgent({ task: "t", browser: session, model })
+  expect(result.outcome.status).toBe("succeeded")
+  expect(model.requests).toHaveLength(1)
+})
+
+it("keeps the answer after failed, empty, or unrecognized follow-ups without retrying", async () => {
+  for (const text of [undefined, "Still done", "", '{"outcome":"invalid","unfinished":[]}']) {
+    const model = scriptedModel([
+      () => ({ text: "Original answer", toolCalls: [] }),
+      () => { if (text === undefined) throw new Error("HTTP 503"); return { text, toolCalls: [] } },
+    ])
+    const result = await runAgent({ task: "t", browser: session, model })
+    expect(result).toMatchObject({ status: "completed", stopReason: "final_answer", answer: "Original answer", outcome: { status: "unknown", unfinished: [] } })
+    expect(result.error).toBeUndefined()
+    expect(model.requests).toHaveLength(2)
+  }
+})
+
+it("takes only outcome fields even when the follow-up rewrites the answer", async () => {
+  const model = scriptedModel([
+    () => ({ text: "Original answer", toolCalls: [] }),
+    () => ({ text: '{"answer":"","outcome":"blocked","unfinished":["Read price"]}', toolCalls: [] }),
+  ])
+  const result = await runAgent({ task: "t", browser: session, model })
+  expect(result).toMatchObject({ answer: "Original answer", outcome: { status: "blocked", unfinished: ["Read price"] } })
+})
+
+it("bounds the follow-up by the task deadline and cancellation while retaining the answer", async () => {
+  for (const cancel of [false, true]) {
+    const controller = new AbortController()
+    let followUpSignal: AbortSignal | undefined
+    const model = scriptedModel([
+      () => ({ text: "Original answer", toolCalls: [] }),
+      request => {
+        followUpSignal = request.signal
+        if (cancel) controller.abort(new Error("Cancelled"))
+        // Simulate an adapter that ignores abort; runAgent must stop waiting.
+        return new Promise(() => {})
+      },
+    ])
+    const result = await runAgent({ task: "t", browser: session, model, signal: controller.signal, timeoutMs: cancel ? 1000 : 30 })
+    expect(followUpSignal?.aborted).toBe(true)
+    expect(result).toMatchObject({ status: "completed", answer: "Original answer", steps: 1, outcome: { status: "unknown" } })
+    expect(model.requests).toHaveLength(2)
+  }
+})
+
+it("does not request an outcome after a model error or pre-existing cancellation", async () => {
+  for (const cancel of [false, true]) {
+    const controller = new AbortController()
+    if (cancel) controller.abort()
+    const model = scriptedModel([() => { throw new Error("HTTP 503") }])
+    const result = await runAgent({ task: "t", browser: session, model, signal: controller.signal })
+    expect(result.stopReason).toBe(cancel ? "cancelled" : "model_error")
+    expect(model.requests).toHaveLength(cancel ? 0 : 1)
+  }
+})

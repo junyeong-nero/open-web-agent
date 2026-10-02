@@ -2,7 +2,7 @@ import type { Message, ModelAdapter, ModelRequest, ModelResponse } from "../mode
 
 /** A fake model that replies from a script; each step sees the requests it was sent so far. */
 export function scriptedModel(
-  script: Array<(request: ModelRequest) => ModelResponse>,
+  script: Array<(request: ModelRequest) => ModelResponse | Promise<ModelResponse>>,
 ): ModelAdapter & { requests: ModelRequest[] } {
   const requests: ModelRequest[] = []
   return {
