@@ -105,6 +105,11 @@ owa run "..." --model-module ./my-model.ts
 
 The agent keeps only the newest snapshot and screenshot in its context. It stops after repeated failed steps, and when it runs out of steps it makes one last call to get a best-effort answer.
 
+If a browser action completes but its follow-up snapshot fails, the tool preserves the action's
+success and reports that the current page state is unavailable. Call `browser_snapshot` for fresh
+refs before taking another action; repeating a click or submission could duplicate its effects.
+Action completion describes the browser operation, not verification that the website accepted it.
+
 ## Options
 
 ```
