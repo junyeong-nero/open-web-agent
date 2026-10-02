@@ -51,7 +51,7 @@ export function openaiChat(options: OpenAIChatOptions): ModelAdapter {
         }
         throw error
       })) as {
-        choices?: Array<{ message?: { content?: string | null; tool_calls?: OpenAIToolCall[] } }>
+        choices?: Array<{ message?: { content?: string | null; tool_calls?: OpenAIToolCall[] }; finish_reason?: string }>
         usage?: { prompt_tokens?: number; completion_tokens?: number }
       }
       const message = json.choices?.[0]?.message
@@ -59,6 +59,7 @@ export function openaiChat(options: OpenAIChatOptions): ModelAdapter {
 
       return {
         text: message.content ?? undefined,
+        finishReason: json.choices?.[0]?.finish_reason,
         toolCalls: (message.tool_calls ?? []).map((call) => ({
           id: call.id,
           name: call.function.name,

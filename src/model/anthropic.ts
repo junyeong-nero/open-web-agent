@@ -49,6 +49,7 @@ export function anthropicMessages(options: AnthropicMessagesOptions): ModelAdapt
 
       const json = (await postJson(fetchImpl, name, `${baseUrl}/messages`, headers, body, request.signal)) as {
         content?: Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown }>
+        stop_reason?: string
         usage?: { input_tokens?: number; output_tokens?: number }
       }
       const blocks = json.content ?? []
@@ -59,6 +60,7 @@ export function anthropicMessages(options: AnthropicMessagesOptions): ModelAdapt
 
       return {
         text: text || undefined,
+        finishReason: json.stop_reason,
         toolCalls: blocks
           .filter((block) => block.type === "tool_use")
           .map((block) => ({ id: block.id ?? "", name: block.name ?? "", arguments: parseToolArguments(block.input) })),

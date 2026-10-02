@@ -29,6 +29,8 @@ export interface ModelRequest {
 export interface ModelResponse {
   text?: string
   toolCalls: ToolCall[]
+  /** Provider-reported termination reason, retained for response diagnostics. */
+  finishReason?: string
   usage?: { inputTokens?: number; outputTokens?: number }
 }
 

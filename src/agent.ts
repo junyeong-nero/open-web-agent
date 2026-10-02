@@ -98,10 +98,13 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       tools: withTools ? specs : [],
       signal,
     }), signal)
-    if (response.text) partialAnswer = response.text
     usage.inputTokens += response.usage?.inputTokens ?? 0
     usage.outputTokens += response.usage?.outputTokens ?? 0
     emit({ type: "model", step, text: response.text, toolCalls: response.toolCalls, usage: response.usage })
+    if (response.toolCalls.length === 0 && !parseFinalAnswer(response.text ?? "").answer.trim()) {
+      throw new Error(`Model returned no answer or tool calls${response.finishReason ? ` (finish reason: ${response.finishReason})` : ""}`)
+    }
+    if (response.text?.trim()) partialAnswer = response.text
     entries.push({ role: "assistant", text: response.text, toolCalls: response.toolCalls })
     return response
   }
