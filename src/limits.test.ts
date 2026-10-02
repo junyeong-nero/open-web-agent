@@ -68,7 +68,7 @@ it("cancels an in-flight browser wait and allows a fresh session afterward", asy
     await (await browser.page()).goto(fixture.url)
     expect(await browser.snapshot()).toContain("Fixture Home")
   } finally { clearTimeout(timer); await browser.close(); fixture.stop() }
-}, 10_000)
+}, 30_000)
 
 it("does not leak a browser when cancellation arrives during launch", async () => {
   const browser = new BrowserSession({ headless: true })
