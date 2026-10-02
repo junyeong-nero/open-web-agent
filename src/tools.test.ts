@@ -29,7 +29,7 @@ describe("browser tools", () => {
     const { snapshot = "" } = await call("browser_snapshot")
     await call("browser_type", { ref: refFor(snapshot, /textbox "Search"/), text: "shoes" })
     const clicked = await call("browser_click", { ref: refFor(snapshot, /button "Search"/), element: "Search button" })
-    expect(clicked.text).toBe("Clicked Search button")
+    expect(clicked.text).toBe(`Clicked Search button\nLanding URL: ${fixture.url}/ | Title: Fixture Home`)
     expect(clicked.snapshot).toContain("Searched shoes")
 
     const selected = await call("browser_select_option", { ref: refFor(snapshot, /combobox "Plan"/), values: ["pro"] })
@@ -119,3 +119,24 @@ it("does not reuse closed tab IDs after a browser session restarts", async () =>
     await expect(browser.selectTab(oldId)).rejects.toThrow("Unknown or closed tab")
   } finally { await browser.close() }
 }, 10_000)
+
+it("bounds landing metadata to one line without changing the snapshot", async () => {
+  const observed = new BrowserSession()
+  const snapshot = `Page URL: https://example.test/sorry?${"x".repeat(400)}\nPage title: Just a moment...\n${"y".repeat(200)}\nPage tab: t1\nSnapshot:\n- heading "Check"`
+  observed.snapshot = async () => snapshot
+  const result = await callTool(tools, observed, "browser_snapshot", {})
+  expect(result.snapshot).toBe(snapshot)
+  const lines = result.text.split("\n")
+  expect(lines).toHaveLength(2)
+  expect(lines[1]).toBe(`Landing URL: ${("https://example.test/sorry?" + "x".repeat(400)).slice(0, 159)}… | Title: ${("Just a moment... " + "y".repeat(200)).slice(0, 119)}…`)
+
+  observed.snapshot = async () => "Page URL: about:blank\nPage title: \nPage tab: t1\nSnapshot:\n"
+  expect((await callTool(tools, observed, "browser_snapshot", {})).text).toBe("Captured page snapshot\nLanding URL: about:blank | Title: ")
+
+  observed.selectTab = async () => {}
+  observed.snapshot = async () => { throw new Error("Observation failed") }
+  const failed = await callTool(tools, observed, "browser_select_tab", { tabId: "t1" })
+  expect(failed.isError).toBeUndefined()
+  expect(failed.text).toContain("follow-up snapshot failed")
+  expect(failed.text).not.toContain("Landing URL:")
+})

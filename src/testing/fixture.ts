@@ -8,6 +8,7 @@ const PAGES: Record<string, string> = {
     <a href="/pricing">Pricing</a>
     <a href="/pricing" target="_blank">Pricing in new tab</a>
   </body></html>`,
+  "/sorry": `<!doctype html><title>Just a moment...</title><h1>Check you are human</h1>`,
   "/async": `<!doctype html><html><head><title>Async lookup</title></head><body>
     <h1>Async lookup</h1><button onclick="document.querySelector('#result').textContent='Loading'; setTimeout(() => document.querySelector('#result').textContent='READY-314', 1500)">Start lookup</button>
     <p id="result">Not started</p></body></html>`,
@@ -21,7 +22,9 @@ export function startFixtureServer(): { url: string; stop(): void } {
     hostname: "127.0.0.1",
     port: 0,
     fetch(request) {
-      const html = PAGES[new URL(request.url).pathname]
+      const url = new URL(request.url)
+      if (url.pathname === "/redirect") return Response.redirect(new URL("/sorry?token=" + "x".repeat(400), url).href)
+      const html = PAGES[url.pathname]
       return html
         ? new Response(html, { headers: { "content-type": "text/html" } })
         : new Response("not found", { status: 404 })
