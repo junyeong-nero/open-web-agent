@@ -1,5 +1,5 @@
 import { z } from "zod"
-import type { Page } from "playwright"
+import { errors, type Page } from "playwright"
 import type { BrowserSession } from "./browser"
 import type { ContentPart, ToolSpec } from "./model/types"
 
@@ -54,6 +54,26 @@ async function act(session: BrowserSession, summary: string, action: (page: Page
   return snapshotAfterAction(session, summary)
 }
 
+/** A committed document is usable even when its response body is still loading. */
+async function navigate(session: BrowserSession, summary: string, action: (page: Page) => Promise<unknown>): Promise<ToolResult> {
+  const page = await session.page()
+  const timeout = session.options.actionTimeoutMs ?? 10_000
+  const started = performance.now()
+  // Connection failures and timeouts before commit must remain action failures.
+  const response = await action(page)
+  if (response) {
+    try {
+      await page.waitForLoadState("domcontentloaded", {
+        timeout: timeout === 0 ? 0 : Math.max(1, timeout - (performance.now() - started)),
+      })
+    } catch (error) {
+      if (!(error instanceof errors.TimeoutError)) throw error
+      summary += "\nThe page may still be loading."
+    }
+  }
+  return snapshotAfterAction(session, summary)
+}
+
 /** Retain a compact record of the observed landing page when the snapshot is superseded. */
 function snapshotResult(summary: string, snapshot: string): ToolResult {
   const headers = /^Page URL: ([^\n]*)\nPage title: ([\s\S]*?)\nPage tab:/.exec(snapshot)
@@ -101,13 +121,13 @@ export const TOOLS: BrowserTool[] = [
     description: "Open a URL in the current tab.",
     schema: z.object({ url: z.string().describe("Absolute URL, e.g. https://example.com") }),
     run: (session, { url }) =>
-      act(session, `Navigated to ${url}`, (page) => page.goto(url, { waitUntil: "domcontentloaded" })),
+      navigate(session, `Navigated to ${url}`, (page) => page.goto(url, { waitUntil: "commit" })),
   }),
   tool({
     name: "browser_go_back",
     description: "Go back to the previous page in history.",
     schema: z.object({}),
-    run: (session) => act(session, "Went back", (page) => page.goBack({ waitUntil: "domcontentloaded" })),
+    run: (session) => navigate(session, "Went back", (page) => page.goBack({ waitUntil: "commit" })),
   }),
   tool({
     name: "browser_snapshot",
