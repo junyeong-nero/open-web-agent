@@ -166,13 +166,23 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
 }
 
 function parseFinalAnswer(text: string): Pick<AgentResult, "answer" | "outcome"> {
-  try {
-    const parsed = JSON.parse(text)
-    if (parsed && typeof parsed.answer === "string" && ["succeeded", "partial", "blocked"].includes(parsed.outcome)
-      && Array.isArray(parsed.unfinished) && parsed.unfinished.every((item: unknown) => typeof item === "string")) {
-      return { answer: parsed.answer, outcome: { status: parsed.outcome, verification: "unverified", unfinished: parsed.unfinished } }
-    }
-  } catch { /* Legacy/plain-text models still work; do not infer success from prose. */ }
+  const fenced = /```json\s*(\{[\s\S]*\})\s*```\s*$/.exec(text)
+  const body = fenced ? fenced[1]! : text.trimEnd()
+  const prefix = fenced ? text.slice(0, fenced.index).trim() : ""
+  // Try only objects ending at the end of the reply, never JSON followed by prose.
+  for (let start = 0; start >= 0 && start < body.length; start = body.indexOf("{", start + 1)) {
+    try {
+      const parsed = JSON.parse(body.slice(start))
+      const prose = fenced ? prefix : body.slice(0, start).trim()
+      const answer = parsed?.answer === undefined && prose ? prose : parsed?.answer
+      if (parsed && typeof answer === "string" && ["succeeded", "partial", "blocked"].includes(parsed.outcome)
+        && Array.isArray(parsed.unfinished) && parsed.unfinished.every((item: unknown) => typeof item === "string")) {
+        return { answer, outcome: { status: parsed.outcome, verification: "unverified", unfinished: parsed.unfinished } }
+      }
+      break
+    } catch { /* Legacy/plain-text models still work; do not infer success from prose. */ }
+    if (fenced) break
+  }
   return { answer: text, outcome: { status: "unknown", verification: "unverified", unfinished: [] } }
 }
 
