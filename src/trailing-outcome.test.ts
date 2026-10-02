@@ -14,7 +14,7 @@ const examples = [
 
 for (const { answer, outcome, unfinished } of examples) {
   const metadata = JSON.stringify({ outcome, unfinished })
-  for (const suffix of [metadata, `\n\`\`\`json\n${metadata}\n\`\`\`\n`]) {
+  for (const suffix of [metadata, `\n${metadata}`, `\n\`\`\`json\n${metadata}\n\`\`\`\n`]) {
     it(`parses trailing ${outcome} metadata: ${suffix}`, async () => {
       const result = await runAgent({ task: "t", browser: new BrowserSession(), model: scriptedModel([
         () => ({ text: `${answer} ${suffix}`, toolCalls: [] }),

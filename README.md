@@ -152,9 +152,12 @@ bun run test          # launches headless Chromium against a local fixture serve
 (and `error` for a failed model request). MCP still returns readable text beginning with the answer.
 
 `status: completed` only means the model produced a final answer. `stopReason` distinguishes
-`final_answer`, `step_limit`, `tool_failures`, and `model_error`. The model reports an
-`outcome.status` of `succeeded`, `partial`, or `blocked`, with an `unfinished` list; legacy plain
-text or malformed final JSON produces `unknown`. Every outcome is explicitly `unverified`.
+`final_answer`, `step_limit`, `tool_failures`, and `model_error`. The model is asked to write the
+user-facing answer first, then a final line containing only
+`{"outcome":"succeeded|partial|blocked","unfinished":["any remaining work"]}`.
+This populates `outcome.status` and its `unfinished` list. Pure JSON replies with `answer`,
+`outcome`, and `unfinished` remain supported; plain text or malformed metadata produces
+`unknown`. Every outcome is explicitly `unverified`.
 There is no independent success judge. `observedUrls` contains the last 20 distinct HTTP(S)
 URLs the browser actually visited during the task, not verified citations supporting the answer.
 
