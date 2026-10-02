@@ -1,4 +1,9 @@
 const PAGES: Record<string, string> = {
+  "/slow-render": `<!doctype html><title>Slow renderer</title><script>
+    // Simulate a renderer blocked during its first text render, independently of network speed.
+    const started = performance.now();
+    while (performance.now() - started < 2500) {}
+  </script><h1>Renderer ready</h1>`,
   "/": `<!doctype html><html><head><title>Fixture Home</title></head><body>
     <h1>Fixture Home</h1>
     <label>Search <input id="q" /></label>

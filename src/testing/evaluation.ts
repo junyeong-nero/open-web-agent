@@ -85,7 +85,7 @@ export interface EvaluationRun {
 
 /** Separate from unit tests: callers explicitly supply the live or scripted model. */
 export async function evaluateCase(testCase: EvaluationCase, model: ModelAdapter, baseUrl: string, maxSteps = 15): Promise<EvaluationRun> {
-  const browser = new BrowserSession({ headless: true, actionTimeoutMs: 1_000 })
+  const browser = new BrowserSession({ headless: true, actionTimeoutMs: 5_000 })
   const startedAt = performance.now()
   const events: AgentEvent[] = []
   const report: EvaluationRun = { caseId: testCase.id, passed: false, checks: {}, durationMs: 0, toolCalls: 0, toolErrors: 0 }

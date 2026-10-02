@@ -4,6 +4,28 @@ import { evaluateCase, EVALUATION_CASES, summarize } from "./evaluation"
 import { refFor, startFixtureServer } from "./fixture"
 import { lastToolText, scriptedModel } from "./scripted-model"
 
+it("evaluates a page when renderer startup exceeds one second", async () => {
+  const fixture = startFixtureServer()
+  try {
+    const run = await evaluateCase({
+      id: "slow-render",
+      task: url => `Open ${url}/slow-render and report the heading.`,
+      async verify({ browser, result }) {
+        return { heading: await (await browser.page()).locator("h1").innerText() === "Renderer ready", answer: result.answer === "Renderer ready" }
+      },
+    }, scriptedModel([
+      () => ({ toolCalls: [{ id: "1", name: "browser_navigate", arguments: { url: `${fixture.url}/slow-render` } }] }),
+      req => {
+        refFor(lastToolText(req.messages), /heading "Renderer ready"/)
+        return { text: "Renderer ready", toolCalls: [] }
+      },
+    ]), fixture.url)
+    expect(run.passed).toBe(true)
+    expect(run.toolCalls).toBe(1)
+    expect(run.toolErrors).toBe(0)
+  } finally { fixture.stop() }
+}, 30_000)
+
 it("scores observed browser state and the answer rather than a success claim", async () => {
   const fixture = startFixtureServer()
   try {
@@ -81,4 +103,4 @@ it("passes the tab-return evaluation only after selecting the preserved original
     expect(Object.values(run.checks).every(Boolean)).toBe(true)
     expect(run.toolErrors).toBe(0)
   } finally { fixture.stop() }
-}, 10_000)
+}, 30_000)
