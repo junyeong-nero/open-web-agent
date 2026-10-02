@@ -18,11 +18,31 @@ const PAGES: Record<string, string> = {
 }
 
 export function startFixtureServer(): { url: string; stop(): void } {
+  const timers = new Set<ReturnType<typeof setTimeout>>()
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch(request) {
       const url = new URL(request.url)
+      if (url.pathname === "/slow-body") {
+        let timer: ReturnType<typeof setTimeout>
+        const body = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('<!doctype html><title>Slow page</title><h1>Usable content</h1>'))
+            timer = setTimeout(() => {
+              timers.delete(timer)
+              controller.enqueue(new TextEncoder().encode('<p>Finished loading</p>'))
+              controller.close()
+            }, 5_000)
+            timers.add(timer)
+          },
+          cancel() {
+            clearTimeout(timer)
+            timers.delete(timer)
+          },
+        })
+        return new Response(body, { headers: { "content-type": "text/html", "cache-control": "no-store" } })
+      }
       if (url.pathname === "/redirect") return Response.redirect(new URL("/sorry?token=" + "x".repeat(400), url).href)
       const html = PAGES[url.pathname]
       return html
@@ -30,7 +50,10 @@ export function startFixtureServer(): { url: string; stop(): void } {
         : new Response("not found", { status: 404 })
     },
   })
-  return { url: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) }
+  return { url: `http://127.0.0.1:${server.port}`, stop: () => {
+    for (const timer of timers) clearTimeout(timer)
+    server.stop(true)
+  } }
 }
 
 export function refFor(snapshot: string, pattern: RegExp): string {
