@@ -91,7 +91,7 @@ it("handles MCP cancellation outside the queue, including queued tasks, and reco
     name: "cancel-test", async complete(request) {
       requests++
       if (requests === 1) { firstSignal = request.signal; started(); return new Promise(() => {}) }
-      return { text: "next task", toolCalls: [] }
+      return { text: 'next task\n{"outcome":"succeeded","unfinished":[]}', toolCalls: [] }
     },
   } })
   const call = (id: number) => server.handle({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "browser_task", arguments: { task: "t" } } })

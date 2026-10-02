@@ -88,13 +88,14 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   let repeatedSteps = 0
   let partialAnswer = ""
 
-  const finish = (status: AgentResult["status"], stopReason: AgentResult["stopReason"], text: string, error?: string): AgentResult => {
+  const finish = (status: AgentResult["status"], stopReason: AgentResult["stopReason"], text: string, error?: string, outcome?: AgentResult["outcome"]): AgentResult => {
     const final = parseFinalAnswer(text)
+    if (outcome) final.outcome = outcome
     const result: AgentResult = { status, stopReason, ...final, observedUrls: [...observedUrls], durationMs: Math.round(performance.now() - startedAt), steps: step, usage, ...(error ? { error } : {}) }
     emit({ type: "done", result })
     return result
   }
-  const ask = async (withTools: boolean) => {
+  const ask = async (withTools: boolean, outcomeOnly = false) => {
     const response = await interruptible(() => options.model.complete({
       system,
       messages: render(entries),
@@ -104,10 +105,10 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     usage.inputTokens += response.usage?.inputTokens ?? 0
     usage.outputTokens += response.usage?.outputTokens ?? 0
     emit({ type: "model", step, text: response.text, toolCalls: response.toolCalls, usage: response.usage })
-    if (response.toolCalls.length === 0 && !parseFinalAnswer(response.text ?? "").answer.trim()) {
+    if (!outcomeOnly && response.toolCalls.length === 0 && !parseFinalAnswer(response.text ?? "").answer.trim()) {
       throw new Error(`Model returned no answer or tool calls${response.finishReason ? ` (finish reason: ${response.finishReason})` : ""}`)
     }
-    if (response.text?.trim()) partialAnswer = response.text
+    if (!outcomeOnly && response.text?.trim()) partialAnswer = response.text
     entries.push({ role: "assistant", text: response.text, toolCalls: response.toolCalls })
     return response
   }
@@ -122,7 +123,22 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       emit({ type: "step", step })
 
       const response = await ask(true)
-      if (response.toolCalls.length === 0) return finish("completed", "final_answer", response.text?.trim() ?? "")
+      if (response.toolCalls.length === 0) {
+        const answer = response.text?.trim() ?? ""
+        let { outcome } = parseFinalAnswer(answer)
+        signal.throwIfAborted()
+        if (outcome.status === "unknown") {
+          entries.push({
+            role: "user",
+            content: [{ type: "text", text: 'For your previous answer, reply only with the final outcome line: {"outcome":"succeeded|partial|blocked","unfinished":["any remaining work"]}.' }],
+          })
+          try {
+            const followUp = await ask(false, true)
+            if (followUp.toolCalls.length === 0) outcome = parseFinalAnswer(`${answer}\n${followUp.text ?? ""}`).outcome
+          } catch { /* Keep the original answer if the optional outcome request fails. */ }
+        }
+        return finish("completed", "final_answer", answer, undefined, outcome)
+      }
 
       let failed = 0
       const state = createHash("sha256")
