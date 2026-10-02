@@ -9,12 +9,13 @@ import { VERSION } from "./version"
 
 const SUPPORTED_PROTOCOLS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
 
-interface JsonRpcRequest {
-  jsonrpc: "2.0"
-  id?: string | number | null
-  method: string
-  params?: Record<string, unknown>
-}
+const JsonRpcRequestSchema = z.object({
+  jsonrpc: z.literal("2.0"),
+  id: z.union([z.string(), z.number(), z.null()]).optional(),
+  method: z.string(),
+  params: z.record(z.string(), z.unknown()).optional(),
+})
+type JsonRpcRequest = z.infer<typeof JsonRpcRequestSchema>
 
 export interface McpServerOptions {
   session: BrowserSession
@@ -104,7 +105,10 @@ export function createMcpServer(options: McpServerOptions) {
 
   return {
     /** Handle one JSON-RPC message; returns the response, or undefined for notifications. */
-    async handle(message: JsonRpcRequest): Promise<Record<string, unknown> | undefined> {
+    async handle(input: unknown): Promise<Record<string, unknown> | undefined> {
+      const parsed = JsonRpcRequestSchema.safeParse(input)
+      if (!parsed.success) return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } }
+      const message = parsed.data
       const isNotification = message.id === undefined
       if (isNotification && message.method === "notifications/cancelled") {
         const id = message.params?.requestId
@@ -175,11 +179,14 @@ export async function serveStdio(
       write({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } })
       continue
     }
-    const work = server.handle(message).then((response) => {
+    const work = server.handle(message).catch(() => ({
+      jsonrpc: "2.0", id: null, error: { code: -32603, message: "Internal error" },
+    })).then((response) => {
       if (response) write(response)
     })
     pending.add(work)
-    void work.finally(() => pending.delete(work))
+    // Handle both paths; finally() would create another unhandled rejected promise.
+    void work.then(() => pending.delete(work), () => pending.delete(work))
   }
   await Promise.all(pending)
 }
