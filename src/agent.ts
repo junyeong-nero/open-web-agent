@@ -166,6 +166,8 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
 }
 
 function parseFinalAnswer(text: string): Pick<AgentResult, "answer" | "outcome"> {
+  // OpenAI models can emit citations as private-use markers: U+E200 "cite" U+E202 ref U+E201.
+  const cleanAnswer = (answer: string) => answer.replace(/\ue200[\s\S]*?\ue201|[\ue200-\ue202]/g, "").trimEnd()
   const fenced = /```json\s*(\{[\s\S]*\})\s*```\s*$/.exec(text)
   const body = fenced ? fenced[1]! : text.trimEnd()
   const prefix = fenced ? text.slice(0, fenced.index).trim() : ""
@@ -177,13 +179,13 @@ function parseFinalAnswer(text: string): Pick<AgentResult, "answer" | "outcome">
       const answer = parsed?.answer === undefined && prose ? prose : parsed?.answer
       if (parsed && typeof answer === "string" && ["succeeded", "partial", "blocked"].includes(parsed.outcome)
         && Array.isArray(parsed.unfinished) && parsed.unfinished.every((item: unknown) => typeof item === "string")) {
-        return { answer, outcome: { status: parsed.outcome, verification: "unverified", unfinished: parsed.unfinished } }
+        return { answer: cleanAnswer(answer), outcome: { status: parsed.outcome, verification: "unverified", unfinished: parsed.unfinished } }
       }
       break
     } catch { /* Legacy/plain-text models still work; do not infer success from prose. */ }
     if (fenced) break
   }
-  return { answer: text, outcome: { status: "unknown", verification: "unverified", unfinished: [] } }
+  return { answer: cleanAnswer(text), outcome: { status: "unknown", verification: "unverified", unfinished: [] } }
 }
 
 /** A finished model response is not proof that the task succeeded. */

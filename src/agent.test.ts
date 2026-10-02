@@ -85,6 +85,28 @@ it("does not infer success from plain text or malformed structured answers", asy
   }
 })
 
+it("strips citation sequences and orphan delimiters from plain and JSON final answers", async () => {
+  const cases = [
+    ["… 오피넷의 시도별 평균 기준입니다. \ue200cite\ue202turn0browser_snapshot\ue201", "… 오피넷의 시도별 평균 기준입니다."],
+    ["… (5경기 기준) \ue200cite\ue202turn0search0\ue201", "… (5경기 기준)"],
+    ["한글🙂\ue200cite\ue202first\ue201 and \ue200cite\ue202second\nref\ue201text \n", "한글🙂 and text"],
+    ["한\ue201글\ue202🙂\ue200 trailing \t", "한글🙂 trailing"],
+    ["일반 text 🙂 발음은 /ˌserənˈdɪpəti/입니다. Уmore \ue203", "일반 text 🙂 발음은 /ˌserənˈdɪpəti/입니다. Уmore \ue203"],
+  ] as const
+  for (const [answer, expected] of cases) {
+    for (const structured of [false, true]) {
+      // Escaped JSON also exercises cleanup after decoding the answer.
+      const text = structured
+        ? JSON.stringify({ answer, outcome: "succeeded", unfinished: [] }).replace(/[\ue200-\ue202]/g, (char) => `\\u${char.charCodeAt(0).toString(16)}`)
+        : answer
+      const result = await runAgent({ task: "t", browser: session, model: scriptedModel([() => ({ text, toolCalls: [] })]) })
+      expect(result.answer).toBe(expected)
+      expect(result.status).toBe("completed")
+      expect(result.outcome.status).toBe(structured ? "succeeded" : "unknown")
+    }
+  }
+})
+
 it("preserves execution metadata when the model request fails", async () => {
   const result = await runAgent({ task: "t", browser: session, model: scriptedModel([() => { throw new Error("HTTP 503") }]) })
   expect(result).toMatchObject({ status: "failed", stopReason: "model_error", error: "HTTP 503", outcome: { status: "unknown" } })
