@@ -1,16 +1,17 @@
-import { afterAll, describe, expect, it } from "bun:test"
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { runAgent, type AgentEvent } from "./agent"
 import { BrowserSession } from "./browser"
 import { refFor, startFixtureServer } from "./testing/fixture"
 import { lastToolText, scriptedModel } from "./testing/scripted-model"
 
 const fixture = startFixtureServer()
-const session = new BrowserSession({ headless: true })
+let session: BrowserSession
 
-afterAll(async () => {
-  await session.close()
-  fixture.stop()
+beforeEach(() => {
+  session = new BrowserSession({ headless: true })
 })
+afterEach(async () => { await session.close() })
+afterAll(() => { fixture.stop() })
 
 describe("runAgent", () => {
   it("drives the browser with tool calls and returns the final text", async () => {
@@ -38,14 +39,15 @@ describe("runAgent", () => {
     const texts = lastRequest.flatMap((message) => (message.role === "tool" ? message.content.map((part) => (part.type === "text" ? part.text : "")) : []))
     expect(texts.filter((text) => text.startsWith("Page URL:"))).toHaveLength(1)
     expect(texts.filter((text) => text.includes("older snapshot omitted"))).toHaveLength(1)
-  })
+  }, 30_000)
 
   it("includes the current page when the browser is already open", async () => {
+    await (await session.page()).goto(`${fixture.url}/pricing`)
     const model = scriptedModel([() => ({ text: "ok", toolCalls: [] })])
     await runAgent({ task: "t", model, browser: session })
     const first = model.requests[0]?.messages[0]
     expect(first?.role === "user" && first.content[0]?.type === "text" && first.content[0].text).toContain("Page title: Pricing")
-  })
+  }, 30_000)
 
   it("stops after repeated failing steps", async () => {
     const failing = () => ({ toolCalls: [{ id: "x", name: "browser_click", arguments: { ref: "nope" } }] })
@@ -62,17 +64,18 @@ describe("runAgent", () => {
     const result = await runAgent({ task: "t", model, browser: session, maxSteps: 1 })
     expect(result).toMatchObject({ status: "max_steps", answer: "best guess", steps: 1 })
     expect(model.requests[1]?.tools).toEqual([])
-  })
+  }, 30_000)
 })
 
 it("separates model-reported outcomes from execution and observed URLs", async () => {
+  await (await session.page()).goto(`${fixture.url}/pricing`)
   const result = await runAgent({ task: "Read price", browser: session, model: scriptedModel([
     () => ({ text: JSON.stringify({ answer: "Cannot access the price", outcome: "blocked", unfinished: ["Read price"], sources: ["https://invented.invalid"] }), toolCalls: [] }),
   ]) })
   expect(result).toMatchObject({ status: "completed", stopReason: "final_answer", outcome: { status: "blocked", verification: "unverified", unfinished: ["Read price"] } })
   expect(result.observedUrls).toEqual([`${fixture.url}/pricing`])
   expect(result.durationMs).toBeGreaterThanOrEqual(0)
-})
+}, 30_000)
 
 it("does not infer success from plain text or malformed structured answers", async () => {
   for (const answer of ["Done", '{"answer":"Done","outcome":"succeeded"}']) {
