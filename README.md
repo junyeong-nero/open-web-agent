@@ -114,6 +114,7 @@ Action completion describes the browser operation, not verification that the web
 
 ```
 --headless                   OWA_HEADLESS=1
+--locale <tag>               OWA_LOCALE, BCP 47 tag such as ko-KR
 --browser chromium|firefox|webkit
 --cdp http://127.0.0.1:9222  attach to your running Chrome instead of launching one
 --user-data-dir <dir>        persistent profile (logins survive restarts)
@@ -123,6 +124,12 @@ Action completion describes the browser operation, not verification that the web
 --trace run.jsonl            append agent events as JSONL
 --json                       (run) print the full result as JSON
 ```
+
+Locale applies to both `run` and `mcp`; `--locale` overrides `OWA_LOCALE`.
+It sets the browser language and Accept-Language header for new and persistent contexts.
+Omitting it preserves the current browser defaults. With `--cdp`, an existing context
+keeps its locale. Library callers can set `BrowserOptions.locale`, for example
+`new BrowserSession({ headless: true, locale: "ko-KR" })`.
 
 ## Library
 
