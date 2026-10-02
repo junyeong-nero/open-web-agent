@@ -43,7 +43,10 @@ export class BrowserSession {
   async page(): Promise<Page> {
     if (this.interrupted) throw new Error("Browser operation cancelled")
     if (this.current && !this.current.isClosed()) return this.current
-    this.opening ??= this.open().finally(() => {
+    this.opening ??= (this.context ? this.context.newPage().then((page) => {
+      this.follow(page)
+      return page
+    }) : this.open()).finally(() => {
       this.opening = undefined
     })
     return this.opening
@@ -111,6 +114,11 @@ export class BrowserSession {
   private async open(): Promise<Page> {
     const context = await this.openContext()
     this.context = context
+    context.on("close", () => {
+      if (this.context !== context) return
+      this.context = this.current = undefined
+      this.tabIds.clear()
+    })
     context.on("page", (page) => this.follow(page))
     for (const page of context.pages()) this.track(page)
     const page = context.pages()[0] ?? (await context.newPage())
@@ -140,6 +148,13 @@ export class BrowserSession {
   private async openContext(): Promise<BrowserContext> {
     const { options } = this
     const viewport = options.viewport ?? { width: 1280, height: 800 }
+
+    // A context can close while its owned browser stays alive. Reuse that connection too.
+    if (this.browser?.isConnected()) {
+      return this.options.cdpUrl
+        ? this.browser.contexts()[0] ?? this.browser.newContext({ viewport })
+        : this.browser.newContext({ viewport })
+    }
 
     if (options.cdpUrl) {
       this.browser = await chromium.connectOverCDP(options.cdpUrl)
