@@ -13,6 +13,17 @@ const PAGES: Record<string, string> = {
     <a href="/pricing">Pricing</a>
     <a href="/pricing" target="_blank">Pricing in new tab</a>
   </body></html>`,
+  "/products": `<!doctype html><html><head><title>Airwrap listings</title></head><body>
+    <h1>Dyson Airwrap listings</h1>
+    <label>Sort by <select onchange="const list = document.querySelector('#products'); [...list.children].sort((a, b) => this.value === 'price' ? Number(a.dataset.price) - Number(b.dataset.price) : Number(a.dataset.rank) - Number(b.dataset.rank)).forEach(item => list.append(item))">
+      <option value="recommended">Recommended</option><option value="price">Price: low to high</option>
+    </select></label>
+    <ol id="products">${Array.from({ length: 30 }, (_, index) => {
+      const name = index === 0 ? "Dyson Airwrap Origin+" : index === 22 ? "Dyson Airwrap Origin Multi Styler and Dryer" : `Dyson Airwrap Complete Set ${index + 1}`
+      const price = index === 0 ? 391320 : index === 22 ? 389430 : 415000 + index * 1730
+      return `<li data-price="${price}" data-rank="${index}"><h2>${name}</h2>${index === 0 ? "<strong>Featured bestseller — recommended pick</strong>" : ""}<p>Price: ${price.toLocaleString("en-US")} KRW</p><p>New product, in stock. Includes styling attachments. Delivery included; no membership or coupon required.</p></li>`
+    }).join("")}</ol>
+  </body></html>`,
   "/sorry": `<!doctype html><title>Just a moment...</title><h1>Check you are human</h1>`,
   "/async": `<!doctype html><html><head><title>Async lookup</title></head><body>
     <h1>Async lookup</h1><button onclick="document.querySelector('#result').textContent='Loading'; setTimeout(() => document.querySelector('#result').textContent='READY-314', 1500)">Start lookup</button>

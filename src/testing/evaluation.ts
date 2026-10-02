@@ -70,6 +70,16 @@ export const EVALUATION_CASES: EvaluationCase[] = [
       }
     },
   },
+  {
+    id: "lowest-price",
+    task: (url) => `Open ${url}/products and find the lowest-priced Dyson Airwrap. Report its product name and price in KRW.`,
+    async verify({ result }) {
+      return {
+        name: result.answer.includes("Dyson Airwrap Origin Multi Styler and Dryer"),
+        price: /\b389,?430\b/.test(result.answer),
+      }
+    },
+  },
 ]
 
 export interface EvaluationRun {

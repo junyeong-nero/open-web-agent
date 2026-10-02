@@ -7,8 +7,8 @@ bun run eval --live --model openai:gpt-6-luna \
   --model-options '{"reasoning_effort":"none"}' --output /tmp/luna-eval.json
 ```
 
-Each case starts an isolated headless browser against local fixture pages. The five cases are
-`price`, `search-filter`, `async-result`, `ref-recovery`, and `tab-return`. Use `--case` for a
+Each case starts an isolated headless browser against local fixture pages. The six cases are
+`price`, `search-filter`, `async-result`, `ref-recovery`, `tab-return`, and `lowest-price`. Use `--case` for a
 subset, `--runs` (1–10) for repeats, and `--max-steps` (1–100) for a per-case budget.
 Each agent run has a 120-second abort signal and a 5-second action timeout.
 The action timeout covers navigation, snapshots and element actions, giving new renderer
@@ -17,6 +17,11 @@ this bounded timeout and count as tool errors; runtime defaults remain unchanged
 
 The tab-return case captures the original missing tab-selection capability (#91) and now serves
 as its regression check. Keep historical baseline failures when comparing versions.
+
+The lowest-price case lists 30 products with a featured, more expensive first result and the
+cheapest product at position 23, plus a client-side price sort. Its checks require the expected
+product name and price. It is easier than real listing pages (see the lowest-price follow-up
+below), so it serves as a regression check rather than a reproduction of that failure.
 
 Checks use DOM state and expected answers, never the model's self-reported success. The report
 includes each verdict/check, execution result, input/output tokens, duration, tool calls/errors,
@@ -67,3 +72,11 @@ original tab selected, input preserved, pricing tab retained and the final answe
 6 and 8 tool calls respectively. These are regression smoke tests, not a broad reliability claim.
 
 The final five-case live run also passed 5/5: 36,570 input / 702 output tokens, 22 tool calls, 42.2 seconds. The single tool error was the deliberately injected stale ref in the recovery case.
+
+## Lowest-price follow-up (2026-10-03)
+
+On the real query "다나와에서 다이슨 에어랩 최저가 찾아줘", `gpt-6-luna` (`reasoning_effort: none`)
+often reported a more prominent, more expensive listing; it picked the cheapest product in 1 of 4
+earlier runs. With the prompt sentence for lowest/highest/newest questions it picked the cheapest
+product in 4 of 4 runs (once by sorting by price), against 1 of 4 in an A/B run without it. The
+`lowest-price` fixture case passed 4/4 in both arms. These are small live samples, not a reliability claim.
