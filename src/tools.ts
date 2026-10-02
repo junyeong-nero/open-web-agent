@@ -6,7 +6,7 @@ import type { ContentPart, ToolSpec } from "./model/types"
 export interface ToolResult {
   /** What happened, always kept in the transcript. */
   text: string
-  /** Page state after the tool ran. The agent keeps only the latest one in its context. */
+  /** Page state (or an unavailable-state marker). The agent keeps only the latest one in context. */
   snapshot?: string
   /** Large observed page body; only the newest is kept in model context. */
   pageText?: boolean
@@ -51,7 +51,21 @@ async function act(session: BrowserSession, summary: string, action: (page: Page
     .then(() => true, () => false)
   await action(page)
   if (await navigated) await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {})
-  return { text: summary, snapshot: await session.snapshot() }
+  return snapshotAfterAction(session, summary)
+}
+
+/** A failed observation must not turn an already completed action into a retryable failure. */
+async function snapshotAfterAction(session: BrowserSession, summary: string): Promise<ToolResult> {
+  try {
+    return { text: summary, snapshot: await session.snapshot() }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return {
+      text: `${summary}\nThe browser action completed, but its follow-up snapshot failed: ${message.split("\n").slice(0, 3).join("\n")}\nDo not repeat the action just to recover the snapshot. Call browser_snapshot to inspect the current page before taking another action.`,
+      // Supersede the previous snapshot so its refs are not presented as current state.
+      snapshot: "[Current page state unavailable. Previous snapshot refs may be stale.]",
+    }
+  }
 }
 
 export const TOOLS: BrowserTool[] = [
@@ -68,7 +82,7 @@ export const TOOLS: BrowserTool[] = [
     schema: z.object({ tabId: z.string().regex(/^t[1-9]\d*$/).describe("Tab ID, e.g. t1 (not an element ref)") }),
     run: async (session, { tabId }) => {
       await session.selectTab(tabId)
-      return { text: `Selected tab ${tabId}`, snapshot: await session.snapshot() }
+      return snapshotAfterAction(session, `Selected tab ${tabId}`)
     },
   }),
   tool({
@@ -179,7 +193,7 @@ export const TOOLS: BrowserTool[] = [
       if (seconds) await page.waitForTimeout(seconds * 1000)
       if (text) await page.getByText(text).first().waitFor({ state: "visible", timeout: 15_000 })
       if (textGone) await page.getByText(textGone).first().waitFor({ state: "hidden", timeout: 15_000 })
-      return { text: "Wait finished", snapshot: await session.snapshot() }
+      return snapshotAfterAction(session, "Wait finished")
     },
   }),
   tool({
