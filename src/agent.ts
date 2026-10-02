@@ -51,7 +51,9 @@ export interface AgentOptions {
   onEvent?: (event: AgentEvent) => void
 }
 
-type Entry = Message | { role: "tool"; toolCallId: string; name: string; result: ToolResult }
+type Entry = Message
+  | { role: "user"; task: string; snapshot: string }
+  | { role: "tool"; toolCallId: string; name: string; result: ToolResult }
 
 export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   const timeoutMs = options.timeoutMs ?? 300_000
@@ -109,7 +111,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   try {
     signal.throwIfAborted()
     const initial = await interruptible(() => taskMessage(options), signal, pending => options.browser.cancelPending(pending))
-    entries.push({ role: "user", content: [{ type: "text", text: initial }] })
+    entries.push(initial)
     while (step < maxSteps) {
       signal.throwIfAborted()
       step += 1
@@ -176,18 +178,22 @@ export function taskIncomplete(result: AgentResult): boolean {
   return result.status !== "completed" || result.outcome.status === "blocked" || result.outcome.status === "partial"
 }
 
-async function taskMessage(options: AgentOptions): Promise<string> {
-  if (!options.browser.started) return `Task: ${options.task}\n\nThe browser has not opened any page yet.`
-  return `Task: ${options.task}\n\nCurrent page:\n${await options.browser.snapshot()}`
+async function taskMessage(options: AgentOptions): Promise<Entry> {
+  if (!options.browser.started) return { role: "user", content: [{ type: "text", text: `Task: ${options.task}\n\nThe browser has not opened any page yet.` }] }
+  return { role: "user", task: options.task, snapshot: await options.browser.snapshot() }
 }
 
 /** Keep only the newest snapshot and image in context; older ones are superseded page state. */
 export function render(entries: Entry[]): Message[] {
-  const lastSnapshot = entries.findLastIndex((entry) => "result" in entry && entry.result.snapshot !== undefined)
+  const lastSnapshot = entries.findLastIndex((entry) => "snapshot" in entry || ("result" in entry && entry.result.snapshot !== undefined))
   const lastPageText = entries.findLastIndex((entry) => "result" in entry && entry.result.pageText)
   const lastImage = entries.findLastIndex((entry) => "result" in entry && entry.result.image !== undefined)
 
   return entries.map((entry, index): Message => {
+    if ("snapshot" in entry) {
+      const snapshot = index === lastSnapshot ? entry.snapshot : "[older snapshot omitted: superseded by a newer one]"
+      return { role: "user", content: [{ type: "text", text: `Task: ${entry.task}\n\nCurrent page:\n${snapshot}` }] }
+    }
     if (!("result" in entry)) return entry
     const result: ToolResult = { ...entry.result }
     if (result.pageText && index !== lastPageText) result.text = "[older page text omitted: superseded by a newer read]"
