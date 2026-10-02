@@ -89,3 +89,31 @@ it("preserves execution metadata when the model request fails", async () => {
   const result = await runAgent({ task: "t", browser: session, model: scriptedModel([() => { throw new Error("HTTP 503") }]) })
   expect(result).toMatchObject({ status: "failed", stopReason: "model_error", error: "HTTP 503", outcome: { status: "unknown" } })
 })
+
+it("retains landing URLs and titles after action and explicit snapshots are omitted", async () => {
+  const model = scriptedModel([
+    () => ({ toolCalls: [{ id: "1", name: "browser_navigate", arguments: { url: `${fixture.url}/redirect` } }] }),
+    () => ({ toolCalls: [{ id: "2", name: "browser_snapshot", arguments: {} }] }),
+    () => ({ toolCalls: [{ id: "3", name: "browser_navigate", arguments: { url: `${fixture.url}/pricing` } }] }),
+    () => ({ text: "ok", toolCalls: [] }),
+  ])
+  const result = await runAgent({ task: "Read the page", model, browser: session })
+  expect(result.status).toBe("completed")
+  const messages = model.requests.at(-1)!.messages.filter((message) => message.role === "tool")
+  expect(messages).toHaveLength(3)
+  for (const message of messages.slice(0, 2)) {
+    const text = message.content.map((part) => part.type === "text" ? part.text : "").join("\n")
+    expect(text).toContain("older snapshot omitted")
+    expect(text).not.toContain("Check you are human")
+    const landing = text.split("\n").find((line) => line.startsWith("Landing URL:"))!
+    expect(landing).toContain(`Landing URL: ${fixture.url}/sorry?token=`)
+    expect(landing).toEndWith("… | Title: Just a moment...")
+    expect(landing.length).toBeLessThanOrEqual(303)
+    expect(text).not.toContain("x".repeat(400))
+  }
+  expect(messages[0]!.content[0]).toMatchObject({ type: "text", text: expect.stringContaining(`Navigated to ${fixture.url}/redirect\nLanding URL:`) })
+  const newest = messages[2]!.content.map((part) => part.type === "text" ? part.text : "").join("\n")
+  expect(newest).toContain(`Landing URL: ${fixture.url}/pricing | Title: Pricing`)
+  expect(newest).toContain("Page title: Pricing")
+  expect(newest).not.toContain("older snapshot omitted")
+}, 30_000)

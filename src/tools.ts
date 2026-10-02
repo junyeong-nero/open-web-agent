@@ -54,10 +54,21 @@ async function act(session: BrowserSession, summary: string, action: (page: Page
   return snapshotAfterAction(session, summary)
 }
 
+/** Retain a compact record of the observed landing page when the snapshot is superseded. */
+function snapshotResult(summary: string, snapshot: string): ToolResult {
+  const headers = /^Page URL: ([^\n]*)\nPage title: ([\s\S]*?)\nPage tab:/.exec(snapshot)
+  const compact = (value: string, max: number) => {
+    const line = value.replace(/\s+/g, " ").trim()
+    return line.length > max ? `${line.slice(0, max - 1)}…` : line
+  }
+  const landing = headers ? `\nLanding URL: ${compact(headers[1]!, 160)} | Title: ${compact(headers[2]!, 120)}` : ""
+  return { text: summary + landing, snapshot }
+}
+
 /** A failed observation must not turn an already completed action into a retryable failure. */
 async function snapshotAfterAction(session: BrowserSession, summary: string): Promise<ToolResult> {
   try {
-    return { text: summary, snapshot: await session.snapshot() }
+    return snapshotResult(summary, await session.snapshot())
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return {
@@ -104,7 +115,7 @@ export const TOOLS: BrowserTool[] = [
       "Capture the accessibility snapshot of the current page. Elements carry [ref=…] handles that the other tools accept.",
     schema: z.object({}),
     readOnly: true,
-    run: async (session) => ({ text: "Captured page snapshot", snapshot: await session.snapshot() }),
+    run: async (session) => snapshotResult("Captured page snapshot", await session.snapshot()),
   }),
   tool({
     name: "browser_click",
