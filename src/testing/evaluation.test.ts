@@ -104,3 +104,32 @@ it("passes the tab-return evaluation only after selecting the preserved original
     expect(run.toolErrors).toBe(0)
   } finally { fixture.stop() }
 }, 30_000)
+
+it.each([
+  ["Dyson Airwrap Origin Multi Styler and Dryer: 389,430 KRW", true],
+  ["Dyson Airwrap Origin+: 391,320 KRW", false],
+  ["Dyson Airwrap Origin Multi Styler and Dryer: 391,320 KRW", false],
+  ["Dyson Airwrap Origin+: 389,430 KRW", false],
+] as const)("scores lowest-price answer %s as %s", async (answer, passed) => {
+  const fixture = startFixtureServer()
+  try {
+    const run = await evaluateCase(EVALUATION_CASES.find(c => c.id === "lowest-price")!, scriptedModel([
+      () => ({ toolCalls: [{ id: "1", name: "browser_navigate", arguments: { url: `${fixture.url}/products` } }] }),
+      req => {
+        const snapshot = lastToolText(req.messages)
+        expect(snapshot.match(/heading "Dyson Airwrap /g)).toHaveLength(31)
+        expect(snapshot.indexOf('heading "Dyson Airwrap Origin+"')).toBeLessThan(snapshot.indexOf('heading "Dyson Airwrap Origin Multi Styler and Dryer"'))
+        return { toolCalls: [{ id: "2", name: "browser_select_option", arguments: { ref: refFor(snapshot, /combobox "Sort by"/), values: ["price"] } }] }
+      },
+      req => {
+        const snapshot = lastToolText(req.messages)
+        expect(snapshot.indexOf('heading "Dyson Airwrap Origin Multi Styler and Dryer"')).toBeLessThan(snapshot.indexOf('heading "Dyson Airwrap Origin+"'))
+        return { text: answer, toolCalls: [] }
+      },
+    ]), fixture.url)
+    expect(run.passed).toBe(passed)
+    expect(run.result?.error).toBeUndefined()
+    expect(run.result?.status).toBe("completed")
+    expect(run.toolErrors).toBe(0)
+  } finally { fixture.stop() }
+}, 30_000)
