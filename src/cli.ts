@@ -26,6 +26,7 @@ Model (flag > env):
 
 Browser:
   --headless                   OWA_HEADLESS=1
+  --locale <tag>               OWA_LOCALE   BCP 47 tag, e.g. ko-KR (existing CDP contexts unchanged)
   --browser <name>             chromium (default), firefox, webkit
   --cdp <url>                  attach to a running Chrome, e.g. http://127.0.0.1:9222
   --user-data-dir <dir>        persistent profile
@@ -51,6 +52,7 @@ export async function main(argv: string[]): Promise<number> {
       "model-options": { type: "string" },
       headless: { type: "boolean" },
       browser: { type: "string" },
+      locale: { type: "string" },
       cdp: { type: "string" },
       "user-data-dir": { type: "string" },
       "executable-path": { type: "string" },
@@ -85,6 +87,7 @@ export async function main(argv: string[]): Promise<number> {
   const session = new BrowserSession({
     headless: values.headless ?? isTruthy(process.env.OWA_HEADLESS),
     browser: browserName as "chromium" | "firefox" | "webkit",
+    locale: values.locale ?? process.env.OWA_LOCALE,
     cdpUrl: values.cdp,
     userDataDir: values["user-data-dir"],
     executablePath: values["executable-path"],

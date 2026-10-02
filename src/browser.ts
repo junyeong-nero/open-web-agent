@@ -10,6 +10,8 @@ export interface BrowserOptions {
   cdpUrl?: string
   /** Persistent profile directory (cookies/logins survive restarts). */
   userDataDir?: string
+  /** BCP 47 locale for new contexts; existing CDP contexts keep their locale. */
+  locale?: string
   viewport?: { width: number; height: number }
   /** Snapshots longer than this are truncated. */
   maxSnapshotChars?: number
@@ -147,18 +149,18 @@ export class BrowserSession {
 
   private async openContext(): Promise<BrowserContext> {
     const { options } = this
-    const viewport = options.viewport ?? { width: 1280, height: 800 }
+    const contextOptions = { viewport: options.viewport ?? { width: 1280, height: 800 }, locale: options.locale }
 
     // A context can close while its owned browser stays alive. Reuse that connection too.
     if (this.browser?.isConnected()) {
       return this.options.cdpUrl
-        ? this.browser.contexts()[0] ?? this.browser.newContext({ viewport })
-        : this.browser.newContext({ viewport })
+        ? this.browser.contexts()[0] ?? this.browser.newContext(contextOptions)
+        : this.browser.newContext(contextOptions)
     }
 
     if (options.cdpUrl) {
       this.browser = await chromium.connectOverCDP(options.cdpUrl)
-      return this.browser.contexts()[0] ?? (await this.browser.newContext({ viewport }))
+      return this.browser.contexts()[0] ?? (await this.browser.newContext(contextOptions))
     }
 
     const type = options.browser === "firefox" ? firefox : options.browser === "webkit" ? webkit : chromium
@@ -166,11 +168,11 @@ export class BrowserSession {
 
     if (options.userDataDir) {
       return withExecutableFallback(type === chromium, launch, (opts) =>
-        type.launchPersistentContext(options.userDataDir as string, { ...opts, viewport }),
+        type.launchPersistentContext(options.userDataDir as string, { ...opts, ...contextOptions }),
       )
     }
     this.browser = await withExecutableFallback(type === chromium, launch, (opts) => type.launch(opts))
-    return this.browser.newContext({ viewport })
+    return this.browser.newContext(contextOptions)
   }
 }
 

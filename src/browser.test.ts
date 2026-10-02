@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BrowserSession } from "./browser"
+import { startFixtureServer } from "./testing/fixture"
 
 it("preserves the context and closes its browser after replacing the last tab", async () => {
   const session = new BrowserSession({ headless: true })
@@ -51,3 +52,26 @@ it("reuses a persistent profile context after its last tab closes", async () => 
     expect((await session.page()).context()).toBe(context)
   } finally { await session.close(); await rm(profile, { recursive: true, force: true }) }
 }, 15_000)
+
+
+for (const persistent of [false, true]) {
+  it(`applies locale to ${persistent ? "persistent" : "new and replacement"} contexts`, async () => {
+    const fixture = startFixtureServer()
+    const profile = persistent ? await mkdtemp(join(tmpdir(), "owa-locale-test-")) : undefined
+    const session = new BrowserSession({ headless: true, locale: "ko-KR", userDataDir: profile })
+    try {
+      for (let attempt = 0; attempt < (persistent ? 1 : 2); attempt++) {
+        const page = await session.page()
+        const response = await page.goto(`${fixture.url}/locale`)
+        expect(await page.evaluate(() => navigator.language)).toBe("ko-KR")
+        const { acceptLanguage } = await response!.json()
+        expect(acceptLanguage.split(",")[0]).toBe("ko-KR")
+        if (!persistent) await page.context().close()
+      }
+    } finally {
+      await session.close()
+      fixture.stop()
+      if (profile) await rm(profile, { recursive: true, force: true })
+    }
+  }, 30_000)
+}

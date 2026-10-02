@@ -24,6 +24,7 @@ export function startFixtureServer(): { url: string; stop(): void } {
     port: 0,
     fetch(request) {
       const url = new URL(request.url)
+      if (url.pathname === "/locale") return Response.json({ acceptLanguage: request.headers.get("accept-language") })
       if (url.pathname === "/slow-body") {
         let timer: ReturnType<typeof setTimeout>
         const body = new ReadableStream({
