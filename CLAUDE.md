@@ -36,6 +36,39 @@ Prefix every commit message and pull request title with a bracketed type tag: `[
 
 Example: `[fix] keep snapshot refs stable across tabs`. After the tag, write the description in lowercase and in the imperative mood.
 
+## Issue workflow
+
+Issues are resolved in three stages. An orchestrating agent files the issue, delegates the fix to Codex, then reviews and merges the PR. Codex implements.
+
+1. **File the issue.** One problem per issue, with a `[type]` title as above. Write the body in Korean, like the existing issues, with these parts:
+   - 우선순위
+   - 문제와 근거: evidence, with permalinks to the base commit
+   - 재현
+   - 개선 및 완료 기준: a checklist
+   - 검토 기준: the base commit
+2. **Delegate to Codex, one issue at a time.**
+   - Create a worktree and branch from the latest `origin/main`: `git worktree add -b <type>/<issue>-<slug> .worktrees/<issue>-<slug> origin/main`. `.worktrees/` is gitignored, and modules resolve from the root `node_modules`.
+   - Run Codex in it, for example `codex-companion.mjs task --write --model gpt-6-astra --effort low --cwd .worktrees/<issue>-<slug> --prompt-file <prompt>` from the Codex plugin. The prompt carries:
+     - the issue text and implementation notes
+     - how to verify
+     - a request for a summary, a commit message, and a PR description
+   - Codex's sandbox has no network, so it cannot push or open PRs. It may also be unable to launch Chromium or bind ports. The orchestrator therefore commits, pushes, and opens the PR. The PR body has `Closes #N.`, a description, a Validation list, and "Implemented by Codex (…)".
+3. **Review and merge.**
+   - Check the diff against the issue's acceptance criteria and the rules of thumb below.
+   - Outside the sandbox, run `bun run typecheck` and `bun run test` and compare with `main`. Rerun once before blaming the PR for a browser-test failure.
+   - Scripted tests cannot show the effect of prompt or agent-behavior changes. For those:
+     - Run a live check with a real model (`bun run eval --live …`, or the same real-site tasks before and after) and record the numbers in the PR.
+     - When the issue makes a change conditional on improvement, A/B it and drop what does not help.
+     - Live runs cost money, so keep them out of `bun run test`.
+   - Small reviewer edits are fine, such as a comment, a doc sentence, or dropping a no-op assertion; mention them in the PR. Send anything larger back to Codex.
+   - Post a short check comment (Korean), then `gh pr merge --squash`. Merge each PR before delegating the next issue, since issues often touch the same files. Remove the worktree afterwards.
+
+When you are Codex working on a delegated issue:
+- Stay in the given worktree and keep the change scoped to the issue.
+- Add focused tests, and run `bun run typecheck` plus the test files you touched.
+- Do not commit, push, or create branches.
+- Finish with the summary, commit message, and PR description the prompt asks for.
+
 ## Architecture
 
 | file | role |
