@@ -99,7 +99,7 @@ owa run "..." --model-module ./my-model.ts
 | `browser_snapshot` | accessibility snapshot with `[ref=eN]` element handles |
 | `browser_click`, `browser_type`, `browser_select_option`, `browser_hover`, `browser_press_key`, `browser_scroll` | act on refs; each returns a fresh snapshot |
 | `browser_wait_for` | wait for text to appear or disappear, or for a number of seconds |
-| `browser_get_text` | visible text of the page or of one element |
+| `browser_get_text` | visible text of the page or of one element; `offset` reads past the length limit |
 | `browser_screenshot` | PNG of the viewport or full page |
 | `browser_evaluate` | run JavaScript in the page (**opt-in**: `--caps unsafe`) |
 
