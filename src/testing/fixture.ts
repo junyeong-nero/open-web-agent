@@ -25,6 +25,8 @@ const PAGES: Record<string, string> = {
     }).join("")}</ol>
   </body></html>`,
   "/sorry": `<!doctype html><title>Just a moment...</title><h1>Check you are human</h1>`,
+  "/overlay": `<!doctype html><title>Overlay</title>
+    <button>Buy now</button><div id="overlay" style="position: fixed; inset: 0"></div>`,
   "/async": `<!doctype html><html><head><title>Async lookup</title></head><body>
     <h1>Async lookup</h1><button onclick="document.querySelector('#result').textContent='Loading'; setTimeout(() => document.querySelector('#result').textContent='READY-314', 1500)">Start lookup</button>
     <p id="result">Not started</p></body></html>`,
