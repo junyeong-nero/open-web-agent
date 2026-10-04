@@ -88,6 +88,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   let previousState = ""
   let repeatedSteps = 0
   let partialAnswer = ""
+  const visit = pageVisits()
 
   const finish = (status: AgentResult["status"], stopReason: AgentResult["stopReason"], text: string, error?: string, outcome?: AgentResult["outcome"]): AgentResult => {
     const final = parseFinalAnswer(text)
@@ -118,6 +119,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     signal.throwIfAborted()
     const initial = await interruptible(() => taskMessage(options), signal, pending => options.browser.cancelPending(pending))
     entries.push(initial)
+    if ("snapshot" in initial) visit("", initial.snapshot)
     while (step < maxSteps) {
       signal.throwIfAborted()
       step += 1
@@ -142,6 +144,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       }
 
       let failed = 0
+      let revisited = ""
       const state = createHash("sha256")
       let canCompare = true
       for (const call of response.toolCalls) {
@@ -151,6 +154,9 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
         if (result.isError) failed += 1
         if (result.isError || ["browser_wait_for", "browser_scroll"].includes(call.name) || (!result.snapshot && !result.pageText)) canCompare = false
         state.update(JSON.stringify([call.name, call.arguments, result.snapshot, result.pageText ? result.text : undefined]))
+        const page = result.isError ? undefined : visit(call.name, result.snapshot)
+        if (page?.notice && REVISIT_NOTICE) result.text += `\n${REVISIT_NOTICE.replace("{visits}", String(page.visits))}`
+        if (page?.stop) revisited = `Stopped after opening ${page.url} ${page.visits} times without finding anything new`
         emit({ type: "tool", step, call, result })
         entries.push({ role: "tool", toolCallId: call.id, name: call.name, result })
       }
@@ -158,8 +164,9 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       const fingerprint = canCompare ? state.digest("hex") : ""
       repeatedSteps = fingerprint && fingerprint === previousState ? repeatedSteps + 1 : 1
       previousState = fingerprint
-      if (fingerprint && repeatedSteps >= (options.maxRepeatedSteps ?? 3)) {
-        return finish("failed", "no_progress", partialAnswer, "Stopped after repeated identical actions and page state")
+      const stalled = fingerprint && repeatedSteps >= (options.maxRepeatedSteps ?? 3) ? "Stopped after repeated identical actions and page state" : revisited
+      if (stalled) {
+        return finish("failed", "no_progress", partialAnswer, stalled)
       }
       failures = failed === response.toolCalls.length ? failures + 1 : 0
       if (failures >= maxFailures) {
@@ -214,6 +221,40 @@ export function taskIncomplete(result: AgentResult): boolean {
 async function taskMessage(options: AgentOptions): Promise<Entry> {
   if (!options.browser.started) return { role: "user", content: [{ type: "text", text: `Task: ${options.task}\n\nThe browser has not opened any page yet.` }] }
   return { role: "user", task: options.task, snapshot: await options.browser.snapshot() }
+}
+
+/** Added once per run to the result that repeats a page a third time ({visits}: times opened); "" keeps only the stop on the fourth. */
+export const REVISIT_NOTICE: string = "You have opened this page {visits} times. Write the facts you need from it in a brief note now, then try a different approach or answer with what you have seen."
+
+/**
+ * Count pages re-opened with nothing new seen since. A page is its URL without fragment plus its title.
+ * Opening a page for the first time, or one whose snapshot is more than a third new lines (ads, clocks and
+ * live numbers change fewer), resets every count, so a list revisited between new detail pages never adds up.
+ */
+function pageVisits() {
+  const pages = new Map<string, { visits: number; repeats: number }>()
+  const seen = new Set<string>()
+  let current = ""
+  let noticed = false
+  return (tool: string, snapshot = "") => {
+    const [address = "", title, , , ...body] = snapshot.split("\n")
+    if (!address.startsWith("Page URL: ")) return undefined
+    const url = address.slice("Page URL: ".length).replace(/#.*/, "")
+    const lines = new Set(body.map((line) => line.replace(/\[ref=\w+\]/g, "")))
+    let fresh = 0
+    for (const line of lines) if (!seen.has(line)) { seen.add(line); fresh++ }
+    // Navigating opens a page even at the current URL; other tools (scrolls, waits, clicks in place) must reach another URL.
+    if (tool !== "browser_navigate" && url === current) return undefined
+    current = url
+    const key = `${url}\n${title}`
+    const page = pages.get(key) ?? { visits: 0, repeats: 0 }
+    pages.set(key, page)
+    if (++page.visits === 1 || fresh * 3 > lines.size) for (const other of pages.values()) other.repeats = 0
+    else page.repeats++
+    const notice = page.repeats === 3 && !noticed
+    if (notice) noticed = true
+    return { url, visits: page.visits, notice, stop: page.repeats > 3 }
+  }
 }
 
 /** Keep only the newest snapshot and image in context; older ones are superseded page state. */
