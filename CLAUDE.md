@@ -23,6 +23,10 @@ bun run src/cli.ts mcp [--agent --model <provider:model>]
 
 There is no build step. Always run `bun run typecheck` and `bun run test` after changes.
 
+### Claude Code cloud sessions
+
+In a cloud session (`CLAUDE_CODE_REMOTE=true`), the SessionStart hook in `.claude/settings.json` runs `scripts/cloud-setup.sh`. It installs dependencies and Chromium, and does nothing locally. Bun's package fetching is known to fail behind the cloud proxy, so the script falls back to `npm install`; that is the only place npm is used. Chromium downloads need `cdn.playwright.dev` and `playwright.download.prss.microsoft.com`, which the default **Trusted** network level does not allow. Set the cloud environment's network access to **Custom**, add both domains, and keep the default list.
+
 ## Commit & PR conventions
 
 Prefix every commit message and pull request title with a bracketed type tag: `[type] contents`.
