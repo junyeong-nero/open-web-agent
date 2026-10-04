@@ -20,6 +20,7 @@ function actionSession() {
     waitForEvent: async () => { throw new Error("No navigation") },
   }) as unknown as Page
   session.locator = async () => ({
+    count: async () => 1,
     click: perform,
     fill: async () => { state.fills++ },
     press: perform,

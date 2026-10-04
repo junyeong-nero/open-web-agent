@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { errors, type Page } from "playwright"
+import { errors, type Locator, type Page } from "playwright"
 import type { BrowserSession } from "./browser"
 import type { ContentPart, ToolSpec } from "./model/types"
 
@@ -99,6 +99,50 @@ async function snapshotAfterAction(session: BrowserSession, summary: string): Pr
   }
 }
 
+/**
+ * Use a ref without waiting out the action timeout when its element is gone. Hydration and re-renders replace
+ * elements, so the ref is re-identified once, by role and name, in a fresh snapshot of the same tab and URL;
+ * otherwise the tool fails at once with that snapshot.
+ */
+async function withRef(session: BrowserSession, ref: string, use: (target: Locator) => Promise<ToolResult>): Promise<ToolResult> {
+  const target = await session.locator(ref)
+  // Waiting cannot help: a replacement element never takes over the old ref, and a ref into a removed frame throws.
+  if (await target.count().catch(() => 0)) return use(target)
+
+  const previous = session.lastSnapshot
+  const snapshot = await session.snapshot()
+  const current = session.lastSnapshot
+  const before = refIdentities(previous?.tree ?? "")
+  const identity = before.get(ref)
+  let replacement: string | undefined
+  if (identity !== undefined && current && previous?.page === current.page && previous.url === current.url) {
+    const matches = [...refIdentities(current.tree)].filter(([, other]) => other === identity).map(([match]) => match)
+    // A single match counts unless the previous snapshot already showed it as a separate element.
+    replacement = matches.length === 1 && (matches[0] === ref || before.get(matches[0]) !== identity) ? matches[0] : undefined
+  }
+  if (!replacement) {
+    const reason = identity === undefined ? `ref ${ref} is not on the page` : `ref ${ref} (${identity}) is no longer on the page`
+    return { ...snapshotResult(`${reason}, so nothing was done. Use a ref from this new snapshot.`, snapshot), isError: true }
+  }
+  // A read returns no snapshot of its own; keep the fresh one, whose refs are now the valid ones.
+  const result = { snapshot, ...(await use(await session.locator(replacement))) }
+  return replacement === ref ? result : { ...result, text: `ref ${ref} was stale; used ${replacement} (${identity})\n${result.text}` }
+}
+
+/** Map each ref in a snapshot tree to its element's role and name, e.g. `link "Pricing"`, without states like [active]. */
+function refIdentities(tree: string): Map<string, string> {
+  const identities = new Map<string, string>()
+  for (const line of tree.split("\n")) {
+    // `- key`, `- key:` or `- key: text`, where a key whose name needs YAML quoting is single-quoted.
+    const match = /^\s*- (?:'((?:[^']|'')*)'|(.*?))(?::(?: .*)?)?$/.exec(line)
+    const key = match?.[1]?.replaceAll("''", "'") ?? match?.[2] ?? ""
+    const attributes = /(?: \[[^\]]*\])*$/.exec(key)![0]
+    const ref = /\[ref=([^\]]+)\]/.exec(attributes)?.[1]
+    if (ref) identities.set(ref, key.slice(0, key.length - attributes.length))
+  }
+  return identities
+}
+
 export const TOOLS: BrowserTool[] = [
   tool({
     name: "browser_tabs",
@@ -146,12 +190,10 @@ export const TOOLS: BrowserTool[] = [
       doubleClick: z.boolean().optional(),
       button: z.enum(["left", "right", "middle"]).optional(),
     }),
-    run: async (session, { ref, element, doubleClick, button }) => {
-      const target = await session.locator(ref)
-      return act(session, `Clicked ${element ?? ref}`, () =>
+    run: (session, { ref, element, doubleClick, button }) =>
+      withRef(session, ref, (target) => act(session, `Clicked ${element ?? ref}`, () =>
         doubleClick ? target.dblclick({ button }) : target.click({ button }),
-      )
-    },
+      )),
   }),
   tool({
     name: "browser_type",
@@ -162,31 +204,24 @@ export const TOOLS: BrowserTool[] = [
       text: z.string(),
       submit: z.boolean().optional().describe("Press Enter after typing"),
     }),
-    run: async (session, { ref, element, text, submit }) => {
-      const target = await session.locator(ref)
-      return act(session, `Typed into ${element ?? ref}${submit ? " and submitted" : ""}`, async () => {
+    run: (session, { ref, element, text, submit }) =>
+      withRef(session, ref, (target) => act(session, `Typed into ${element ?? ref}${submit ? " and submitted" : ""}`, async () => {
         await target.fill(text)
         if (submit) await target.press("Enter")
-      })
-    },
+      })),
   }),
   tool({
     name: "browser_select_option",
     description: "Select one or more options in a <select> element.",
     schema: z.object({ ref, element, values: z.array(z.string()).min(1).describe("Option values or labels") }),
-    run: async (session, { ref, element, values }) => {
-      const target = await session.locator(ref)
-      return act(session, `Selected ${values.join(", ")} in ${element ?? ref}`, () => target.selectOption(values))
-    },
+    run: (session, { ref, element, values }) =>
+      withRef(session, ref, (target) => act(session, `Selected ${values.join(", ")} in ${element ?? ref}`, () => target.selectOption(values))),
   }),
   tool({
     name: "browser_hover",
     description: "Hover the mouse over an element.",
     schema: z.object({ ref, element }),
-    run: async (session, { ref, element }) => {
-      const target = await session.locator(ref)
-      return act(session, `Hovered ${element ?? ref}`, () => target.hover())
-    },
+    run: (session, { ref, element }) => withRef(session, ref, (target) => act(session, `Hovered ${element ?? ref}`, () => target.hover())),
   }),
   tool({
     name: "browser_press_key",
@@ -203,12 +238,12 @@ export const TOOLS: BrowserTool[] = [
       ref: ref.optional(),
     }),
     run: async (session, { direction, pixels = 800, ref }) => {
-      const target = ref ? await session.locator(ref) : undefined
-      return act(session, `Scrolled ${direction} ${pixels}px`, async (page) => {
+      const scroll = (target?: Locator) => act(session, `Scrolled ${direction} ${pixels}px`, async (page) => {
         if (target) await target.hover()
         await page.mouse.wheel(0, direction === "down" ? pixels : -pixels)
         await page.waitForTimeout(300)
       })
+      return ref ? withRef(session, ref, scroll) : scroll()
     },
   }),
   tool({
@@ -233,10 +268,12 @@ export const TOOLS: BrowserTool[] = [
     schema: z.object({ ref: ref.optional() }),
     readOnly: true,
     run: async (session, { ref }) => {
-      const target = ref ? await session.locator(ref) : (await session.page()).locator("body")
-      const text = (await target.innerText()).replace(/\n{3,}/g, "\n\n").trim()
-      const max = session.options.maxSnapshotChars ?? 40_000
-      return { pageText: true, text: text.length > max ? `${text.slice(0, max)}\n… [text truncated at ${max} chars]` : text || "(no text)" }
+      const read = async (target: Locator): Promise<ToolResult> => {
+        const text = (await target.innerText()).replace(/\n{3,}/g, "\n\n").trim()
+        const max = session.options.maxSnapshotChars ?? 40_000
+        return { pageText: true, text: text.length > max ? `${text.slice(0, max)}\n… [text truncated at ${max} chars]` : text || "(no text)" }
+      }
+      return ref ? withRef(session, ref, read) : read((await session.page()).locator("body"))
     },
   }),
   tool({

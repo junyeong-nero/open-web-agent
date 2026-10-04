@@ -30,6 +30,8 @@ export class BrowserSession {
   private interrupted = false
   private tabIds = new Map<Page, string>()
   private nextTabId = 1
+  /** Tab, URL and untruncated tree of the last snapshot, for re-identifying a ref whose element was replaced. */
+  lastSnapshot?: { page: Page; url: string; tree: string }
 
   constructor(readonly options: BrowserOptions = {}) {}
 
@@ -57,6 +59,7 @@ export class BrowserSession {
   async snapshot(): Promise<string> {
     const page = await this.page()
     const tree = await page.ariaSnapshot({ mode: "ai" })
+    this.lastSnapshot = { page, url: page.url(), tree }
     const max = this.options.maxSnapshotChars ?? 40_000
     const body = tree.length > max ? `${tree.slice(0, max)}\n… [snapshot truncated at ${max} chars]` : tree
     return `Page URL: ${page.url()}\nPage title: ${await page.title()}\nPage tab: ${this.track(page)}\nSnapshot:\n${body}`

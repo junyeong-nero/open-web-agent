@@ -110,6 +110,10 @@ success and reports that the current page state is unavailable. Call `browser_sn
 refs before taking another action; repeating a click or submission could duplicate its effects.
 Action completion describes the browser operation, not verification that the website accepted it.
 
+A ref whose element is gone does not wait for the action timeout. If the page replaced the element
+with exactly one element of the same role and name (for example during hydration), the tool uses it
+and says so. Otherwise it fails at once and returns a fresh snapshot.
+
 ## Options
 
 ```
