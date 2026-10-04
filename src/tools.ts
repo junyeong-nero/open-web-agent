@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { errors, type Page } from "playwright"
+import { errors, type Download, type Page, type Response } from "playwright"
 import type { BrowserSession } from "./browser"
 import type { ContentPart, ToolSpec } from "./model/types"
 
@@ -55,13 +55,36 @@ async function act(session: BrowserSession, summary: string, action: (page: Page
 }
 
 /** A committed document is usable even when its response body is still loading. */
-async function navigate(session: BrowserSession, summary: string, action: (page: Page) => Promise<unknown>): Promise<ToolResult> {
+async function navigate(session: BrowserSession, summary: string, action: (page: Page) => Promise<Response | null>): Promise<ToolResult> {
   const page = await session.page()
   const timeout = session.options.actionTimeoutMs ?? 10_000
   const started = performance.now()
-  // Connection failures and timeouts before commit must remain action failures.
-  const response = await action(page)
+  // A navigation that becomes a download never commits, so keep what the server sent to explain it.
+  const sent: { response?: Response; download?: Download } = {}
+  const onResponse = (response: Response) => {
+    if (response.request().isNavigationRequest() && response.frame() === page.mainFrame()) sent.response = response
+  }
+  const onDownload = (download: Download) => { sent.download = download }
+  page.on("response", onResponse)
+  page.on("download", onDownload)
+  let response: Response | null
+  try {
+    // Connection failures and timeouts before commit must remain action failures.
+    response = await action(page)
+  } catch (error) {
+    // goto rejects with "Download is starting" and a history navigation with net::ERR_ABORTED, before the download event fires.
+    const starting = String(error).includes("Download is starting")
+    if (!sent.download && (starting || String(error).includes("net::ERR_ABORTED"))) {
+      await page.waitForEvent("download", { timeout: 2_000 }).catch(() => {})
+    }
+    if (!sent.download && !starting) throw error
+    throw new Error(downloadMessage(sent))
+  } finally {
+    page.off("response", onResponse)
+    page.off("download", onDownload)
+  }
   if (response) {
+    if (response.status() >= 400) summary += `\nThe server responded with HTTP ${response.status()}.`
     try {
       await page.waitForLoadState("domcontentloaded", {
         timeout: timeout === 0 ? 0 : Math.max(1, timeout - (performance.now() - started)),
@@ -72,6 +95,16 @@ async function navigate(session: BrowserSession, summary: string, action: (page:
     }
   }
   return snapshotAfterAction(session, summary)
+}
+
+/** Explain a download so the agent stops reopening a URL whose file the browser cannot show. */
+function downloadMessage({ response, download }: { response?: Response; download?: Download }): string {
+  const type = response?.headers()["content-type"]?.split(";")[0]?.trim().toLowerCase()
+  const name = download?.suggestedFilename()
+  const details = [type && `content-type \`${type}\``, name && `filename \`${name}\``].filter(Boolean).join(", ")
+  const pdf = type === "application/pdf" || /\.pdf$/i.test(name ?? "")
+  return `The server sent a file${details ? ` (${details})` : ""} instead of a web page; the browser cannot display it. Opening the same URL again gives the same result.`
+    + (pdf ? " For a PDF, look for an HTML version of the same document, such as its abstract or landing page." : "")
 }
 
 /** Retain a compact record of the observed landing page when the snapshot is superseded. */

@@ -61,6 +61,8 @@ export function startFixtureServer(): { url: string; stop(): void } {
         return new Response(body, { headers: { "content-type": "text/html", "cache-control": "no-store" } })
       }
       if (url.pathname === "/redirect") return Response.redirect(new URL("/sorry?token=" + "x".repeat(400), url).href)
+      if (url.pathname === "/forbidden") return new Response("<!doctype html><title>Access denied</title><h1>Access denied</h1>", { status: 403, headers: { "content-type": "text/html" } })
+      if (url.pathname === "/paper") return new Response("%PDF-1.4\n", { headers: { "content-type": "application/pdf", "content-disposition": 'attachment; filename="paper.pdf"' } })
       const html = PAGES[url.pathname]
       return html
         ? new Response(html, { headers: { "content-type": "text/html" } })
