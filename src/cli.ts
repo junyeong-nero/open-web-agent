@@ -71,6 +71,11 @@ export async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = positionals
   if (values.help || !command) return print(HELP)
 
+  const maxSteps = values["max-steps"] === undefined ? undefined : Number(values["max-steps"])
+  if (maxSteps !== undefined && (!Number.isSafeInteger(maxSteps) || maxSteps <= 0)) throw new Error("--max-steps must be a positive integer")
+  const timeoutMs = values["timeout-ms"] === undefined ? undefined : Number(values["timeout-ms"])
+  if (timeoutMs !== undefined && (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647)) throw new Error("--timeout-ms must be a positive integer up to 2147483647")
+
   const env = modelConfigFromEnv({
     ...process.env,
     OWA_MODEL_OPTIONS: values["model-options"] ?? process.env.OWA_MODEL_OPTIONS,
@@ -93,10 +98,6 @@ export async function main(argv: string[]): Promise<number> {
     executablePath: values["executable-path"],
   })
   const tools = selectTools(parseCaps(values.caps))
-  const maxSteps = values["max-steps"] ? Number.parseInt(values["max-steps"], 10) : undefined
-
-  const timeoutMs = values["timeout-ms"] === undefined ? undefined : Number(values["timeout-ms"])
-  if (timeoutMs !== undefined && (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647)) throw new Error("--timeout-ms must be a positive integer up to 2147483647")
 
   if (command === "mcp") {
     const agentModel = values.agent ? await resolveModel(modelConfig) : undefined
