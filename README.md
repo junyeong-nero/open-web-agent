@@ -99,7 +99,7 @@ owa run "..." --model-module ./my-model.ts
 | `browser_snapshot` | accessibility snapshot with `[ref=eN]` element handles |
 | `browser_click`, `browser_type`, `browser_select_option`, `browser_hover`, `browser_press_key`, `browser_scroll` | act on refs; each returns a fresh snapshot |
 | `browser_wait_for` | wait for text to appear or disappear, or for a number of seconds |
-| `browser_get_text` | visible text of the page or of one element |
+| `browser_get_text` | visible text of the page or of one element; `offset` reads past the length limit |
 | `browser_screenshot` | PNG of the viewport or full page |
 | `browser_evaluate` | run JavaScript in the page (**opt-in**: `--caps unsafe`) |
 
@@ -164,6 +164,8 @@ user-facing answer first, then a final line containing only
 `{"outcome":"succeeded|partial|blocked","unfinished":["any remaining work"]}`.
 This populates `outcome.status` and its `unfinished` list. When a final answer has no outcome
 line, the agent sends one tool-less follow-up request for it and keeps the original answer.
+Like runs that reach the step limit, runs that stop for `no_progress` or `tool_failures` make one
+more tool-less request for the best answer and outcome so far; they still report `status: failed`.
 Pure JSON replies with `answer`,
 `outcome`, and `unfinished` remain supported; plain text or malformed metadata produces
 `unknown`. Every outcome is explicitly `unverified`.

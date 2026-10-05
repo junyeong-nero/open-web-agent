@@ -114,6 +114,18 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     entries.push({ role: "assistant", text: response.text, toolCalls: response.toolCalls })
     return response
   }
+  /** Before an early stop, ask once without tools for the best answer so far; keep `fallback` if that fails or is empty. */
+  const bestEffortAnswer = async (notice: string, fallback: string) => {
+    entries.push({
+      role: "user",
+      content: [{ type: "text", text: `${notice} Reply now with your best final answer from what you have seen, then the final outcome line {"outcome":"succeeded|partial|blocked","unfinished":["any remaining work"]}.` }],
+    })
+    try {
+      const last = await ask(false)
+      if (last.toolCalls.length === 0) return last.text?.trim() ?? ""
+    } catch { /* Keep the earlier answer if the best-effort request fails or returns no answer. */ }
+    return fallback
+  }
 
   try {
     signal.throwIfAborted()
@@ -166,11 +178,11 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       previousState = fingerprint
       const stalled = fingerprint && repeatedSteps >= (options.maxRepeatedSteps ?? 3) ? "Stopped after repeated identical actions and page state" : revisited
       if (stalled) {
-        return finish("failed", "no_progress", partialAnswer, stalled)
+        return finish("failed", "no_progress", await bestEffortAnswer("Stopping because the last steps made no progress.", partialAnswer), stalled)
       }
       failures = failed === response.toolCalls.length ? failures + 1 : 0
       if (failures >= maxFailures) {
-        return finish("failed", "tool_failures", `Stopped after ${failures} consecutive steps where every browser action failed.`)
+        return finish("failed", "tool_failures", await bestEffortAnswer(`Stopping because every browser action failed in the last ${failures} steps.`, `Stopped after ${failures} consecutive steps where every browser action failed.`))
       }
     }
 
