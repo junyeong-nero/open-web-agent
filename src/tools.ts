@@ -276,13 +276,28 @@ export const TOOLS: BrowserTool[] = [
   tool({
     name: "browser_get_text",
     description: "Return the visible text of the page (or of one element). Use it to read content for the answer.",
-    schema: z.object({ ref: ref.optional() }),
+    schema: z.object({
+      ref: ref.optional(),
+      offset: z.number().int().min(0).optional().describe("Character offset to start reading from, as given in a truncation notice. Default 0"),
+    }),
     readOnly: true,
-    run: async (session, { ref }) => {
+    run: async (session, { ref, offset = 0 }) => {
       const target = ref ? await session.locator(ref) : (await session.page()).locator("body")
       const text = (await target.innerText()).replace(/\n{3,}/g, "\n\n").trim()
+      // No pageText flag, so an out-of-range read does not evict the part read last.
+      if (offset > 0 && offset >= text.length) return { text: `No text at offset=${offset}: the text is ${text.length} chars long.`, isError: true }
       const max = session.options.maxSnapshotChars ?? 40_000
-      return { pageText: true, text: text.length > max ? `${text.slice(0, max)}\n… [text truncated at ${max} chars]` : text || "(no text)" }
+      // Part boundaries never split a surrogate pair (one character, e.g. an emoji).
+      const splitsPair = (index: number) => /[\uD800-\uDBFF]/.test(text.charAt(index - 1)) && /[\uDC00-\uDFFF]/.test(text.charAt(index))
+      const start = splitsPair(offset) ? offset - 1 : offset
+      let end = Math.min(start + max, text.length)
+      if (splitsPair(end)) end += 1
+      const part = text.slice(start, end)
+      const range = `showing chars ${start}–${end} of ${text.length}`
+      if (end < text.length) {
+        return { pageText: true, text: `${part}\n… [text truncated: ${range}; call browser_get_text with ${ref ? `ref=${ref} and ` : ""}offset=${end} to read more]` }
+      }
+      return { pageText: true, text: offset > 0 ? `${part}\n[end of text: ${range}]` : part || "(no text)" }
     },
   }),
   tool({

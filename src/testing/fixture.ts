@@ -24,6 +24,10 @@ const PAGES: Record<string, string> = {
       return `<li data-price="${price}" data-rank="${index}"><h2>${name}</h2>${index === 0 ? "<strong>Featured bestseller — recommended pick</strong>" : ""}<p>Price: ${price.toLocaleString("en-US")} KRW</p><p>New product, in stock. Includes styling attachments. Delivery included; no membership or coupon required.</p></li>`
     }).join("")}</ol>
   </body></html>`,
+  "/article": `<!doctype html><html><head><title>Long article</title></head><body>
+    <header>Site header</header>
+    <main><h1>Long article</h1>${Array.from({ length: 8 }, (_, index) => `<h2>Table ${index + 1}</h2>${"<p>Measured values are listed in this table.</p>".repeat(250)}`).join("")}<p>End of article</p></main>
+  </body></html>`,
   "/sorry": `<!doctype html><title>Just a moment...</title><h1>Check you are human</h1>`,
   "/overlay": `<!doctype html><title>Overlay</title>
     <button>Buy now</button><div id="overlay" style="position: fixed; inset: 0"></div>`,
