@@ -61,7 +61,7 @@ export class BrowserSession {
     const tree = await page.ariaSnapshot({ mode: "ai" })
     this.lastSnapshot = { page, url: page.url(), tree }
     const max = this.options.maxSnapshotChars ?? 40_000
-    const body = tree.length > max ? `${tree.slice(0, max)}\n… [snapshot truncated at ${max} chars]` : tree
+    const body = tree.length > max ? truncate(tree, max) : tree
     return `Page URL: ${page.url()}\nPage title: ${await page.title()}\nPage tab: ${this.track(page)}\nSnapshot:\n${body}`
   }
 
@@ -177,6 +177,41 @@ export class BrowserSession {
     this.browser = await withExecutableFallback(type === chromium, launch, (opts) => type.launch(opts))
     return this.browser.newContext(contextOptions)
   }
+}
+
+/**
+ * Cut a snapshot tree to `max` characters. Pages render modals in a portal at the end of the body, where the cut
+ * would drop them, so dialog and alertdialog subtrees go first and the rest of the tree fills what is left.
+ * Lines only move within the one snapshot, so every ref shown still resolves.
+ */
+function truncate(tree: string, max: number): string {
+  const notice = `\n… [snapshot truncated at ${max} chars]`
+  const lines = tree.split("\n")
+  const dialogs: string[] = []
+  const rest: string[] = []
+  for (let start = 0; start < lines.length; start++) {
+    // ariaSnapshot leaves out hidden elements, so every dialog in it is open. A YAML-quoted key starts with a quote.
+    const indent = /^( *)- '?(?:alert)?dialog\b/.exec(lines[start])?.[1].length
+    if (indent === undefined) {
+      rest.push(lines[start])
+      continue
+    }
+    // The subtree is the dialog line and the more deeply indented lines after it; it moves to the top level.
+    let end = start + 1
+    while (end < lines.length && lines[end].search(/\S/) > indent) end++
+    dialogs.push(lines.slice(start, end).map((line) => line.slice(indent)).join("\n"))
+    start = end - 1
+  }
+  if (!dialogs.length) return `${tree.slice(0, max)}${notice}`
+  // A dialog holding the focus goes first, in case the dialogs alone exceed the budget.
+  dialogs.sort((a, b) => Number(b.includes("[active]")) - Number(a.includes("[active]")))
+  const open = dialogs.join("\n")
+  const others = rest.join("\n")
+  const shown = open.slice(0, max)
+  const behind = others.slice(0, max - shown.length)
+  return `Open dialog (shown first; the page behind it may not accept clicks):\n${shown}`
+    + (behind && `\nRest of the page:\n${behind}`)
+    + (shown.length < open.length || behind.length < others.length ? notice : "")
 }
 
 /** Playwright pins an exact browser build; fall back to any cached Chromium when that build is missing. */

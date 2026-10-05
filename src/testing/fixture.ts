@@ -28,6 +28,20 @@ const PAGES: Record<string, string> = {
     <header>Site header</header>
     <main><h1>Long article</h1>${Array.from({ length: 8 }, (_, index) => `<h2>Table ${index + 1}</h2>${"<p>Measured values are listed in this table.</p>".repeat(250)}`).join("")}<p>End of article</p></main>
   </body></html>`,
+  // Like many sites, open a modal in a portal at the end of a long page, past where its snapshot is cut.
+  "/trade-in": `<!doctype html><html><head><title>Trade-in values</title></head><body>
+    <h1>Trade in your device</h1>
+    <button onclick="document.querySelector('#portal').append(document.querySelector('template').content.cloneNode(true)); document.querySelector('[role=dialog]').focus()">See all values</button>
+    <ol>${Array.from({ length: 300 }, (_, index) => `<li><a href="#model-${index + 1}">Phone model ${index + 1}</a> <button>Estimate ${index + 1}</button></li>`).join("")}</ol>
+    <div id="portal"></div>
+    <template><div style="position: fixed; inset: 0; background: rgb(0 0 0 / 50%)">
+      <div role="dialog" aria-modal="true" aria-labelledby="values" tabindex="-1" style="margin: 40px; padding: 20px; background: white">
+        <h2 id="values">Trade-in values</h2>
+        <table><tr><th>Model</th><th>Value</th></tr><tr><td>Phone 11 Pro Max</td><td>Up to $140</td></tr></table>
+        <button onclick="document.querySelector('#portal').replaceChildren()">Close</button>
+      </div>
+    </div></template>
+  </body></html>`,
   "/sorry": `<!doctype html><title>Just a moment...</title><h1>Check you are human</h1>`,
   "/overlay": `<!doctype html><title>Overlay</title>
     <button>Buy now</button><div id="overlay" style="position: fixed; inset: 0"></div>`,

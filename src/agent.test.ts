@@ -141,6 +141,21 @@ it("retains landing URLs and titles after action and explicit snapshots are omit
   expect(newest).not.toContain("older snapshot omitted")
 }, 30_000)
 
+it("gives the model rules for the HTTP statuses that navigation results report", async () => {
+  const model = scriptedModel([
+    () => ({ toolCalls: [{ id: "1", name: "browser_navigate", arguments: { url: `${fixture.url}/forbidden` } }] }),
+    () => ({ toolCalls: [{ id: "2", name: "browser_navigate", arguments: { url: `${fixture.url}/guessed-path` } }] }),
+    () => ({ text: 'Blocked\n{"outcome":"blocked","unfinished":["t"]}', toolCalls: [] }),
+  ])
+  await runAgent({ task: "t", model, browser: session })
+  const [, blocked, missing] = model.requests
+  expect(lastToolText(blocked!.messages)).toContain("The server responded with HTTP 403.")
+  expect(lastToolText(missing!.messages)).toContain("The server responded with HTTP 404.")
+  // One assertion per prompt rule, so dropping a rule drops only its line.
+  expect(missing!.system).toContain("the server responds with HTTP 401, 402, 403, or 429")
+  expect(missing!.system).toContain("If a URL you guessed returns HTTP 404")
+}, 30_000)
+
 it("asks once without tools for an outcome and preserves the original answer", async () => {
   const answer = "The price is $42. https://example.com/pricing"
   const model = scriptedModel([
