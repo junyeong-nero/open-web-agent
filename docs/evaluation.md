@@ -12,8 +12,8 @@ Each case starts an isolated headless browser against local fixture pages. The s
 subset, `--runs` (1–10) for repeats, and `--max-steps` (1–100) for a per-case budget.
 Each agent run has a 120-second abort signal and a 5-second action timeout.
 The action timeout covers navigation, snapshots and element actions, giving new renderer
-processes time to initialize and draw text on slower machines. Stale refs still fail within
-this bounded timeout and count as tool errors; runtime defaults remain unchanged.
+processes time to initialize and draw text on slower machines. Refs that are not on the page
+fail at once without this timeout and count as tool errors; runtime defaults remain unchanged.
 
 The tab-return case captures the original missing tab-selection capability (#91) and now serves
 as its regression check. Keep historical baseline failures when comparing versions.
