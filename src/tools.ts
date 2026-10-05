@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { errors, type Locator, type Page } from "playwright"
+import { errors, type Download, type Locator, type Page, type Response } from "playwright"
 import type { BrowserSession } from "./browser"
 import type { ContentPart, ToolSpec } from "./model/types"
 
@@ -55,13 +55,36 @@ async function act(session: BrowserSession, summary: string, action: (page: Page
 }
 
 /** A committed document is usable even when its response body is still loading. */
-async function navigate(session: BrowserSession, summary: string, action: (page: Page) => Promise<unknown>): Promise<ToolResult> {
+async function navigate(session: BrowserSession, summary: string, action: (page: Page) => Promise<Response | null>): Promise<ToolResult> {
   const page = await session.page()
   const timeout = session.options.actionTimeoutMs ?? 10_000
   const started = performance.now()
-  // Connection failures and timeouts before commit must remain action failures.
-  const response = await action(page)
+  // A navigation that becomes a download never commits, so keep what the server sent to explain it.
+  const sent: { response?: Response; download?: Download } = {}
+  const onResponse = (response: Response) => {
+    if (response.request().isNavigationRequest() && response.frame() === page.mainFrame()) sent.response = response
+  }
+  const onDownload = (download: Download) => { sent.download = download }
+  page.on("response", onResponse)
+  page.on("download", onDownload)
+  let response: Response | null
+  try {
+    // Connection failures and timeouts before commit must remain action failures.
+    response = await action(page)
+  } catch (error) {
+    // goto rejects with "Download is starting" and a history navigation with net::ERR_ABORTED, before the download event fires.
+    const starting = String(error).includes("Download is starting")
+    if (!sent.download && (starting || String(error).includes("net::ERR_ABORTED"))) {
+      await page.waitForEvent("download", { timeout: 2_000 }).catch(() => {})
+    }
+    if (!sent.download && !starting) throw error
+    throw new Error(downloadMessage(sent))
+  } finally {
+    page.off("response", onResponse)
+    page.off("download", onDownload)
+  }
   if (response) {
+    if (response.status() >= 400) summary += `\nThe server responded with HTTP ${response.status()}.`
     try {
       await page.waitForLoadState("domcontentloaded", {
         timeout: timeout === 0 ? 0 : Math.max(1, timeout - (performance.now() - started)),
@@ -72,6 +95,16 @@ async function navigate(session: BrowserSession, summary: string, action: (page:
     }
   }
   return snapshotAfterAction(session, summary)
+}
+
+/** Explain a download so the agent stops reopening a URL whose file the browser cannot show. */
+function downloadMessage({ response, download }: { response?: Response; download?: Download }): string {
+  const type = response?.headers()["content-type"]?.split(";")[0]?.trim().toLowerCase()
+  const name = download?.suggestedFilename()
+  const details = [type && `content-type \`${type}\``, name && `filename \`${name}\``].filter(Boolean).join(", ")
+  const pdf = type === "application/pdf" || /\.pdf$/i.test(name ?? "")
+  return `The server sent a file${details ? ` (${details})` : ""} instead of a web page; the browser cannot display it. Opening the same URL again gives the same result.`
+    + (pdf ? " For a PDF, look for an HTML version of the same document, such as its abstract or landing page." : "")
 }
 
 /** Retain a compact record of the observed landing page when the snapshot is superseded. */
@@ -85,14 +118,27 @@ function snapshotResult(summary: string, snapshot: string): ToolResult {
   return { text: summary + landing, snapshot }
 }
 
+/** Playwright call log lines that only narrate its retry loop; the reasons between them are kept. */
+const RETRY_NARRATION = /^(?:attempting .+ action|retrying .+ action|waiting \d+ms$|waiting for element to be |element is visible|scrolling into view if needed$|done scrolling$)/
+
+/** The error message plus each distinct reason from Playwright's call log, in at most 600 characters. */
+function failureReason(error: unknown): string {
+  const message = (error instanceof Error ? error.message : String(error)).replace(/\u001b\[[\d;]*m/g, "").trim()
+  const [head, ...logs] = message.split(/\n+Call log:\n/)
+  // Every retry logs the same reasons again; drop bullets and Playwright's "2 ×" counts before comparing.
+  const reasons = new Set(logs.join("\n").split("\n").map((line) => line.trim().replace(/^(?:\d+ × )?(?:- )?/, "")).filter((line) => line && !RETRY_NARRATION.test(line)))
+  // Shorten long element previews in the middle so a trailing "intercepts pointer events" survives.
+  const text = [head, ...[...reasons].map((line) => `- ${line.length > 200 ? `${line.slice(0, 139)}…${line.slice(-60)}` : line}`)].join("\n")
+  return text.length > 600 ? `${text.slice(0, 599)}…` : text
+}
+
 /** A failed observation must not turn an already completed action into a retryable failure. */
 async function snapshotAfterAction(session: BrowserSession, summary: string): Promise<ToolResult> {
   try {
     return snapshotResult(summary, await session.snapshot())
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
     return {
-      text: `${summary}\nThe browser action completed, but its follow-up snapshot failed: ${message.split("\n").slice(0, 3).join("\n")}\nDo not repeat the action just to recover the snapshot. Call browser_snapshot to inspect the current page before taking another action.`,
+      text: `${summary}\nThe browser action completed, but its follow-up snapshot failed: ${failureReason(error)}\nDo not repeat the action just to recover the snapshot. Call browser_snapshot to inspect the current page before taking another action.`,
       // Supersede the previous snapshot so its refs are not presented as current state.
       snapshot: "[Current page state unavailable. Previous snapshot refs may be stale.]",
     }
@@ -104,10 +150,10 @@ async function snapshotAfterAction(session: BrowserSession, summary: string): Pr
  * elements, so the ref is re-identified once, by role and name, in a fresh snapshot of the same tab and URL;
  * otherwise the tool fails at once with that snapshot.
  */
-async function withRef(session: BrowserSession, ref: string, use: (target: Locator) => Promise<ToolResult>): Promise<ToolResult> {
+async function withRef(session: BrowserSession, ref: string, use: (target: Locator, ref: string) => Promise<ToolResult>): Promise<ToolResult> {
   const target = await session.locator(ref)
   // Waiting cannot help: a replacement element never takes over the old ref, and a ref into a removed frame throws.
-  if (await target.count().catch(() => 0)) return use(target)
+  if (await target.count().catch(() => 0)) return use(target, ref)
 
   const previous = session.lastSnapshot
   const snapshot = await session.snapshot()
@@ -125,7 +171,7 @@ async function withRef(session: BrowserSession, ref: string, use: (target: Locat
     return { ...snapshotResult(`${reason}, so nothing was done. Use a ref from this new snapshot.`, snapshot), isError: true }
   }
   // A read returns no snapshot of its own; keep the fresh one, whose refs are now the valid ones.
-  const result = { snapshot, ...(await use(await session.locator(replacement))) }
+  const result = { snapshot, ...(await use(await session.locator(replacement), replacement)) }
   return replacement === ref ? result : { ...result, text: `ref ${ref} was stale; used ${replacement} (${identity})\n${result.text}` }
 }
 
@@ -141,6 +187,28 @@ function refIdentities(tree: string): Map<string, string> {
     if (ref) identities.set(ref, key.slice(0, key.length - attributes.length))
   }
   return identities
+}
+
+/** Playwright's multi-character key names (US layout codes and modifier aliases) by lowercase name, plus common aliases. */
+const KEY_NAMES = new Map<string, string>([
+  ...[
+    "Escape", "Enter", "Tab", "Backspace", "Delete", "Insert", "Home", "End", "PageUp", "PageDown",
+    "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "CapsLock", "NumLock", "ScrollLock", "PrintScreen", "Pause", "ContextMenu",
+    "Shift", "ShiftLeft", "ShiftRight", "Control", "ControlLeft", "ControlRight", "ControlOrMeta",
+    "Alt", "AltLeft", "AltRight", "AltGraph", "Meta", "MetaLeft", "MetaRight",
+    "Backquote", "Minus", "Equal", "Backslash", "BracketLeft", "BracketRight", "Semicolon", "Quote", "Comma", "Period", "Slash",
+    "NumpadAdd", "NumpadSubtract", "NumpadMultiply", "NumpadDivide", "NumpadDecimal", "NumpadEnter",
+    "AudioVolumeMute", "AudioVolumeDown", "AudioVolumeUp", "MediaTrackNext", "MediaTrackPrevious", "MediaPlayPause",
+    ...Array.from({ length: 12 }, (_, index) => `F${index + 1}`),
+    ...Array.from({ length: 10 }, (_, digit) => [`Digit${digit}`, `Numpad${digit}`]).flat(),
+    ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((letter) => `Key${letter}`),
+  ].map((name) => [name.toLowerCase(), name] as const),
+  ["esc", "Escape"], ["ctrl", "Control"], ["cmd", "Meta"], ["command", "Meta"], ["del", "Delete"],
+])
+
+/** Spell named keys the way Playwright expects (END → End, CTRL+A → Control+A); single characters keep their case. */
+function playwrightKey(key: string): string {
+  return key.split("+").map((part) => KEY_NAMES.get(part.toLowerCase()) ?? part).join("+")
 }
 
 export const TOOLS: BrowserTool[] = [
@@ -227,7 +295,14 @@ export const TOOLS: BrowserTool[] = [
     name: "browser_press_key",
     description: "Press a key or chord on the focused element, e.g. Enter, Escape, ArrowDown, Control+A.",
     schema: z.object({ key: z.string() }),
-    run: (session, { key }) => act(session, `Pressed ${key}`, (page) => page.keyboard.press(key)),
+    run: (session, args) => {
+      const key = playwrightKey(args.key)
+      return act(session, `Pressed ${key}`, (page) => page.keyboard.press(key).catch(async (error) => {
+        // Playwright leaves a chord's earlier keys held down when a later key is unknown (CTRL+RETURN).
+        for (const part of key.split("+").slice(0, -1).reverse()) await page.keyboard.up(part).catch(() => {})
+        throw error
+      }))
+    },
   }),
   tool({
     name: "browser_scroll",
@@ -265,13 +340,29 @@ export const TOOLS: BrowserTool[] = [
   tool({
     name: "browser_get_text",
     description: "Return the visible text of the page (or of one element). Use it to read content for the answer.",
-    schema: z.object({ ref: ref.optional() }),
+    schema: z.object({
+      ref: ref.optional(),
+      offset: z.number().int().min(0).optional().describe("Character offset to start reading from, as given in a truncation notice. Default 0"),
+    }),
     readOnly: true,
-    run: async (session, { ref }) => {
-      const read = async (target: Locator): Promise<ToolResult> => {
+    run: async (session, { ref, offset = 0 }) => {
+      // `used` is the ref actually read, which differs from `ref` after a stale ref was re-identified.
+      const read = async (target: Locator, used?: string): Promise<ToolResult> => {
         const text = (await target.innerText()).replace(/\n{3,}/g, "\n\n").trim()
+        // No pageText flag, so an out-of-range read does not evict the part read last.
+        if (offset > 0 && offset >= text.length) return { text: `No text at offset=${offset}: the text is ${text.length} chars long.`, isError: true }
         const max = session.options.maxSnapshotChars ?? 40_000
-        return { pageText: true, text: text.length > max ? `${text.slice(0, max)}\n… [text truncated at ${max} chars]` : text || "(no text)" }
+        // Part boundaries never split a surrogate pair (one character, e.g. an emoji).
+        const splitsPair = (index: number) => /[\uD800-\uDBFF]/.test(text.charAt(index - 1)) && /[\uDC00-\uDFFF]/.test(text.charAt(index))
+        const start = splitsPair(offset) ? offset - 1 : offset
+        let end = Math.min(start + max, text.length)
+        if (splitsPair(end)) end += 1
+        const part = text.slice(start, end)
+        const range = `showing chars ${start}–${end} of ${text.length}`
+        if (end < text.length) {
+          return { pageText: true, text: `${part}\n… [text truncated: ${range}; call browser_get_text with ${used ? `ref=${used} and ` : ""}offset=${end} to read more]` }
+        }
+        return { pageText: true, text: offset > 0 ? `${part}\n[end of text: ${range}]` : part || "(no text)" }
       }
       return ref ? withRef(session, ref, read) : read((await session.page()).locator("body"))
     },
@@ -307,6 +398,16 @@ export function toolSpec(definition: BrowserTool): ToolSpec {
   return { name: definition.name, description: definition.description, inputSchema }
 }
 
+/** Models often send null for an optional argument they mean to omit; a null required argument still fails validation. */
+function omitNullOptionals(schema: z.ZodObject, args: unknown): unknown {
+  if (typeof args !== "object" || args === null || Array.isArray(args)) return args
+  const input: Record<string, unknown> = { ...args }
+  for (const [key, field] of Object.entries<z.ZodType>(schema.shape)) {
+    if (input[key] === null && field.safeParse(undefined).success) delete input[key]
+  }
+  return input
+}
+
 /** Validate arguments, run the tool, and turn any failure into an error result the model can react to. */
 export async function callTool(
   tools: BrowserTool[],
@@ -317,15 +418,14 @@ export async function callTool(
   const definition = tools.find((candidate) => candidate.name === name)
   if (!definition) return { text: `Unknown tool "${name}"`, isError: true }
 
-  const parsed = definition.schema.safeParse(args ?? {})
+  const parsed = definition.schema.safeParse(omitNullOptionals(definition.schema, args ?? {}))
   if (!parsed.success) {
     return { text: `Invalid arguments for ${name}: ${z.prettifyError(parsed.error)}`, isError: true }
   }
   try {
     return await definition.run(session, parsed.data)
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    return { text: `${name} failed: ${message.split("\n").slice(0, 3).join("\n")}\nTake a new browser_snapshot if the page may have changed.`, isError: true }
+    return { text: `${name} failed: ${failureReason(error)}\nTake a new browser_snapshot if the page may have changed.`, isError: true }
   }
 }
 
