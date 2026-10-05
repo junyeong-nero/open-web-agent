@@ -90,6 +90,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   let repeatedSteps = 0
   let partialAnswer = ""
   const visit = pageVisits()
+  const search = searchesAfterBlock()
 
   const finish = (status: AgentResult["status"], stopReason: AgentResult["stopReason"], text: string, error?: string, outcome?: AgentResult["outcome"]): AgentResult => {
     const final = parseFinalAnswer(text)
@@ -158,6 +159,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
 
       let failed = 0
       let revisited = ""
+      let searched = ""
       const state = createHash("sha256")
       let canCompare = true
       for (const call of response.toolCalls) {
@@ -169,6 +171,8 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
         state.update(JSON.stringify([call.name, call.arguments, result.snapshot, result.pageText ? result.text : undefined]))
         const page = result.isError ? undefined : visit(call.name, result.snapshot)
         if (page?.stop) revisited = `Stopped after opening ${page.url} ${page.visits} times without finding anything new`
+        const searches = search(result)
+        if (searches) searched = `Stopped after opening ${searches} since a site was blocked`
         emit({ type: "tool", step, call, result })
         entries.push({ role: "tool", toolCallId: call.id, name: call.name, result })
       }
@@ -176,7 +180,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       const fingerprint = canCompare ? state.digest("hex") : ""
       repeatedSteps = fingerprint && fingerprint === previousState ? repeatedSteps + 1 : 1
       previousState = fingerprint
-      const stalled = fingerprint && repeatedSteps >= (options.maxRepeatedSteps ?? 3) ? "Stopped after repeated identical actions and page state" : revisited
+      const stalled = fingerprint && repeatedSteps >= (options.maxRepeatedSteps ?? 3) ? "Stopped after repeated identical actions and page state" : revisited || searched
       if (stalled) {
         return finish("failed", "no_progress", await bestEffortAnswer("Stopping because the last steps made no progress.", partialAnswer), stalled)
       }
@@ -260,6 +264,32 @@ function pageVisits() {
     if (++page.visits === 1 || fresh * 3 > lines.size) for (const other of pages.values()) other.repeats = 0
     else page.repeats++
     return { url, visits: page.visits, stop: page.repeats > 3 }
+  }
+}
+
+/** Result pages of web search engines; in-site searches such as amazon.com/s do not count. */
+const SEARCH_RESULTS = /^https?:\/\/(?:[\w-]+\.)*(?:(?:google\.[a-z.]+|bing\.com|yahoo\.com|search\.brave\.com)\/search\b|duckduckgo\.com\/[^#]*[?&]q=)/
+
+/**
+ * Once a site is blocked (HTTP 401, 402, 403 or 429, or a file instead of a page), count search result pages opened
+ * for the first time; opening any other page ends a run of them. Successful runs used at most 4 in a row and 7 in total.
+ */
+function searchesAfterBlock() {
+  const seen = new Set<string>()
+  let blocked = false
+  let inRow = 0
+  return (result: ToolResult) => {
+    blocked ||= /The server (?:responded with HTTP (?:40[123]|429)\.|sent a file)/.test(result.text)
+    const url = /^Page URL: (.*)/.exec(result.snapshot ?? "")?.[1]
+    if (!blocked || !url) return undefined
+    if (!SEARCH_RESULTS.test(url)) inRow = 0
+    else if (!seen.has(url)) {
+      seen.add(url)
+      inRow += 1
+    }
+    if (inRow > 4) return `${inRow} search result pages in a row`
+    if (seen.size > 7) return `${seen.size} search result pages`
+    return undefined
   }
 }
 
