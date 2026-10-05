@@ -114,6 +114,10 @@ A ref whose element is gone does not wait for the action timeout. If the page re
 with exactly one element of the same role and name (for example during hydration), the tool uses it
 and says so. Otherwise it fails at once and returns a fresh snapshot.
 
+Snapshots longer than 40,000 characters are cut. When one is cut, its open dialogs (`dialog`,
+`alertdialog`) come first and the rest of the page fills the remaining space, so a modal rendered at
+the end of the page stays visible and its refs work.
+
 ## Options
 
 ```
