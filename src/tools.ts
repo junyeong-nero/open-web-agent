@@ -189,6 +189,53 @@ function refIdentities(tree: string): Map<string, string> {
   return identities
 }
 
+/**
+ * Sites often hide a checkbox or radio under its own styled label, so Playwright waits out the action timeout because
+ * the label intercepts the click. A person clicks the label there, and the label toggles its control. Return that
+ * label with the control's click point on it, but only when the label or its plain content is on top at that point:
+ * an unrelated overlay, another control's label, or a link inside the label is left to fail as before.
+ */
+async function coveringLabel(session: BrowserSession, target: Locator, ref: string) {
+  // Ordinary clicks skip the DOM check; only refs the snapshot shows as a checkbox or radio pay for it.
+  if (!/^(?:checkbox|radio)\b/.test(refIdentities(session.lastSnapshot?.tree ?? "").get(ref) ?? "")) return undefined
+  const covered = await target.evaluate((element) => {
+    const toggle = element.matches("input[type=checkbox], input[type=radio], [role=checkbox], [role=radio]")
+    // Playwright waits for a disabled control instead of clicking it, so those keep the normal click.
+    const disabled = element.matches(":disabled") || element.closest("[aria-disabled=true]")
+    const labels = toggle && !disabled ? [...((element as HTMLInputElement).labels ?? [])] : []
+    if (!labels.length) return null
+    // Playwright clicks the control's center. A label passes a click on its own content to the control,
+    // but not a click on a link or control inside it.
+    const center = () => {
+      const box = element.getBoundingClientRect()
+      const x = box.left + box.width / 2, y = box.top + box.height / 2
+      const hit = (element.getRootNode() as Document | ShadowRoot).elementFromPoint(x, y)
+      return { x, y, owner: hit && (element.contains(hit) ? element : hit.closest("a[href], button, input, select, textarea, label")) }
+    }
+    let { x, y, owner } = center()
+    // Something else is there when the control is out of view, so scroll it into view as Playwright would and look again.
+    if (owner !== element && !labels.some((label) => label === owner)) {
+      element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
+      ;({ x, y, owner } = center())
+    }
+    const index = labels.findIndex((label) => label === owner)
+    if (index < 0) return null
+    const label = labels[index]!
+    const box = label.getBoundingClientRect()
+    const style = getComputedStyle(label)
+    const text = label.innerText.replace(/\s+/g, " ").trim()
+    return {
+      index,
+      text: text.length > 60 ? `${text.slice(0, 59)}…` : text,
+      // Playwright measures a click position from the padding box.
+      position: { x: x - box.left - parseInt(style.borderLeftWidth), y: y - box.top - parseInt(style.borderTopWidth) },
+    }
+  })
+  if (!covered) return undefined
+  const label = (await target.evaluateHandle((element, index) => (element as HTMLInputElement).labels?.[index], covered.index)).asElement()
+  return label ? { ...covered, label } : undefined
+}
+
 /** Playwright's multi-character key names (US layout codes and modifier aliases) by lowercase name, plus common aliases. */
 const KEY_NAMES = new Map<string, string>([
   ...[
@@ -259,9 +306,16 @@ export const TOOLS: BrowserTool[] = [
       button: z.enum(["left", "right", "middle"]).optional(),
     }),
     run: (session, { ref, element, doubleClick, button }) =>
-      withRef(session, ref, (target) => act(session, `Clicked ${element ?? ref}`, () =>
-        doubleClick ? target.dblclick({ button }) : target.click({ button }),
-      )),
+      withRef(session, ref, async (target, used) => {
+        // Playwright still checks that the label, not something on top of it, receives the click.
+        const covering = await coveringLabel(session, target, used)
+        const clicked = covering?.label ?? target
+        const options = { button, position: covering?.position }
+        const through = covering ? ` through its label${covering.text && ` "${covering.text}"`}, which covers it` : ""
+        return act(session, `Clicked ${element ?? ref}${through}`, () =>
+          doubleClick ? clicked.dblclick(options) : clicked.click(options),
+        ).finally(() => covering?.label.dispose().catch(() => {}))
+      }),
   }),
   tool({
     name: "browser_type",
