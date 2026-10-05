@@ -164,6 +164,8 @@ user-facing answer first, then a final line containing only
 `{"outcome":"succeeded|partial|blocked","unfinished":["any remaining work"]}`.
 This populates `outcome.status` and its `unfinished` list. When a final answer has no outcome
 line, the agent sends one tool-less follow-up request for it and keeps the original answer.
+Like runs that reach the step limit, runs that stop for `no_progress` or `tool_failures` make one
+more tool-less request for the best answer and outcome so far; they still report `status: failed`.
 Pure JSON replies with `answer`,
 `outcome`, and `unfinished` remain supported; plain text or malformed metadata produces
 `unknown`. Every outcome is explicitly `unverified`.
