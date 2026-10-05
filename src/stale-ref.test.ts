@@ -49,6 +49,24 @@ it("reads a replacement element and returns the fresh snapshot whose refs are no
   expect(result.text).toBe(`ref ${stale} was stale; used ${fresh} (heading "Fixture Home")\nFixture Home`)
 }, 30_000)
 
+it("points the truncation notice of a re-identified read at the ref it used", async () => {
+  const page = await session.page()
+  await page.evaluate(() => document.body.insertAdjacentHTML("beforeend", `<section aria-label="Long article"><p>${"word ".repeat(10_000)}end</p></section>`))
+  const stale = refFor((await call("browser_snapshot")).snapshot!, /region "Long article"/)
+  await page.evaluate(() => {
+    const section = document.querySelector("section")!
+    section.replaceWith(section.cloneNode(true))
+  })
+  const first = await call("browser_get_text", { ref: stale })
+  const fresh = refFor(first.snapshot!, /region "Long article"/)
+  expect(fresh).not.toBe(stale)
+  // The stale ref no longer exists, so the notice must name the replacement for the follow-up read.
+  expect(first.text).toContain(`call browser_get_text with ref=${fresh} and offset=40000 to read more]`)
+  const rest = await call("browser_get_text", { ref: fresh, offset: 40_000 })
+  expect(rest.isError).toBeUndefined()
+  expect(rest.text).toContain("end\n[end of text:")
+}, 30_000)
+
 it("re-identifies an element whose snapshot line is YAML-quoted", async () => {
   const page = await session.page()
   await page.evaluate(() => document.body.insertAdjacentHTML("beforeend", `<button id="deal">Price: $42 "deal" it's #1</button>`))
