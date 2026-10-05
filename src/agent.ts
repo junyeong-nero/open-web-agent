@@ -167,7 +167,6 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
         if (result.isError || ["browser_wait_for", "browser_scroll"].includes(call.name) || (!result.snapshot && !result.pageText)) canCompare = false
         state.update(JSON.stringify([call.name, call.arguments, result.snapshot, result.pageText ? result.text : undefined]))
         const page = result.isError ? undefined : visit(call.name, result.snapshot)
-        if (page?.notice && REVISIT_NOTICE) result.text += `\n${REVISIT_NOTICE.replace("{visits}", String(page.visits))}`
         if (page?.stop) revisited = `Stopped after opening ${page.url} ${page.visits} times without finding anything new`
         emit({ type: "tool", step, call, result })
         entries.push({ role: "tool", toolCallId: call.id, name: call.name, result })
@@ -235,9 +234,6 @@ async function taskMessage(options: AgentOptions): Promise<Entry> {
   return { role: "user", task: options.task, snapshot: await options.browser.snapshot() }
 }
 
-/** Added once per run to the result that repeats a page a third time ({visits}: times opened); "" keeps only the stop on the fourth. */
-export const REVISIT_NOTICE: string = "You have opened this page {visits} times. Write the facts you need from it in a brief note now, then try a different approach or answer with what you have seen."
-
 /**
  * Count pages re-opened with nothing new seen since. A page is its URL without fragment plus its title.
  * Opening a page for the first time, or one whose snapshot is more than a third new lines (ads, clocks and
@@ -247,7 +243,6 @@ function pageVisits() {
   const pages = new Map<string, { visits: number; repeats: number }>()
   const seen = new Set<string>()
   let current = ""
-  let noticed = false
   return (tool: string, snapshot = "") => {
     const [address = "", title, , , ...body] = snapshot.split("\n")
     if (!address.startsWith("Page URL: ")) return undefined
@@ -263,9 +258,7 @@ function pageVisits() {
     pages.set(key, page)
     if (++page.visits === 1 || fresh * 3 > lines.size) for (const other of pages.values()) other.repeats = 0
     else page.repeats++
-    const notice = page.repeats === 3 && !noticed
-    if (notice) noticed = true
-    return { url, visits: page.visits, notice, stop: page.repeats > 3 }
+    return { url, visits: page.visits, stop: page.repeats > 3 }
   }
 }
 

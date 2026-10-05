@@ -1,9 +1,9 @@
 import { expect, it } from "bun:test"
 import { z } from "zod"
-import { REVISIT_NOTICE, runAgent, type AgentEvent } from "./agent"
+import { runAgent } from "./agent"
 import { BrowserSession } from "./browser"
 import { startFixtureServer } from "./testing/fixture"
-import { lastToolText, scriptedModel } from "./testing/scripted-model"
+import { scriptedModel } from "./testing/scripted-model"
 import type { BrowserTool } from "./tools"
 
 const SITE = "https://site.test"
@@ -48,21 +48,12 @@ function script(calls: Call[]) {
   ])
 }
 
-/** 1-based tool calls whose result carries the revisit notice. */
-function noticed(events: AgentEvent[]): number[] {
-  const texts = events.flatMap((event) => (event.type === "tool" ? [event.result.text] : []))
-  return texts.flatMap((text, index) => (REVISIT_NOTICE && REVISIT_NOTICE.split("{visits}").every((part) => text.includes(part)) ? [index + 1] : []))
-}
-
 async function browse(calls: Call[], page = site, browser = new BrowserSession({ headless: true })) {
-  const events: AgentEvent[] = []
-  const model = script(calls)
-  const result = await runAgent({ task: "t", browser, model, tools: fakeTools(page), onEvent: (event) => events.push(event) })
-  return { result, model, noticed: noticed(events) }
+  return { result: await runAgent({ task: "t", browser, model: script(calls), tools: fakeTools(page) }) }
 }
 
-it("notices a page's third non-consecutive repeat once and stops the cycle on its fourth", async () => {
-  const { result, model, noticed } = await browse([
+it("stops a cycle on a page's fourth non-consecutive repeat", async () => {
+  const { result } = await browse([
     ["browser_navigate", `${SITE}/a`],
     ["browser_click", `${SITE}/b`],
     ["browser_go_back", `${SITE}/a`],
@@ -74,33 +65,28 @@ it("notices a page's third non-consecutive repeat once and stops the cycle on it
     ["browser_navigate", `${SITE}/a#top`],
   ])
   expect(result).toMatchObject({ status: "failed", stopReason: "no_progress", steps: 9, error: `Stopped after opening ${SITE}/a 5 times without finding anything new` })
-  expect(noticed).toEqual(REVISIT_NOTICE ? [7] : [])
-  if (REVISIT_NOTICE) expect(lastToolText(model.requests[7]!.messages)).toContain(REVISIT_NOTICE.replace("{visits}", "4"))
 })
 
 it("does not count a list revisited between new detail pages", async () => {
   const calls: Call[] = [["browser_navigate", `${SITE}/list`]]
   for (let item = 1; item <= 6; item++) calls.push(["browser_click", `${SITE}/item/${item}`], ["browser_navigate", `${SITE}/list`])
-  const { result, noticed } = await browse(calls)
+  const { result } = await browse(calls)
   expect(result).toMatchObject({ status: "completed", stopReason: "final_answer", steps: 14 })
-  expect(noticed).toEqual([])
 })
 
 it("does not count scrolls and waits between page visits", async () => {
   const calls: Call[] = []
   for (const path of ["/a", "/b", "/a", "/b", "/a"]) calls.push(["browser_navigate", `${SITE}${path}`], ["browser_scroll"], ["browser_wait_for"], ["browser_scroll"])
-  const { result, noticed } = await browse(calls)
+  const { result } = await browse(calls)
   expect(result).toMatchObject({ status: "completed", stopReason: "final_answer", steps: 21 })
-  expect(noticed).toEqual([])
 })
 
 it("does not count a re-opened page whose content changed", async () => {
   const live: Page = (url, load) => url.endsWith("/status") ? { title: "Status", body: `- paragraph: Step ${load}\n- paragraph: Log ${load}` } : site(url, load)
   const calls: Call[] = []
   for (let round = 0; round < 6; round++) calls.push(["browser_navigate", `${SITE}/status`], ["browser_navigate", `${SITE}/a`])
-  const { result, noticed } = await browse(calls, live)
+  const { result } = await browse(calls, live)
   expect(result).toMatchObject({ status: "completed", stopReason: "final_answer" })
-  expect(noticed).toEqual([])
 })
 
 it("counts the page already open when the task starts as its first visit", async () => {
@@ -110,25 +96,22 @@ it("counts the page already open when the task starts as its first visit", async
   }
   const calls: Call[] = []
   for (let round = 0; round < 4; round++) calls.push(["browser_navigate", `${SITE}/b`], ["browser_navigate", `${SITE}/a`])
-  const { result, noticed } = await browse(calls, site, new OpenSession())
+  const { result } = await browse(calls, site, new OpenSession())
   expect(result).toMatchObject({ stopReason: "no_progress", steps: 8 })
-  expect(noticed).toEqual(REVISIT_NOTICE ? [6] : [])
 })
 
 it("stops a cycle between real fixture pages, ignoring fragments", async () => {
   const fixture = startFixtureServer()
   const browser = new BrowserSession({ headless: true })
   try {
-    const events: AgentEvent[] = []
     const model = scriptedModel([
       ...["/", "/pricing", "/#top", "/pricing", "/", "/pricing", "/#search", "/pricing", "/"].map((path, index) => () => ({
         toolCalls: [{ id: `${index + 1}`, name: "browser_navigate", arguments: { url: fixture.url + path } }],
       })),
       () => ({ text: "done", toolCalls: [] }),
     ])
-    const result = await runAgent({ task: "t", browser, model, onEvent: (event) => events.push(event) })
+    const result = await runAgent({ task: "t", browser, model })
     expect(result).toMatchObject({ status: "failed", stopReason: "no_progress", steps: 9, error: `Stopped after opening ${fixture.url}/ 5 times without finding anything new` })
-    expect(noticed(events)).toEqual(REVISIT_NOTICE ? [7] : [])
   } finally {
     await browser.close()
     fixture.stop()
