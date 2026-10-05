@@ -6,7 +6,7 @@ A small browser agent that is also a browser MCP server.
 - **`owa run "<task>"`**: runs the built-in agent loop on the *same* tools and prints the answer.
 - **`owa mcp --agent`**: also exposes `browser_task`. Your coding agent can hand off a whole web task to the built-in agent, running on a model you choose, and only the final answer comes back into its context.
 
-Models plug in by **API format** (OpenAI Chat Completions or Anthropic Messages) or by a module you write yourself. No provider SDKs are involved. The runtime depends only on `playwright` and `zod`, and the runtime source is about 1.5k lines.
+Models plug in by **API format** (OpenAI Chat Completions or Anthropic Messages) or by a module you write yourself. No provider SDKs are involved. The runtime depends only on `playwright` and `zod`, and the runtime source is about 1.9k lines.
 
 Why this shape? See [docs/positioning.md](docs/positioning.md) for how it compares with playwright-mcp, agent-browser, browser-use, Stagehand, and others.
 
@@ -103,7 +103,9 @@ owa run "..." --model-module ./my-model.ts
 | `browser_screenshot` | PNG of the viewport or full page |
 | `browser_evaluate` | run JavaScript in the page (**opt-in**: `--caps unsafe`) |
 
-The agent keeps only the newest snapshot and screenshot in its context. It stops after repeated failed steps, and when it runs out of steps it makes one last call to get a best-effort answer.
+The agent keeps only the newest snapshot and screenshot in its context. It stops when it runs out of steps, after repeated failed steps, or when it stops making progress. In each of these cases it makes one last call to get a best-effort answer.
+
+Navigation results report HTTP error statuses, for example `The server responded with HTTP 403.`, and keep the error page's snapshot. A navigation that turns into a file download fails with the file's content type and name instead of Playwright's `Download is starting`. That covers a PDF, or a bot wall that serves `application/blank`. Other failed actions keep Playwright's reason, such as the element that intercepted a click. Optional arguments sent as `null` count as omitted, and `browser_press_key` accepts key names in any case (`END`, `CTRL+A`).
 
 If a browser action completes but its follow-up snapshot fails, the tool preserves the action's
 success and reports that the current page state is unavailable. Call `browser_snapshot` for fresh
@@ -129,6 +131,7 @@ the end of the page stays visible and its refs work.
 --executable-path <path>
 --caps core,unsafe
 --max-steps <n>              default 30
+--timeout-ms <n>             total agent deadline, default 300000
 --trace run.jsonl            append agent events as JSONL
 --json                       (run) print the full result as JSON
 ```
@@ -160,6 +163,8 @@ bun run typecheck
 bun run test          # launches headless Chromium against a local fixture server
 ```
 
+[CLAUDE.md](CLAUDE.md) describes the issue, implementation and review workflow, including Claude Code cloud sessions. Open work and known limitations are in [docs/TODO.md](docs/TODO.md).
+
 ### Delegated task results
 
 `owa run --json` and MCP `browser_task.structuredContent` return the same compact result:
@@ -167,7 +172,7 @@ bun run test          # launches headless Chromium against a local fixture serve
 (and `error` for a failed model request). MCP still returns readable text beginning with the answer.
 
 `status: completed` only means the model produced a final answer. `stopReason` distinguishes
-`final_answer`, `step_limit`, `tool_failures`, and `model_error`. The model is asked to write the
+`final_answer`, `step_limit`, `no_progress`, `tool_failures`, `model_error`, `timeout`, and `cancelled`. The model is asked to write the
 user-facing answer first, then a final line containing only
 `{"outcome":"succeeded|partial|blocked","unfinished":["any remaining work"]}`.
 This populates `outcome.status` and its `unfinished` list. When a final answer has no outcome
