@@ -52,7 +52,8 @@ it("presses key variants in the page and releases a chord's keys when one is unk
   const { snapshot = "" } = await call("browser_navigate", { url: `${fixture.url}/` })
   await call("browser_type", { ref: refFor(snapshot, /textbox "Search"/), text: "shoes" })
   const input = (await session.page()).locator("#q")
-  for (const key of ["CTRL+A", "A", "a"]) expect((await call("browser_press_key", { key })).isError).toBeUndefined()
+  // Control+A only selects all off macOS (there it moves to the line start), so select with ControlOrMeta.
+  for (const key of ["CONTROLORMETA+A", "A", "a"]) expect((await call("browser_press_key", { key })).isError).toBeUndefined()
   expect(await input.inputValue()).toBe("Aa")
 
   const unknown = await call("browser_press_key", { key: "CTRL+NOPE" })
