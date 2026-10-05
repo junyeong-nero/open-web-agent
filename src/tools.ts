@@ -145,6 +145,28 @@ async function snapshotAfterAction(session: BrowserSession, summary: string): Pr
   }
 }
 
+/** Playwright's multi-character key names (US layout codes and modifier aliases) by lowercase name, plus common aliases. */
+const KEY_NAMES = new Map<string, string>([
+  ...[
+    "Escape", "Enter", "Tab", "Backspace", "Delete", "Insert", "Home", "End", "PageUp", "PageDown",
+    "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "CapsLock", "NumLock", "ScrollLock", "PrintScreen", "Pause", "ContextMenu",
+    "Shift", "ShiftLeft", "ShiftRight", "Control", "ControlLeft", "ControlRight", "ControlOrMeta",
+    "Alt", "AltLeft", "AltRight", "AltGraph", "Meta", "MetaLeft", "MetaRight",
+    "Backquote", "Minus", "Equal", "Backslash", "BracketLeft", "BracketRight", "Semicolon", "Quote", "Comma", "Period", "Slash",
+    "NumpadAdd", "NumpadSubtract", "NumpadMultiply", "NumpadDivide", "NumpadDecimal", "NumpadEnter",
+    "AudioVolumeMute", "AudioVolumeDown", "AudioVolumeUp", "MediaTrackNext", "MediaTrackPrevious", "MediaPlayPause",
+    ...Array.from({ length: 12 }, (_, index) => `F${index + 1}`),
+    ...Array.from({ length: 10 }, (_, digit) => [`Digit${digit}`, `Numpad${digit}`]).flat(),
+    ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((letter) => `Key${letter}`),
+  ].map((name) => [name.toLowerCase(), name] as const),
+  ["esc", "Escape"], ["ctrl", "Control"], ["cmd", "Meta"], ["command", "Meta"], ["del", "Delete"],
+])
+
+/** Spell named keys the way Playwright expects (END → End, CTRL+A → Control+A); single characters keep their case. */
+function playwrightKey(key: string): string {
+  return key.split("+").map((part) => KEY_NAMES.get(part.toLowerCase()) ?? part).join("+")
+}
+
 export const TOOLS: BrowserTool[] = [
   tool({
     name: "browser_tabs",
@@ -238,7 +260,14 @@ export const TOOLS: BrowserTool[] = [
     name: "browser_press_key",
     description: "Press a key or chord on the focused element, e.g. Enter, Escape, ArrowDown, Control+A.",
     schema: z.object({ key: z.string() }),
-    run: (session, { key }) => act(session, `Pressed ${key}`, (page) => page.keyboard.press(key)),
+    run: (session, args) => {
+      const key = playwrightKey(args.key)
+      return act(session, `Pressed ${key}`, (page) => page.keyboard.press(key).catch(async (error) => {
+        // Playwright leaves a chord's earlier keys held down when a later key is unknown (CTRL+RETURN).
+        for (const part of key.split("+").slice(0, -1).reverse()) await page.keyboard.up(part).catch(() => {})
+        throw error
+      }))
+    },
   }),
   tool({
     name: "browser_scroll",
@@ -331,6 +360,16 @@ export function toolSpec(definition: BrowserTool): ToolSpec {
   return { name: definition.name, description: definition.description, inputSchema }
 }
 
+/** Models often send null for an optional argument they mean to omit; a null required argument still fails validation. */
+function omitNullOptionals(schema: z.ZodObject, args: unknown): unknown {
+  if (typeof args !== "object" || args === null || Array.isArray(args)) return args
+  const input: Record<string, unknown> = { ...args }
+  for (const [key, field] of Object.entries<z.ZodType>(schema.shape)) {
+    if (input[key] === null && field.safeParse(undefined).success) delete input[key]
+  }
+  return input
+}
+
 /** Validate arguments, run the tool, and turn any failure into an error result the model can react to. */
 export async function callTool(
   tools: BrowserTool[],
@@ -341,7 +380,7 @@ export async function callTool(
   const definition = tools.find((candidate) => candidate.name === name)
   if (!definition) return { text: `Unknown tool "${name}"`, isError: true }
 
-  const parsed = definition.schema.safeParse(args ?? {})
+  const parsed = definition.schema.safeParse(omitNullOptionals(definition.schema, args ?? {}))
   if (!parsed.success) {
     return { text: `Invalid arguments for ${name}: ${z.prettifyError(parsed.error)}`, isError: true }
   }
