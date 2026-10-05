@@ -29,7 +29,7 @@ function clickTimeout(reasons: string[]): Error {
 function clickFailingWith(error: Error) {
   const session = new BrowserSession()
   session.page = async () => ({ waitForEvent: async () => { throw new Error("No navigation") } }) as unknown as Page
-  session.locator = async () => ({ click: async () => { throw error } }) as unknown as Locator
+  session.locator = async () => ({ count: async () => 1, click: async () => { throw error } }) as unknown as Locator
   return callTool(tools, session, "browser_click", { ref: "e2" })
 }
 
