@@ -85,14 +85,27 @@ function snapshotResult(summary: string, snapshot: string): ToolResult {
   return { text: summary + landing, snapshot }
 }
 
+/** Playwright call log lines that only narrate its retry loop; the reasons between them are kept. */
+const RETRY_NARRATION = /^(?:attempting .+ action|retrying .+ action|waiting \d+ms$|waiting for element to be |element is visible|scrolling into view if needed$|done scrolling$)/
+
+/** The error message plus each distinct reason from Playwright's call log, in at most 600 characters. */
+function failureReason(error: unknown): string {
+  const message = (error instanceof Error ? error.message : String(error)).replace(/\u001b\[[\d;]*m/g, "").trim()
+  const [head, ...logs] = message.split(/\n+Call log:\n/)
+  // Every retry logs the same reasons again; drop bullets and Playwright's "2 ×" counts before comparing.
+  const reasons = new Set(logs.join("\n").split("\n").map((line) => line.trim().replace(/^(?:\d+ × )?(?:- )?/, "")).filter((line) => line && !RETRY_NARRATION.test(line)))
+  // Shorten long element previews in the middle so a trailing "intercepts pointer events" survives.
+  const text = [head, ...[...reasons].map((line) => `- ${line.length > 200 ? `${line.slice(0, 139)}…${line.slice(-60)}` : line}`)].join("\n")
+  return text.length > 600 ? `${text.slice(0, 599)}…` : text
+}
+
 /** A failed observation must not turn an already completed action into a retryable failure. */
 async function snapshotAfterAction(session: BrowserSession, summary: string): Promise<ToolResult> {
   try {
     return snapshotResult(summary, await session.snapshot())
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
     return {
-      text: `${summary}\nThe browser action completed, but its follow-up snapshot failed: ${message.split("\n").slice(0, 3).join("\n")}\nDo not repeat the action just to recover the snapshot. Call browser_snapshot to inspect the current page before taking another action.`,
+      text: `${summary}\nThe browser action completed, but its follow-up snapshot failed: ${failureReason(error)}\nDo not repeat the action just to recover the snapshot. Call browser_snapshot to inspect the current page before taking another action.`,
       // Supersede the previous snapshot so its refs are not presented as current state.
       snapshot: "[Current page state unavailable. Previous snapshot refs may be stale.]",
     }
@@ -287,8 +300,7 @@ export async function callTool(
   try {
     return await definition.run(session, parsed.data)
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    return { text: `${name} failed: ${message.split("\n").slice(0, 3).join("\n")}\nTake a new browser_snapshot if the page may have changed.`, isError: true }
+    return { text: `${name} failed: ${failureReason(error)}\nTake a new browser_snapshot if the page may have changed.`, isError: true }
   }
 }
 
