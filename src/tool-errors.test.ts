@@ -34,11 +34,15 @@ function clickFailingWith(error: Error) {
 }
 
 it("names the element that intercepts a click", async () => {
-  const session = new BrowserSession({ headless: true, actionTimeoutMs: 1_000 })
+  const session = new BrowserSession({ headless: true })
   try {
-    // Load with a generous timeout so that only the click runs into the short one.
-    await (await session.page()).goto(`${fixture.url}/overlay`, { timeout: 20_000 })
-    const result = await callTool(tools, session, "browser_click", { ref: refFor(await session.snapshot(), /button "Buy now"/) })
+    // Load and snapshot with the default timeout, since a new renderer can stall about 2 s on its first text render.
+    // Only the click gets the short timeout.
+    const page = await session.page()
+    await page.goto(`${fixture.url}/overlay`)
+    const ref = refFor(await session.snapshot(), /button "Buy now"/)
+    page.setDefaultTimeout(1_000)
+    const result = await callTool(tools, session, "browser_click", { ref })
     expect(result.isError).toBe(true)
     expect(result.text).toStartWith("browser_click failed: click: Timeout 1000ms exceeded.\n")
     expect(result.text).toContain("\n- locator resolved to <button>Buy now</button>\n")
