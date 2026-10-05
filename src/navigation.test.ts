@@ -52,6 +52,37 @@ it("keeps connection failures and timeouts before commit as errors", async () =>
   }
 }, 30_000)
 
+it("reports HTTP error statuses while still returning the error page, including after going back", async () => {
+  const result = await callTool(tools, session, "browser_navigate", { url: `${fixture.url}/forbidden` })
+  expect(result.isError).toBeUndefined()
+  expect(result.text).toContain("HTTP 403")
+  expect(result.snapshot).toContain("Access denied")
+  expect((await callTool(tools, session, "browser_navigate", { url: `${fixture.url}/pricing` })).text).not.toContain("HTTP")
+  const back = await callTool(tools, session, "browser_go_back", {})
+  expect(back.isError).toBeUndefined()
+  expect(back.text).toContain("HTTP 403")
+  expect(back.snapshot).toContain("Access denied")
+}, 30_000)
+
+it("explains navigations that download a file instead of opening a page", async () => {
+  const result = await callTool(tools, session, "browser_navigate", { url: `${fixture.url}/paper` })
+  expect(result.isError).toBe(true)
+  expect(result.text).toContain("content-type `application/pdf`, filename `paper.pdf`")
+  expect(result.text).toContain("Opening the same URL again gives the same result")
+  expect(result.text).toContain("HTML version")
+
+  // A history entry that now answers with a file fails the same way.
+  await callTool(tools, session, "browser_navigate", { url: `${fixture.url}/pricing` })
+  await callTool(tools, session, "browser_navigate", { url: fixture.url })
+  await (await session.page()).route("**/pricing", (route) => route.fulfill({
+    contentType: "text/csv", headers: { "content-disposition": 'attachment; filename="prices.csv"' }, body: "plan,price",
+  }))
+  const back = await callTool(tools, session, "browser_go_back", {})
+  expect(back.isError).toBe(true)
+  expect(back.text).toContain("content-type `text/csv`, filename `prices.csv`")
+  expect(back.text).not.toContain("HTML version")
+}, 30_000)
+
 for (const stopReason of ["timeout", "cancelled"] as const) {
   it(`preserves task ${stopReason} during a committed slow navigation`, async () => {
     const controller = new AbortController()
