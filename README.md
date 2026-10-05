@@ -195,7 +195,10 @@ past the requested deadline. Cancelling only a model request leaves the browser 
 Only the newest `browser_get_text` body is sent back to the model; older bodies become placeholders.
 Three consecutive steps with identical actions and observed state stop with `no_progress`.
 Waits, scrolling, failed tools and results without observed state are excluded to avoid treating
-normal waiting as a loop. This simple detector does not detect every multi-step cycle.
+normal waiting as a loop. Cycles across pages are counted too: re-opening a page (same URL without
+fragment, same title, at most a third new snapshot lines) is a repeat, and opening anything new resets
+the counts, so returning to a list between new detail pages never adds up. A page's fourth repeat
+stops the run with `no_progress`.
 
 Tab snapshots include a stable `Page tab: tN` identifier. `browser_tabs` lists IDs, titles, URLs
 and the selected tab; `browser_select_tab` accepts `{ "tabId": "t1" }`, preserves existing page
