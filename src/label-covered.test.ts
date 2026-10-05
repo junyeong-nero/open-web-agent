@@ -19,13 +19,13 @@ afterAll(async () => {
   fixture.stop()
 })
 
-/** Click a ref, and measure how long after the call the page saw the first change event. */
+/** Click a ref, and measure how long after the call the page recorded its first change event. */
 async function clickAndTime(ref: string) {
-  const page = await session.page()
-  await page.evaluate(() => document.addEventListener("change", () => { (window as any).changedAt ??= Date.now() }))
   const started = Date.now()
   const result = await call("browser_click", { ref })
-  return { result, changedAfter: await page.evaluate(() => (window as any).changedAt) - started }
+  // getAttribute, unlike page.evaluate, also works on a page that replaces window.eval.
+  const changedAt = await (await session.page()).locator("html").getAttribute("data-changed-at")
+  return { result, changedAfter: Number(changedAt ?? NaN) - started }
 }
 
 it("clicks a checkbox through the label that covers it within a second", async () => {
@@ -57,6 +57,25 @@ it("clicks a radio through the label that covers it, and a radio that nothing co
   expect(await page.locator("#standard").isChecked()).toBe(true)
 }, 30_000)
 
+it("clicks through the label, and an uncovered checkbox as before, on a page that replaces window.eval", async () => {
+  const { snapshot = "" } = await call("browser_navigate", { url: `${fixture.url}/toggles-no-eval` })
+  const page = await session.page()
+  // As on americanexpress.com, Playwright's page-world evaluate fails here.
+  await expect(page.evaluate(() => 1)).rejects.toThrow("eval is disabled")
+  const compare = refFor(snapshot, /checkbox "Add to compare"/)
+  const { result, changedAfter } = await clickAndTime(compare)
+  expect(changedAfter).toBeLessThan(1_000)
+  expect(result.isError).toBeUndefined()
+  expect(result.text).toStartWith(`Clicked ${compare} through its label "Add to compare", which covers it\n`)
+  expect(await page.locator("#compare").isChecked()).toBe(true)
+
+  const updates = refFor(result.snapshot!, /checkbox "Email me card offers"/)
+  const direct = await call("browser_click", { ref: updates })
+  expect(direct.isError).toBeUndefined()
+  expect(direct.text).toStartWith(`Clicked ${updates}\n`)
+  expect(await page.locator("#updates").isChecked()).toBe(true)
+}, 30_000)
+
 it.each([
   {
     covering: "an unrelated overlay",
@@ -83,7 +102,7 @@ it.each([
   expect(page.url()).toBe(`${fixture.url}/toggles`)
 }, 30_000)
 
-it("clicks refs that the snapshot does not show as a checkbox or radio without checking for a label", async () => {
+it("looks for a covering label only on checkbox and radio refs, and clicks as before when it cannot", async () => {
   const stub = new BrowserSession()
   const calls: string[] = []
   stub.page = async () => ({ waitForEvent: async () => { throw new Error("No navigation") } }) as unknown as Page
@@ -91,12 +110,15 @@ it("clicks refs that the snapshot does not show as a checkbox or radio without c
   stub.lastSnapshot = { page: {} as Page, url: "about:blank", tree: '- button "Buy now" [ref=e2]\n- checkbox "Gift wrap" [ref=e3]' }
   stub.locator = async () => ({
     count: async () => 1,
-    click: async () => { calls.push("click") },
-    evaluate: async () => { calls.push("evaluate"); return null },
+    click: async (options?: { trial?: boolean }) => { calls.push(options?.trial ? "trial" : "click") },
+    getAttribute: async () => {
+      calls.push("lookup")
+      throw new Error("Unexpected page state")
+    },
   }) as unknown as Locator
   expect((await callTool(selectTools(), stub, "browser_click", { ref: "e2" })).text).toBe("Clicked e2")
   expect(calls).toEqual(["click"])
-  // A checkbox ref pays for the DOM check and, with no covering label, is clicked as before.
+  // When a step of the check fails, the checkbox gets the normal click instead of an error.
   expect((await callTool(selectTools(), stub, "browser_click", { ref: "e3" })).text).toBe("Clicked e3")
-  expect(calls).toEqual(["click", "evaluate", "click"])
+  expect(calls).toEqual(["click", "lookup", "click"])
 })

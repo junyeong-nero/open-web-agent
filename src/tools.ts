@@ -189,51 +189,54 @@ function refIdentities(tree: string): Map<string, string> {
   return identities
 }
 
+/** A trial click of a checkbox or radio that has not gone through by then means something covers it. */
+const COVERED_AFTER_MS = 300
+/** The other steps of the covering-label check answer at once unless the page is busy; the click keeps its own timeout. */
+const LABEL_CHECK_TIMEOUT_MS = 1_000
+
 /**
  * Sites often hide a checkbox or radio under its own styled label, so Playwright waits out the action timeout because
  * the label intercepts the click. A person clicks the label there, and the label toggles its control. Return that
- * label with the control's click point on it, but only when the label or its plain content is on top at that point:
- * an unrelated overlay, another control's label, or a link inside the label is left to fail as before.
+ * label with the control's center as a position on it, but only when a trial click of the control fails and a trial
+ * click of the label at that point succeeds: an unrelated overlay or another control's label is left to fail as before.
+ * Only Playwright actions touch the page, since they run in Playwright's own world, while page-world evaluate breaks
+ * on sites that replace window.eval. If any step fails, the click goes to the control as usual.
  */
 async function coveringLabel(session: BrowserSession, target: Locator, ref: string) {
-  // Ordinary clicks skip the DOM check; only refs the snapshot shows as a checkbox or radio pay for it.
+  // Ordinary clicks skip all of this; only refs the snapshot shows as a checkbox or radio pay for it.
   if (!/^(?:checkbox|radio)\b/.test(refIdentities(session.lastSnapshot?.tree ?? "").get(ref) ?? "")) return undefined
-  const covered = await target.evaluate((element) => {
-    const toggle = element.matches("input[type=checkbox], input[type=radio], [role=checkbox], [role=radio]")
-    // Playwright waits for a disabled control instead of clicking it, so those keep the normal click.
-    const disabled = element.matches(":disabled") || element.closest("[aria-disabled=true]")
-    const labels = toggle && !disabled ? [...((element as HTMLInputElement).labels ?? [])] : []
-    if (!labels.length) return null
-    // Playwright clicks the control's center. A label passes a click on its own content to the control,
-    // but not a click on a link or control inside it.
-    const center = () => {
-      const box = element.getBoundingClientRect()
-      const x = box.left + box.width / 2, y = box.top + box.height / 2
-      const hit = (element.getRootNode() as Document | ShadowRoot).elementFromPoint(x, y)
-      return { x, y, owner: hit && (element.contains(hit) ? element : hit.closest("a[href], button, input, select, textarea, label")) }
+  const timeout = LABEL_CHECK_TIMEOUT_MS
+  const succeeds = (action: Promise<unknown>) => action.then(() => true, () => false)
+  try {
+    // Its labels: an enclosing label without `for` around no other control, and any label naming its id.
+    const id = await target.getAttribute("id", { timeout })
+    let labels = target.locator('xpath=ancestor::label[not(@for)][count(.//input[not(@type="hidden")] | .//button | .//select | .//textarea) = 1]')
+    if (id) labels = labels.or(target.locator("xpath=ancestor::*[last()]").locator(`label[for=${JSON.stringify(id)}]`))
+    const count = await labels.count()
+    // A control that takes the click itself keeps the normal click, and so does a disabled one, which Playwright waits for.
+    if (!count || await succeeds(target.click({ trial: true, timeout: COVERED_AFTER_MS })) || !(await target.isEnabled({ timeout }))) return undefined
+    const box = await target.boundingBox({ timeout })
+    if (!box) return undefined
+    const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    const covers = (area: { x: number; y: number; width: number; height: number } | null) =>
+      !!area && center.x >= area.x && center.x <= area.x + area.width && center.y >= area.y && center.y <= area.y + area.height
+    for (let index = 0; index < count; index++) {
+      const label = labels.nth(index)
+      const outer = await label.boundingBox({ timeout })
+      // A click on a link or button inside the label goes to that element, not to the control.
+      const inner = await Promise.all((await label.locator("a[href], button").all()).map((control) => control.boundingBox({ timeout })))
+      if (!outer || inner.some(covers)) continue
+      // Playwright adds the label's border to this position; the trial click checks the point it actually uses.
+      const position = { x: center.x - outer.x, y: center.y - outer.y }
+      if (await succeeds(label.click({ trial: true, position, timeout }))) {
+        const text = (await label.innerText({ timeout }).catch(() => "")).replace(/\s+/g, " ").trim()
+        return { label, position, text: text.length > 60 ? `${text.slice(0, 59)}…` : text }
+      }
     }
-    let { x, y, owner } = center()
-    // Something else is there when the control is out of view, so scroll it into view as Playwright would and look again.
-    if (owner !== element && !labels.some((label) => label === owner)) {
-      element.scrollIntoView({ block: "center", inline: "center", behavior: "instant" })
-      ;({ x, y, owner } = center())
-    }
-    const index = labels.findIndex((label) => label === owner)
-    if (index < 0) return null
-    const label = labels[index]!
-    const box = label.getBoundingClientRect()
-    const style = getComputedStyle(label)
-    const text = label.innerText.replace(/\s+/g, " ").trim()
-    return {
-      index,
-      text: text.length > 60 ? `${text.slice(0, 59)}…` : text,
-      // Playwright measures a click position from the padding box.
-      position: { x: x - box.left - parseInt(style.borderLeftWidth), y: y - box.top - parseInt(style.borderTopWidth) },
-    }
-  })
-  if (!covered) return undefined
-  const label = (await target.evaluateHandle((element, index) => (element as HTMLInputElement).labels?.[index], covered.index)).asElement()
-  return label ? { ...covered, label } : undefined
+  } catch {
+    // A step that cannot run on this page must never be the reason the click fails.
+  }
+  return undefined
 }
 
 /** Playwright's multi-character key names (US layout codes and modifier aliases) by lowercase name, plus common aliases. */
@@ -314,7 +317,7 @@ export const TOOLS: BrowserTool[] = [
         const through = covering ? ` through its label${covering.text && ` "${covering.text}"`}, which covers it` : ""
         return act(session, `Clicked ${element ?? ref}${through}`, () =>
           doubleClick ? clicked.dblclick(options) : clicked.click(options),
-        ).finally(() => covering?.label.dispose().catch(() => {}))
+        )
       }),
   }),
   tool({
