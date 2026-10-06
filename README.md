@@ -240,10 +240,7 @@ Waits, scrolling, failed tools and results without observed state are excluded t
 normal waiting as a loop. Cycles across pages are counted too: re-opening a page (same URL without
 fragment, same title, at most a third new snapshot lines) is a repeat, and opening anything new resets
 the counts, so returning to a list between new detail pages never adds up. A page's fourth repeat
-stops the run with `no_progress`. After a site is blocked (HTTP 401, 402, 403 or 429, or a file sent
-instead of a page), new result pages of web search engines (Google, Bing, DuckDuckGo, Yahoo, Brave)
-are counted as well. Opening any other page ends a run of them; the fifth in a row, or the eighth in
-total, stops the run with `no_progress`.
+stops the run with `no_progress`.
 
 Tab snapshots include a stable `Page tab: tN` identifier. `browser_tabs` lists IDs, titles, URLs
 and the selected tab; `browser_select_tab` accepts `{ "tabId": "t1" }`, preserves existing page
