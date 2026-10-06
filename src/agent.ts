@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import { interruptible } from "./cancel"
 import type { BrowserSession } from "./browser"
 import type { Message, ModelAdapter, ToolCall, Usage } from "./model/types"
-import { type BrowserTool, callTool, resultContent, selectTools, type ToolResult, toolSpec } from "./tools"
+import { type BrowserTool, callTool, resultContent, selectTools, type ToolContext, type ToolResult, toolSpec, usableTools } from "./tools"
 
 export const SYSTEM_PROMPT = `You are a web agent that completes the user's task by operating a real browser through tools.
 
@@ -17,9 +17,10 @@ export const SYSTEM_PROMPT = `You are a web agent that completes the user's task
 - Never invent facts: base the answer on what you saw in the browser.
 - When finished, reply without tool calls: write your user-facing answer first, then a final line containing only {"outcome":"succeeded|partial|blocked","unfinished":["any remaining work"]}. This is your own assessment, not independent verification. If you cannot complete the task, explain why in the answer and list the remaining work. That ends the run.`
 
+/** A `model` event with a `role` is a secondary model's call: `grounding` answered browser_locate. */
 export type AgentEvent =
   | { type: "step"; step: number }
-  | { type: "model"; step: number; text?: string; toolCalls: ToolCall[]; model?: string; durationMs: number; usage?: Usage }
+  | { type: "model"; step: number; text?: string; toolCalls: ToolCall[]; model?: string; durationMs: number; usage?: Usage; role?: "grounding" }
   | { type: "tool"; step: number; call: ToolCall; result: ToolResult }
   | { type: "done"; result: AgentResult }
 
@@ -36,6 +37,8 @@ export interface AgentResult {
   steps: number
   /** Summed over the run's model calls; see `sumUsage`. */
   usage: Usage & { inputTokens: number; outputTokens: number }
+  /** The grounding model's calls, which `usage` leaves out, summed the same way; present when the run made one. */
+  groundingUsage?: Usage & { inputTokens: number; outputTokens: number }
 }
 
 export interface AgentOptions {
@@ -53,6 +56,10 @@ export interface AgentOptions {
   systemPrompt?: string
   signal?: AbortSignal
   onEvent?: (event: AgentEvent) => void
+  /** Answers browser_locate (the vision capability), which is not offered without it. */
+  groundingModel?: ModelAdapter
+  /** See `ToolContext.groundingScale`. */
+  groundingScale?: number
 }
 
 type Entry = Message
@@ -76,12 +83,14 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     }
   }
   observe()
-  const tools = options.tools ?? selectTools()
+  const context: ToolContext = { groundingModel: options.groundingModel, groundingScale: options.groundingScale, signal }
+  const tools = usableTools(options.tools ?? selectTools(), context)
   const specs = tools.map(toolSpec)
   const maxSteps = options.maxSteps ?? 30
   const maxFailures = options.maxConsecutiveFailures ?? 3
   const system = options.systemPrompt ?? SYSTEM_PROMPT
   const callUsage: Array<Usage | undefined> = []
+  const groundingCalls: Array<Usage | undefined> = []
   const emit = options.onEvent ?? (() => {})
 
   const entries: Entry[] = []
@@ -96,6 +105,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     const final = parseFinalAnswer(text)
     if (outcome) final.outcome = outcome
     const result: AgentResult = { status, stopReason, ...final, observedUrls: [...observedUrls], durationMs: Math.round(performance.now() - startedAt), steps: step, usage: sumUsage(callUsage), ...(error ? { error } : {}) }
+    if (groundingCalls.length) result.groundingUsage = sumUsage(groundingCalls)
     emit({ type: "done", result })
     return result
   }
@@ -164,8 +174,12 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       let canCompare = true
       for (const call of response.toolCalls) {
         signal.throwIfAborted()
-        const result = await interruptible(() => callTool(tools, options.browser, call.name, call.arguments), signal, pending => options.browser.cancelPending(pending))
+        const result = await interruptible(() => callTool(tools, options.browser, call.name, call.arguments, context), signal, pending => options.browser.cancelPending(pending))
         observe()
+        if (result.modelCall) {
+          groundingCalls.push(result.modelCall.usage)
+          emit({ type: "model", step, toolCalls: [], ...result.modelCall })
+        }
         if (result.isError) failed += 1
         if (result.isError || ["browser_wait_for", "browser_scroll"].includes(call.name) || (!result.snapshot && !result.pageText)) canCompare = false
         state.update(JSON.stringify([call.name, call.arguments, result.snapshot, result.pageText ? result.text : undefined]))

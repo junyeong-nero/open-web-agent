@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { errors, type Download, type Locator, type Page, type Response } from "playwright"
 import type { BrowserSession } from "./browser"
-import type { ContentPart, ToolSpec } from "./model/types"
+import type { ContentPart, ModelAdapter, ToolSpec, Usage } from "./model/types"
 
 export interface ToolResult {
   /** What happened, always kept in the transcript. */
@@ -13,9 +13,30 @@ export interface ToolResult {
   image?: { mimeType: string; data: string }
   isError?: boolean
   structuredContent?: Record<string, unknown>
+  /** A model request the tool made; the agent records it like its own model calls. */
+  modelCall?: ModelCall
 }
 
-export type Capability = "core" | "unsafe"
+/** browser_locate's request to the grounding model, as the agent records model calls. */
+export interface ModelCall {
+  role: "grounding"
+  text?: string
+  model?: string
+  durationMs: number
+  usage?: Usage
+}
+
+export type Capability = "core" | "unsafe" | "vision"
+
+/** What a tool call may use besides the browser, set by the front door (the agent or the MCP server). */
+export interface ToolContext {
+  /** Answers browser_locate, which is not offered without it. */
+  groundingModel?: ModelAdapter
+  /** The grounding model answers on a 0–n scale on both axes (e.g. 1000) instead of in screenshot pixels. */
+  groundingScale?: number
+  /** Cancels a model request a tool makes. */
+  signal?: AbortSignal
+}
 
 export interface BrowserTool {
   name: string
@@ -23,7 +44,7 @@ export interface BrowserTool {
   schema: z.ZodObject
   readOnly: boolean
   capability: Capability
-  run(session: BrowserSession, args: any): Promise<ToolResult>
+  run(session: BrowserSession, args: any, context: ToolContext): Promise<ToolResult>
 }
 
 function tool<S extends z.ZodObject>(definition: {
@@ -32,7 +53,7 @@ function tool<S extends z.ZodObject>(definition: {
   schema: S
   readOnly?: boolean
   capability?: Capability
-  run(session: BrowserSession, args: z.infer<S>): Promise<ToolResult>
+  run(session: BrowserSession, args: z.infer<S>, context: ToolContext): Promise<ToolResult>
 }): BrowserTool {
   return { readOnly: false, capability: "core", ...definition }
 }
@@ -261,6 +282,39 @@ function playwrightKey(key: string): string {
   return key.split("+").map((part) => KEY_NAMES.get(part.toLowerCase()) ?? part).join("+")
 }
 
+/** Ask for one point, in screenshot pixels unless the grounding model answers on a 0–`scale` range. */
+function groundingPrompt({ width, height }: { width: number; height: number }, scale?: number): string {
+  const units = scale
+    ? `on a 0–${scale} scale on both axes, from the top-left corner (0, 0) to the bottom-right corner (${scale}, ${scale})`
+    : `in pixels of the ${width}×${height} screenshot, counted from its top-left corner`
+  return `You find one element in a screenshot of a web page. Reply with only the point to click on it as JSON {"x": <x>, "y": <y>}, ${units}. If the element is not in the screenshot, reply "not found".`
+}
+
+const NUMBER = String.raw`-?\d+(?:\.\d+)?`
+
+/**
+ * The point a grounding model's reply names, in whole screenshot pixels, or undefined when it names none inside the
+ * screenshot. Read in order: `x` and `y` keys (JSON or `x=…`), the first group of two numbers in parentheses, brackets
+ * or a tag such as `(x, y)` or `<point>x y</point>`, or of four as a box whose center is taken, then a bare `x, y`.
+ * Values on a 0–`scale` range are scaled to the screenshot, and so are fractions between 0 and 1.
+ */
+export function groundingPoint(reply: string, size: { width: number; height: number }, scale?: number): { x: number; y: number } | undefined {
+  const keyed = ["x", "y"].map((key) => new RegExp(String.raw`\b${key}\b["']?\s*[:=]\s*["']?(${NUMBER})`, "i").exec(reply)?.[1])
+  const grouped = [...reply.matchAll(new RegExp(String.raw`[(\[>]\s*(${NUMBER}(?:(?:\s*,\s*|\s+)${NUMBER}){1,3})\s*[)\]<]`, "g"))]
+    .map((match) => match[1]!.split(/\s*,\s*|\s+/))
+    .find((numbers) => numbers.length === 2 || numbers.length === 4)
+  const bare = new RegExp(String.raw`(${NUMBER})\s*,\s*(${NUMBER})`).exec(reply)?.slice(1)
+  const values = (keyed.every((value) => value !== undefined) ? keyed : grouped ?? bare)?.map(Number)
+  if (!values) return undefined
+  const [x, y] = values.length === 4 ? [(values[0]! + values[2]!) / 2, (values[1]! + values[3]!) / 2] : values
+  const fractions = values.every((value) => Math.abs(value) <= 1) && values.some((value) => !Number.isInteger(value))
+  const range = fractions ? 1 : scale
+  const point = { x: Math.round(range ? (x! * size.width) / range : x!), y: Math.round(range ? (y! * size.height) / range : y!) }
+  if (point.x < 0 || point.y < 0 || point.x > size.width || point.y > size.height) return undefined
+  // A point on the right or bottom edge, such as 1000 on a 0–1000 scale, becomes the last pixel.
+  return { x: Math.min(point.x, size.width - 1), y: Math.min(point.y, size.height - 1) }
+}
+
 export const TOOLS: BrowserTool[] = [
   tool({
     name: "browser_tabs",
@@ -444,10 +498,70 @@ export const TOOLS: BrowserTool[] = [
       return { text: JSON.stringify(result, null, 2) ?? "undefined" }
     },
   }),
+  tool({
+    name: "browser_click_at",
+    description: "Click a point of the viewport, in CSS pixels from its top-left corner, such as one browser_locate returns. For what the snapshot does not show or a ref cannot operate, such as a canvas, a slider or a date picker; otherwise prefer browser_click.",
+    schema: z.object({
+      x: z.number().min(0).describe("Pixels from the left edge of the viewport"),
+      y: z.number().min(0).describe("Pixels from the top edge of the viewport"),
+      element,
+    }),
+    capability: "vision",
+    run: async (session, { x, y, element }) => {
+      // The mouse would dispatch a click outside the viewport without error, and it would reach nothing.
+      const viewport = (await session.page()).viewportSize()
+      if (viewport && (x >= viewport.width || y >= viewport.height)) {
+        return { text: `x=${x}, y=${y} is outside the ${viewport.width}×${viewport.height} viewport, so nothing was clicked. Scroll the target into view and locate it again.`, isError: true }
+      }
+      return act(session, `Clicked ${element ? `${element} ` : ""}at x=${x}, y=${y}`, (page) => page.mouse.click(x, y))
+    },
+  }),
+  tool({
+    name: "browser_locate",
+    description: "Find an element in a screenshot of the viewport and return the point to click it with browser_click_at. A grounding model reads the screenshot, so this also finds what the snapshot does not show, such as a canvas, a slider or a date picker. Describe the element by its visible text, look and position, e.g. \"the 15 in the October calendar\". Only the visible viewport is searched.",
+    schema: z.object({ description: z.string().min(1).describe("The element to find, e.g. the Book button on the seat map") }),
+    readOnly: true,
+    capability: "vision",
+    run: async (session, { description }, { groundingModel, groundingScale, signal }) => {
+      if (!groundingModel) return { text: "browser_locate needs a grounding model (--grounding-model).", isError: true }
+      // With the CSS scale one screenshot pixel is one CSS pixel at any device scale factor, as the mouse expects.
+      const png = await (await session.page()).screenshot({ type: "png", scale: "css" })
+      // A PNG stores its width and height at bytes 16 and 20 of its header.
+      const size = { width: png.readUInt32BE(16), height: png.readUInt32BE(20) }
+      const started = performance.now()
+      const response = await groundingModel.complete({
+        system: groundingPrompt(size, groundingScale),
+        messages: [{ role: "user", content: [{ type: "image", mimeType: "image/png", data: png.toString("base64") }, { type: "text", text: `Element: ${description}` }] }],
+        tools: [],
+        signal,
+      })
+      const modelCall: ModelCall = { role: "grounding", text: response.text, model: response.model, durationMs: Math.round(performance.now() - started), usage: response.usage }
+      const point = groundingPoint(response.text ?? "", size, groundingScale)
+      if (!point) {
+        const reply = (response.text ?? "").replace(/\s+/g, " ").trim()
+        return {
+          text: `No point inside the ${size.width}×${size.height} screenshot in the grounding model's reply. Describe the element another way, or scroll it into view first. The reply: ${JSON.stringify(reply.length > 200 ? `${reply.slice(0, 199)}…` : reply)}`,
+          isError: true,
+          modelCall,
+        }
+      }
+      return {
+        text: `Located ${description} at x=${point.x}, y=${point.y}. Pass these to browser_click_at.`,
+        modelCall,
+        // MCP clients get the point and the grounding call's usage here.
+        structuredContent: { ...point, model: modelCall.model, durationMs: modelCall.durationMs, usage: modelCall.usage },
+      }
+    },
+  }),
 ]
 
 export function selectTools(capabilities: Capability[] = ["core"]): BrowserTool[] {
   return TOOLS.filter((candidate) => capabilities.includes(candidate.capability))
+}
+
+/** The tools a front door offers: browser_locate only with a grounding model to answer it. */
+export function usableTools(tools: BrowserTool[], { groundingModel }: ToolContext): BrowserTool[] {
+  return groundingModel ? tools : tools.filter((candidate) => candidate.name !== "browser_locate")
 }
 
 export function toolSpec(definition: BrowserTool): ToolSpec {
@@ -471,6 +585,7 @@ export async function callTool(
   session: BrowserSession,
   name: string,
   args: unknown,
+  context: ToolContext = {},
 ): Promise<ToolResult> {
   const definition = tools.find((candidate) => candidate.name === name)
   if (!definition) return { text: `Unknown tool "${name}"`, isError: true }
@@ -480,7 +595,7 @@ export async function callTool(
     return { text: `Invalid arguments for ${name}: ${z.prettifyError(parsed.error)}`, isError: true }
   }
   try {
-    return await definition.run(session, parsed.data)
+    return await definition.run(session, parsed.data, context)
   } catch (error) {
     return { text: `${name} failed: ${failureReason(error)}\nTake a new browser_snapshot if the page may have changed.`, isError: true }
   }
