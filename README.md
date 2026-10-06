@@ -105,6 +105,13 @@ owa run "..." --model-module ./my-model.ts
 
 The agent keeps only the newest snapshot and screenshot in its context. It stops when it runs out of steps, after repeated failed steps, or when it stops making progress. In each of these cases it makes one last call to get a best-effort answer.
 
+Before an action or navigation returns its snapshot, it waits for the page to settle: the main-frame
+documents, scripts, styles and XHR/fetch requests it started have finished, a new document has reached
+DOMContentLoaded, and the URL and accessibility tree have not changed for 0.6 seconds. Event streams,
+WebSockets, beacons and requests that were already open do not count. The wait adds at most 3 seconds
+(`BrowserOptions.settleTimeoutMs`; 0 turns it off), and a page still changing then is returned with
+`The page may still be changing.`
+
 Navigation results report HTTP error statuses, for example `The server responded with HTTP 403.`, and keep the error page's snapshot. A navigation that turns into a file download fails with the file's content type and name instead of Playwright's `Download is starting`. That covers a PDF, or a bot wall that serves `application/blank`. Other failed actions keep Playwright's reason, such as the element that intercepted a click. Optional arguments sent as `null` count as omitted, and `browser_press_key` accepts key names in any case (`END`, `CTRL+A`).
 
 If a browser action completes but its follow-up snapshot fails, the tool preserves the action's

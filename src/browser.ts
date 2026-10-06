@@ -17,6 +17,8 @@ export interface BrowserOptions {
   maxSnapshotChars?: number
   /** Per-action timeout; failing fast lets the model re-plan. */
   actionTimeoutMs?: number
+  /** After an action or navigation, wait up to this long for the page to stop changing before the snapshot (default 3000; 0 turns it off). */
+  settleTimeoutMs?: number
 }
 
 const REF_PATTERN = /^(f\d+)?e\d+$/

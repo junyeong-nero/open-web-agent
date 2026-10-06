@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { errors, type Download, type Locator, type Page, type Response } from "playwright"
+import { errors, type Download, type Frame, type Locator, type Page, type Request, type Response } from "playwright"
 import type { BrowserSession } from "./browser"
 import type { ContentPart, ToolSpec } from "./model/types"
 
@@ -43,15 +43,141 @@ const element = z
   .optional()
   .describe("Short human-readable description of the element, shown to humans approving the action")
 
-/** Run a page action, wait for any navigation it caused, and return the fresh snapshot. */
+/** Main-frame requests that can still change a snapshot. Streams (EventSource, WebSocket), beacons, images and fonts never hold it. */
+const SETTLE_REQUESTS = new Set(["document", "stylesheet", "script", "xhr", "fetch"])
+/** How long the URL, the accessibility tree and the tracked requests must stay unchanged for the page to count as settled. */
+const SETTLE_QUIET_MS = 600
+const SETTLE_POLL_MS = 150
+
+interface Settling {
+  /** Start comparing snapshots while the action still waits for its own navigation. */
+  observe(): void
+  /** Wait at most settleTimeoutMs more; resolves to a note when the page was still changing, and never rejects. */
+  settle(): Promise<string>
+  stop(): void
+}
+
+/**
+ * Watch a page from just before an action until it settles: the main-frame documents, scripts, styles and data
+ * requests started since then have finished, a new document has reached DOMContentLoaded, and the URL and the
+ * accessibility tree have not changed for SETTLE_QUIET_MS. An empty tree has not rendered yet. Only request events
+ * and ariaSnapshot, which runs in Playwright's utility world, are used, never page-world evaluate, so pages that
+ * override `window.eval` settle too. Undefined when settling is off or the page cannot be watched.
+ */
+function watchSettling(session: BrowserSession, page: Page): Settling | undefined {
+  const cap = session.options.settleTimeoutMs ?? 3_000
+  if (!(cap > 0)) return undefined
+  const quiet = Math.min(SETTLE_QUIET_MS, cap / 2)
+  // Requests that started before the action, such as an open long poll, are never tracked.
+  const pending = new Set<Request>()
+  let activity = performance.now()
+  const touch = () => { activity = performance.now() }
+  const onRequest = (request: Request) => {
+    try {
+      if (SETTLE_REQUESTS.has(request.resourceType()) && request.frame() === page.mainFrame()) pending.add(request)
+    } catch { /* A service worker request has no frame. */ }
+  }
+  const onFinished = (request: Request) => { if (pending.delete(request)) touch() }
+  const onNavigated = (frame: Frame) => { if (frame === page.mainFrame()) touch() }
+  let stopped = false
+  let wake = () => {}
+  const stop = () => {
+    stopped = true
+    wake()
+    try {
+      page.off("request", onRequest)
+      page.off("requestfinished", onFinished)
+      page.off("requestfailed", onFinished)
+      page.off("framenavigated", onNavigated)
+      page.off("domcontentloaded", touch)
+      page.off("load", touch)
+    } catch { /* Nothing was attached to a page that cannot be watched. */ }
+  }
+  try {
+    page.on("request", onRequest)
+    page.on("requestfinished", onFinished)
+    page.on("requestfailed", onFinished)
+    page.on("framenavigated", onNavigated)
+    page.on("domcontentloaded", touch)
+    page.on("load", touch)
+  } catch {
+    stop()
+    return undefined
+  }
+
+  let deadline = Infinity
+  let loop: Promise<string> | undefined
+  const run = async (): Promise<string> => {
+    let previous: string | undefined
+    while (!stopped) {
+      if (performance.now() >= deadline) return "\nThe page may still be changing."
+      const deciding = deadline < Infinity
+      let took = 0
+      try {
+        // A new tab opened by the action is the page the snapshot shows.
+        const current = await session.page()
+        if (deciding) await current.waitForLoadState("domcontentloaded", { timeout: Math.max(1, deadline - performance.now()) })
+        if (current !== page || !pending.size) {
+          const started = performance.now()
+          const tree = await current.ariaSnapshot({ mode: "ai", timeout: Math.max(1, Math.min(deadline, started + 1_000) - started) })
+          took = performance.now() - started
+          const url = current.url()
+          const state = `${url}\n${tree}`
+          if (previous !== undefined && state !== previous) touch()
+          previous = state
+          // An empty tree has not rendered yet, unless the tab is blank on purpose.
+          if (deciding && (tree || url === "about:blank") && performance.now() - activity >= quiet) return ""
+        }
+      } catch (error) {
+        // A timeout means the page is still busy; anything else, such as a closed page or a cancelled session, ends the wait.
+        if (!(error instanceof errors.TimeoutError)) return ""
+        touch()
+      }
+      const now = performance.now()
+      // Poll every SETTLE_POLL_MS and when the quiet period ends, but spend at most half the time taking snapshots.
+      const next = activity + quiet > now ? Math.min(SETTLE_POLL_MS, activity + quiet - now) : SETTLE_POLL_MS
+      await new Promise<void>((resolve) => {
+        wake = resolve
+        setTimeout(resolve, Math.max(0, Math.min(Math.max(next, took), deadline - now)))
+      })
+    }
+    return ""
+  }
+  return {
+    observe() {
+      touch()
+      loop ??= run()
+    },
+    async settle() {
+      if (stopped) return ""
+      deadline = performance.now() + cap
+      wake()
+      if (!loop) {
+        touch()
+        loop = run()
+      }
+      try { return await loop } finally { stop() }
+    },
+    stop,
+  }
+}
+
+/** Run a page action, wait for any navigation it caused and for the page to settle, and return the fresh snapshot. */
 async function act(session: BrowserSession, summary: string, action: (page: Page) => Promise<unknown>): Promise<ToolResult> {
   const page = await session.page()
+  const settling = watchSettling(session, page)
   const navigated = page
     .waitForEvent("framenavigated", { predicate: (frame) => frame === page.mainFrame(), timeout: 750 })
     .then(() => true, () => false)
-  await action(page)
+  try {
+    await action(page)
+  } catch (error) {
+    settling?.stop()
+    throw error
+  }
+  settling?.observe()
   if (await navigated) await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {})
-  return snapshotAfterAction(session, summary)
+  return snapshotAfterAction(session, summary, settling)
 }
 
 /** A committed document is usable even when its response body is still loading. */
@@ -67,11 +193,13 @@ async function navigate(session: BrowserSession, summary: string, action: (page:
   const onDownload = (download: Download) => { sent.download = download }
   page.on("response", onResponse)
   page.on("download", onDownload)
+  const settling = watchSettling(session, page)
   let response: Response | null
   try {
     // Connection failures and timeouts before commit must remain action failures.
     response = await action(page)
   } catch (error) {
+    settling?.stop()
     // goto rejects with "Download is starting" and a history navigation with net::ERR_ABORTED, before the download event fires.
     const starting = String(error).includes("Download is starting")
     if (!sent.download && (starting || String(error).includes("net::ERR_ABORTED"))) {
@@ -90,11 +218,13 @@ async function navigate(session: BrowserSession, summary: string, action: (page:
         timeout: timeout === 0 ? 0 : Math.max(1, timeout - (performance.now() - started)),
       })
     } catch (error) {
+      // The action timeout is spent, so a page that is still loading is returned without settling.
+      settling?.stop()
       if (!(error instanceof errors.TimeoutError)) throw error
       summary += "\nThe page may still be loading."
     }
   }
-  return snapshotAfterAction(session, summary)
+  return snapshotAfterAction(session, summary, settling)
 }
 
 /** Explain a download so the agent stops reopening a URL whose file the browser cannot show. */
@@ -133,7 +263,8 @@ function failureReason(error: unknown): string {
 }
 
 /** A failed observation must not turn an already completed action into a retryable failure. */
-async function snapshotAfterAction(session: BrowserSession, summary: string): Promise<ToolResult> {
+async function snapshotAfterAction(session: BrowserSession, summary: string, settling?: Settling): Promise<ToolResult> {
+  if (settling) summary += await settling.settle()
   try {
     return snapshotResult(summary, await session.snapshot())
   } catch (error) {
