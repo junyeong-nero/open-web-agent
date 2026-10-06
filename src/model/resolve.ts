@@ -49,8 +49,8 @@ export function modelConfigFromEnv(env: Record<string, string | undefined> = pro
 
 /**
  * A secondary model for one role, e.g. `escalate`: `--<role>-model` or `OWA_<ROLE>_MODEL`, and optional
- * `--<role>-model-options` or `OWA_<ROLE>_MODEL_OPTIONS` (flag > env). Undefined when no model is set. Only the
- * `provider:model` spec and options apply: the main model's base URL, API format, OWA_API_KEY and module do not.
+ * `--<role>-model-options` or `OWA_<ROLE>_MODEL_OPTIONS` (flag > env). Undefined when the model is unset or empty.
+ * Only the `provider:model` spec and options apply: the main model's base URL, API format, OWA_API_KEY and module do not.
  */
 export function roleModelConfig(
   role: string,
@@ -61,11 +61,8 @@ export function roleModelConfig(
   const model = flags.model ?? env[variable]
   const options = flags.options ?? env[`${variable}_OPTIONS`]
   const label = `--${role}-model-options / ${variable}_OPTIONS`
-  if (!model) {
-    if (options !== undefined) throw new Error(`${label} need --${role}-model or ${variable}`)
-    return undefined
-  }
-  return { model, extraBody: parseModelOptions(options, label) }
+  if (model === undefined && options !== undefined) throw new Error(`${label} need --${role}-model or ${variable}`)
+  return model ? { model, extraBody: parseModelOptions(options, label) } : undefined
 }
 
 const RESERVED_OPTIONS = ["model", "messages", "tools", "system", "stream", "api_key", "apiKey", "authorization", "headers"]
