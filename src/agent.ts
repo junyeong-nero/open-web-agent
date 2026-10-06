@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import { interruptible } from "./cancel"
 import type { BrowserSession } from "./browser"
+import { judgeRequest, parseVerdict, UNSUPPORTED_AT } from "./judge"
 import type { Message, ModelAdapter, ToolCall, Usage } from "./model/types"
 import { type BrowserTool, callTool, resultContent, selectTools, type ToolResult, toolSpec } from "./tools"
 
@@ -19,7 +20,8 @@ export const SYSTEM_PROMPT = `You are a web agent that completes the user's task
 
 export type AgentEvent =
   | { type: "step"; step: number }
-  | { type: "model"; step: number; text?: string; toolCalls: ToolCall[]; model?: string; durationMs: number; usage?: Usage }
+  /** `role` is set on the judge model's calls; agent model calls leave it out. */
+  | { type: "model"; step: number; text?: string; toolCalls: ToolCall[]; model?: string; durationMs: number; usage?: Usage; role?: "judge" }
   | { type: "tool"; step: number; call: ToolCall; result: ToolResult }
   | { type: "done"; result: AgentResult }
 
@@ -28,7 +30,14 @@ export interface AgentResult {
   /** Execution termination, distinct from the model's unverified assessment. */
   stopReason: "final_answer" | "step_limit" | "tool_failures" | "model_error" | "timeout" | "cancelled" | "no_progress"
   answer: string
-  outcome: { status: "succeeded" | "partial" | "blocked" | "unknown"; verification: "unverified"; unfinished: string[] }
+  outcome: {
+    status: "succeeded" | "partial" | "blocked" | "unknown"
+    /** `judged` when the judge model checked this succeeded answer against the page evidence; see `judge`. */
+    verification: "unverified" | "judged"
+    unfinished: string[]
+    /** The judge's verdict: the model that judged, its probability that the evidence supports the answer, and why. */
+    judge?: { model: string; supported: number; reason?: string }
+  }
   /** Last 20 distinct HTTP(S) URLs actually observed; not verified citations. */
   observedUrls: string[]
   durationMs: number
@@ -36,6 +45,8 @@ export interface AgentResult {
   steps: number
   /** Summed over the run's model calls; see `sumUsage`. */
   usage: Usage & { inputTokens: number; outputTokens: number }
+  /** The judge model's calls, summed the same way and kept apart because its tokens have another price; set once the judge replied. */
+  judgeUsage?: Usage & { inputTokens: number; outputTokens: number }
 }
 
 export interface AgentOptions {
@@ -51,6 +62,12 @@ export interface AgentOptions {
   /** Stop after identical action/state steps; waits and scrolls are exempt (default three). */
   maxRepeatedSteps?: number
   systemPrompt?: string
+  /**
+   * Checks a final answer whose outcome is succeeded against the page content still in context, in one tool-less request.
+   * When the judge is sure the answer is unsupported, the agent continues once with its finding, or marks the outcome
+   * partial when no step is left. A failed judge request changes nothing.
+   */
+  judgeModel?: ModelAdapter
   signal?: AbortSignal
   onEvent?: (event: AgentEvent) => void
 }
@@ -82,6 +99,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   const maxFailures = options.maxConsecutiveFailures ?? 3
   const system = options.systemPrompt ?? SYSTEM_PROMPT
   const callUsage: Array<Usage | undefined> = []
+  const judgeUsage: Array<Usage | undefined> = []
   const emit = options.onEvent ?? (() => {})
 
   const entries: Entry[] = []
@@ -90,12 +108,16 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   let previousState = ""
   let repeatedSteps = 0
   let partialAnswer = ""
+  let sentBack = false
   const visit = pageVisits()
 
   const finish = (status: AgentResult["status"], stopReason: AgentResult["stopReason"], text: string, error?: string, outcome?: AgentResult["outcome"]): AgentResult => {
     const final = parseFinalAnswer(text)
     if (outcome) final.outcome = outcome
-    const result: AgentResult = { status, stopReason, ...final, observedUrls: [...observedUrls], durationMs: Math.round(performance.now() - startedAt), steps: step, usage: sumUsage(callUsage), ...(error ? { error } : {}) }
+    const result: AgentResult = {
+      status, stopReason, ...final, observedUrls: [...observedUrls], durationMs: Math.round(performance.now() - startedAt), steps: step, usage: sumUsage(callUsage),
+      ...(judgeUsage.length ? { judgeUsage: sumUsage(judgeUsage) } : {}), ...(error ? { error } : {}),
+    }
     emit({ type: "done", result })
     return result
   }
@@ -129,6 +151,19 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     } catch { /* Keep the earlier answer if the best-effort request fails or returns no answer. */ }
     return fallback
   }
+  /** Ask the judge whether the page content in context supports the answer; undefined when the request fails or holds no verdict. */
+  const judge = async (judgeModel: ModelAdapter, answer: string) => {
+    const requestedAt = performance.now()
+    try {
+      const response = await interruptible(() => judgeModel.complete({ ...judgeRequest(options.task, answer, latestPages(entries)), signal }), signal)
+      judgeUsage.push(response.usage)
+      emit({ type: "model", role: "judge", step, text: response.text, toolCalls: response.toolCalls, model: response.model, durationMs: Math.round(performance.now() - requestedAt), usage: response.usage })
+      const verdict = parseVerdict(response.text)
+      return verdict && { model: response.model ?? judgeModel.name, ...verdict }
+    } catch {
+      return undefined
+    }
+  }
 
   try {
     signal.throwIfAborted()
@@ -154,6 +189,21 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
             const followUp = await ask(false, true)
             if (followUp.toolCalls.length === 0) outcome = parseFinalAnswer(`${answer}\n${followUp.text ?? ""}`).outcome
           } catch { /* Keep the original answer if the optional outcome request fails. */ }
+        }
+        // A failed judge request leaves the answer and outcome as they were.
+        const verdict = outcome.status === "succeeded" && options.judgeModel ? await judge(options.judgeModel, parseFinalAnswer(answer).answer) : undefined
+        if (verdict) {
+          outcome = { ...outcome, verification: "judged", judge: verdict }
+          if (verdict.supported <= UNSUPPORTED_AT) {
+            const finding = `A check against the page evidence found the answer unsupported.${verdict.reason ? ` Reason: ${verdict.reason}` : ""}`
+            // Send the answer back once; a second unsupported answer, or one at the step limit, becomes partial.
+            if (step < maxSteps && !sentBack) {
+              sentBack = true
+              entries.push({ role: "user", content: [{ type: "text", text: `${finding}\nVerify the facts in the browser, then reply with your corrected final answer and the outcome line.` }] })
+              continue
+            }
+            outcome = { ...outcome, status: "partial", unfinished: [...outcome.unfinished, finding] }
+          }
         }
         return finish("completed", "final_answer", answer, undefined, outcome)
       }
@@ -274,6 +324,19 @@ function pageVisits() {
     else page.repeats++
     return { url, visits: page.visits, stop: page.repeats > 3 }
   }
+}
+
+/** The newest page text and snapshot: the page content that `render` still keeps in context. */
+function latestPages(entries: Entry[]): { text?: string; snapshot?: string } {
+  const pages: { text?: string; snapshot?: string } = {}
+  for (const entry of entries.toReversed()) {
+    if ("snapshot" in entry) pages.snapshot ??= entry.snapshot
+    else if ("result" in entry) {
+      if (entry.result.pageText) pages.text ??= entry.result.text
+      if (entry.result.snapshot !== undefined) pages.snapshot ??= entry.result.snapshot
+    }
+  }
+  return pages
 }
 
 /** Keep only the newest snapshot and image in context; older ones are superseded page state. */

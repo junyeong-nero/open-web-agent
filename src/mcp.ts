@@ -24,6 +24,8 @@ export interface McpServerOptions {
   agentModel?: ModelAdapter
   agentMaxSteps?: number
   agentTimeoutMs?: number
+  /** With `agentModel`, checks browser_task answers that claim success; see `AgentOptions.judgeModel`. */
+  judgeModel?: ModelAdapter
 }
 
 const BrowserTaskSchema = z.object({
@@ -72,13 +74,15 @@ export function createMcpServer(options: McpServerOptions) {
         tools: options.tools,
         maxSteps: parsed.data.maxSteps ?? options.agentMaxSteps,
         timeoutMs: parsed.data.timeoutMs ?? options.agentTimeoutMs,
+        judgeModel: options.judgeModel,
         signal,
       })
     } catch (error) {
       return { text: `browser_task failed: ${error instanceof Error ? error.message : String(error)}`, isError: true }
     }
+    const judgeTokens = result.judgeUsage ? `, judge tokens: ${result.judgeUsage.inputTokens} in / ${result.judgeUsage.outputTokens} out` : ""
     return {
-      text: `${result.answer || result.error || "No answer returned"}\n\n[status: ${result.status}, steps: ${result.steps}]\n[stop: ${result.stopReason}, outcome: ${result.outcome.status} (unverified), duration: ${result.durationMs}ms, tokens: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out]${result.outcome.unfinished.length ? `\nUnfinished: ${result.outcome.unfinished.join("; ")}` : ""}${result.observedUrls.length ? `\nObserved URLs (not verified citations): ${result.observedUrls.join(", ")}` : ""}`,
+      text: `${result.answer || result.error || "No answer returned"}\n\n[status: ${result.status}, steps: ${result.steps}]\n[stop: ${result.stopReason}, outcome: ${result.outcome.status} (${result.outcome.verification}), duration: ${result.durationMs}ms, tokens: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out${judgeTokens}]${result.outcome.unfinished.length ? `\nUnfinished: ${result.outcome.unfinished.join("; ")}` : ""}${result.observedUrls.length ? `\nObserved URLs (not verified citations): ${result.observedUrls.join(", ")}` : ""}`,
       structuredContent: { ...result },
       isError: taskIncomplete(result),
     }

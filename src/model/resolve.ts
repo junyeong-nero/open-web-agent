@@ -2,12 +2,14 @@ import { isAbsolute, resolve as resolvePath } from "node:path"
 import { pathToFileURL } from "node:url"
 import { anthropicMessages } from "./anthropic"
 import { openaiChat } from "./openai"
+import { typesafeSystemOne } from "./typesafe"
 import type { ModelAdapter } from "./types"
 
 export type ApiFormat = "openai" | "anthropic"
 
 interface ProviderPreset {
-  api: ApiFormat
+  /** `systemone` answers yes/no questions only, so it serves as a judge model, never as the agent model. */
+  api: ApiFormat | "systemone"
   baseUrl: string
   keyEnv?: string
 }
@@ -19,6 +21,7 @@ export const PROVIDERS: Record<string, ProviderPreset> = {
   openrouter: { api: "openai", baseUrl: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY" },
   gemini: { api: "openai", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", keyEnv: "GEMINI_API_KEY" },
   ollama: { api: "openai", baseUrl: "http://localhost:11434/v1" },
+  typesafe: { api: "systemone", baseUrl: "https://api.typesafe.ai/v1", keyEnv: "TYPESAFE_API_KEY" },
 }
 
 export interface ModelConfig {
@@ -49,21 +52,22 @@ export function modelConfigFromEnv(env: Record<string, string | undefined> = pro
 
 const RESERVED_OPTIONS = ["model", "messages", "tools", "system", "stream", "api_key", "apiKey", "authorization", "headers"]
 
-export function parseModelOptions(value: string | undefined): Record<string, unknown> | undefined {
+/** `source` names the flag and variable in error messages. */
+export function parseModelOptions(value: string | undefined, source = "--model-options / OWA_MODEL_OPTIONS"): Record<string, unknown> | undefined {
   if (value === undefined) return undefined
   let parsed: unknown
   try {
     parsed = JSON.parse(value)
   } catch {
     // Do not echo JSON or parser errors: the supplied value may contain credentials.
-    throw new Error("--model-options / OWA_MODEL_OPTIONS must be a JSON object")
+    throw new Error(`${source} must be a JSON object`)
   }
-  return validateModelOptions(parsed)
+  return validateModelOptions(parsed, source)
 }
 
-function validateModelOptions(value: unknown): Record<string, unknown> {
+function validateModelOptions(value: unknown, source = "--model-options / OWA_MODEL_OPTIONS"): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("--model-options / OWA_MODEL_OPTIONS must be a JSON object")
+    throw new Error(`${source} must be a JSON object`)
   }
   for (const key of RESERVED_OPTIONS) {
     if (Object.hasOwn(value, key)) throw new Error(`Model options cannot set "${key}"; use the dedicated model/auth configuration and let the agent manage messages and tools`)
@@ -113,9 +117,26 @@ export async function resolveModel(
     throw new Error(`Model provider "${providerName}" needs an API key: set ${preset.keyEnv} or OWA_API_KEY.`)
   }
 
+  if (api === "systemone") return typesafeSystemOne({ model: spec.model, baseUrl, apiKey, extraBody })
   return api === "anthropic"
     ? anthropicMessages({ model: spec.model, baseUrl, apiKey, maxTokens: config.maxTokens, extraBody })
     : openaiChat({ model: spec.model, baseUrl, apiKey, extraBody })
+}
+
+/**
+ * The model for one secondary role, such as the judge: `--judge-model` or OWA_JUDGE_MODEL, with request fields from
+ * `--judge-model-options` or OWA_JUDGE_MODEL_OPTIONS (flag > env). Undefined when the role has no model.
+ */
+export async function resolveRoleModel(
+  role: string,
+  flags: { model?: string; options?: string } = {},
+  env: Record<string, string | undefined> = process.env,
+): Promise<ModelAdapter | undefined> {
+  const variable = `OWA_${role.toUpperCase()}_MODEL`
+  const model = flags.model ?? env[variable]
+  if (!model) return undefined
+  const extraBody = parseModelOptions(flags.options ?? env[`${variable}_OPTIONS`], `--${role}-model-options / ${variable}_OPTIONS`)
+  return resolveModel({ model, extraBody }, env)
 }
 
 async function loadModelModule(path: string, config: ModelConfig): Promise<ModelAdapter> {
