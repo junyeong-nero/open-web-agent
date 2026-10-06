@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { interruptible } from "./cancel"
 import type { BrowserSession } from "./browser"
-import type { Message, ModelAdapter, ToolCall } from "./model/types"
+import type { Message, ModelAdapter, ToolCall, Usage } from "./model/types"
 import { type BrowserTool, callTool, resultContent, selectTools, type ToolResult, toolSpec } from "./tools"
 
 export const SYSTEM_PROMPT = `You are a web agent that completes the user's task by operating a real browser through tools.
@@ -12,13 +12,14 @@ export const SYSTEM_PROMPT = `You are a web agent that completes the user's task
 - Older snapshots are omitted. Before leaving a page whose facts you still need, read the relevant content with browser_get_text so it survives a tab switch. Before another text read, preserve earlier needed facts in a brief assistant note; only the newest text read is retained.
 - If an action fails, look at the new snapshot and try a different approach instead of repeating the same call.
 - If a page's content, landing URL, or title indicates a bot check, CAPTCHA, or access denial (e.g. google.com/sorry or "Just a moment..."), or the server responds with HTTP 401, 402, 403, or 429, do not retry that site for the rest of this task, even with a different URL or query; use another site or search engine.
+- After a site is blocked, do not keep rewriting search queries whose results point back to it: after three searches without opening a result, answer from what you have seen, with outcome blocked or partial.
 - For lowest/highest/newest questions, use the site's sort or filter when available, otherwise compare every candidate you saw before answering.
 - Never invent facts: base the answer on what you saw in the browser.
 - When finished, reply without tool calls: write your user-facing answer first, then a final line containing only {"outcome":"succeeded|partial|blocked","unfinished":["any remaining work"]}. This is your own assessment, not independent verification. If you cannot complete the task, explain why in the answer and list the remaining work. That ends the run.`
 
 export type AgentEvent =
   | { type: "step"; step: number }
-  | { type: "model"; step: number; text?: string; toolCalls: ToolCall[]; usage?: { inputTokens?: number; outputTokens?: number } }
+  | { type: "model"; step: number; text?: string; toolCalls: ToolCall[]; model?: string; durationMs: number; usage?: Usage }
   | { type: "tool"; step: number; call: ToolCall; result: ToolResult }
   | { type: "done"; result: AgentResult }
 
@@ -33,7 +34,8 @@ export interface AgentResult {
   durationMs: number
   error?: string
   steps: number
-  usage: { inputTokens: number; outputTokens: number }
+  /** Summed over the run's model calls; see `sumUsage`. */
+  usage: Usage & { inputTokens: number; outputTokens: number }
 }
 
 export interface AgentOptions {
@@ -79,7 +81,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   const maxSteps = options.maxSteps ?? 30
   const maxFailures = options.maxConsecutiveFailures ?? 3
   const system = options.systemPrompt ?? SYSTEM_PROMPT
-  const usage = { inputTokens: 0, outputTokens: 0 }
+  const callUsage: Array<Usage | undefined> = []
   const emit = options.onEvent ?? (() => {})
 
   const entries: Entry[] = []
@@ -93,20 +95,21 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   const finish = (status: AgentResult["status"], stopReason: AgentResult["stopReason"], text: string, error?: string, outcome?: AgentResult["outcome"]): AgentResult => {
     const final = parseFinalAnswer(text)
     if (outcome) final.outcome = outcome
-    const result: AgentResult = { status, stopReason, ...final, observedUrls: [...observedUrls], durationMs: Math.round(performance.now() - startedAt), steps: step, usage, ...(error ? { error } : {}) }
+    const result: AgentResult = { status, stopReason, ...final, observedUrls: [...observedUrls], durationMs: Math.round(performance.now() - startedAt), steps: step, usage: sumUsage(callUsage), ...(error ? { error } : {}) }
     emit({ type: "done", result })
     return result
   }
   const ask = async (withTools: boolean, outcomeOnly = false) => {
+    const requestedAt = performance.now()
     const response = await interruptible(() => options.model.complete({
       system,
       messages: render(entries),
       tools: withTools ? specs : [],
       signal,
     }), signal)
-    usage.inputTokens += response.usage?.inputTokens ?? 0
-    usage.outputTokens += response.usage?.outputTokens ?? 0
-    emit({ type: "model", step, text: response.text, toolCalls: response.toolCalls, usage: response.usage })
+    const durationMs = Math.round(performance.now() - requestedAt)
+    callUsage.push(response.usage)
+    emit({ type: "model", step, text: response.text, toolCalls: response.toolCalls, model: response.model, durationMs, usage: response.usage })
     if (!outcomeOnly && response.toolCalls.length === 0 && !parseFinalAnswer(response.text ?? "").answer.trim()) {
       throw new Error(`Model returned no answer or tool calls${response.finishReason ? ` (finish reason: ${response.finishReason})` : ""}`)
     }
@@ -114,7 +117,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     entries.push({ role: "assistant", text: response.text, toolCalls: response.toolCalls })
     return response
   }
-  /** Before an early stop, ask once without tools for the best answer so far; keep `fallback` if that fails or is empty. */
+  /** Before stopping without a final answer, ask once without tools for the best answer so far; keep `fallback` if that fails or is empty. */
   const bestEffortAnswer = async (notice: string, fallback: string) => {
     entries.push({
       role: "user",
@@ -186,12 +189,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     }
 
     // Out of steps: one last tool-less call so the caller still gets the best available answer.
-    entries.push({
-      role: "user",
-      content: [{ type: "text", text: "Step limit reached. Reply now with your best final answer from what you have seen." }],
-    })
-    const last = await ask(false)
-    return finish("max_steps", "step_limit", last.text?.trim() ?? "")
+    return finish("max_steps", "step_limit", await bestEffortAnswer("Step limit reached.", partialAnswer))
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (signal.aborted) return finish("failed", signal.reason === deadline.signal.reason ? "timeout" : "cancelled", partialAnswer, message)
@@ -227,6 +225,22 @@ function parseFinalAnswer(text: string): Pick<AgentResult, "answer" | "outcome">
 /** A finished model response is not proof that the task succeeded. */
 export function taskIncomplete(result: AgentResult): boolean {
   return result.status !== "completed" || result.outcome.status === "blocked" || result.outcome.status === "partial"
+}
+
+/**
+ * Sum per-call usage. Input and output tokens count a missing value as zero; cache counts add up the calls
+ * that reported them. Cost appears only when every call reported one, since a partial sum would understate it.
+ */
+export function sumUsage(calls: Array<Usage | undefined>): AgentResult["usage"] {
+  const total: AgentResult["usage"] = { inputTokens: 0, outputTokens: 0 }
+  for (const call of calls) {
+    for (const key of ["inputTokens", "outputTokens", "cachedInputTokens", "cacheWriteTokens", "cost"] as const) {
+      const value = call?.[key]
+      if (value !== undefined) total[key] = (total[key] ?? 0) + value
+    }
+  }
+  if (calls.some((call) => call?.cost === undefined)) delete total.cost
+  return total
 }
 
 async function taskMessage(options: AgentOptions): Promise<Entry> {

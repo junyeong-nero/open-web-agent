@@ -75,3 +75,50 @@ it("falls back when the deadline or cancellation interrupts the best-effort requ
     expect(model.requests).toHaveLength(4)
   }
 })
+
+/** One step that calls a tool and leaves a partial answer, so a step limit of 1 ends the run. */
+async function stepLimitRun(final: Reply, options: Pick<AgentOptions, "signal" | "timeoutMs"> = {}) {
+  const model = scriptedModel([() => ({ text: note, toolCalls: [{ id: "1", name: "missing", arguments: {} }] }), final])
+  const result = await runAgent({ task: "t", browser: new BrowserSession({ headless: true }), model, maxSteps: 1, ...options })
+  return { model, result }
+}
+
+it("asks for the outcome line in the one tool-less request at the step limit", async () => {
+  const { model, result } = await stepLimitRun(() => ({
+    text: 'The first two prices are $10 and $12.\n{"outcome":"partial","unfinished":["Find the third price"]}',
+    toolCalls: [],
+  }))
+  expect(result).toMatchObject({
+    status: "max_steps", stopReason: "step_limit", steps: 1, answer: "The first two prices are $10 and $12.",
+    outcome: { status: "partial", verification: "unverified", unfinished: ["Find the third price"] },
+  })
+  expect(result.error).toBeUndefined()
+  expect(model.requests.map(request => request.tools.length > 0)).toEqual([true, false])
+  const notice = model.requests[1]!.messages.at(-1)
+  const text = notice?.role === "user" && notice.content[0]?.type === "text" ? notice.content[0].text : ""
+  expect(text).toContain("Step limit reached.")
+  expect(text).toContain("succeeded|partial|blocked")
+})
+
+it.each(unusableReplies)("keeps step_limit and the partial answer when the step-limit reply %s", async (_reply, final) => {
+  const { model, result } = await stepLimitRun(final)
+  expect(result).toMatchObject({ status: "max_steps", stopReason: "step_limit", steps: 1, answer: note, outcome: { status: "unknown", unfinished: [] } })
+  expect(result.error).toBeUndefined()
+  expect(model.requests).toHaveLength(2)
+})
+
+it("keeps step_limit when the deadline or cancellation interrupts the step-limit request", async () => {
+  for (const cancel of [false, true]) {
+    const controller = new AbortController()
+    let signal: AbortSignal | undefined
+    const { model, result } = await stepLimitRun(request => {
+      signal = request.signal
+      if (cancel) controller.abort(new Error("Cancelled"))
+      // Simulate an adapter that ignores abort; runAgent must stop waiting.
+      return new Promise(() => {})
+    }, { signal: controller.signal, timeoutMs: cancel ? 5_000 : 200 })
+    expect(signal?.aborted).toBe(true)
+    expect(result).toMatchObject({ status: "max_steps", stopReason: "step_limit", steps: 1, answer: note })
+    expect(model.requests).toHaveLength(2)
+  }
+})

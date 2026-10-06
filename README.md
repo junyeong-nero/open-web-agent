@@ -127,6 +127,11 @@ Snapshots longer than 40,000 characters are cut. When one is cut, its open dialo
 `alertdialog`) come first and the rest of the page fills the remaining space, so a modal rendered at
 the end of the page stays visible and its refs work.
 
+A checkbox or radio covered by its own label, as when a site hides the input under a styled label, is
+clicked through that label at the same point instead of waiting for the action timeout, and the result
+says so. Anything else on top, such as a dialog or a cookie banner, still fails the click with an error
+that names it.
+
 ## Options
 
 ```
@@ -198,6 +203,30 @@ CLI exit code. An unknown outcome is not treated as an execution error, but is n
 For an explicit real-model evaluation (separate from unit tests), run `bun run eval --live --model
 openai:gpt-6-luna --model-options '{"reasoning_effort":"none"}'`. See [evaluation instructions](docs/evaluation.md)
 for cases, JSON reports and the direct-operation versus delegation comparison procedure.
+
+### Usage and cost
+
+Each model call's usage has the fields below. A value the provider did not send is left out, never
+written as zero.
+
+| field | meaning | OpenAI format `usage` (OpenAI, OpenRouter, Gemini, …) | Anthropic `usage` |
+|---|---|---|---|
+| `inputTokens` | all input tokens, cache reads and writes included | `prompt_tokens` | `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` |
+| `outputTokens` | output tokens | `completion_tokens` | `output_tokens` |
+| `cachedInputTokens` | input tokens read from the prompt cache | `prompt_tokens_details.cached_tokens` | `cache_read_input_tokens` |
+| `cacheWriteTokens` | input tokens written to the prompt cache | `prompt_tokens_details.cache_write_tokens` (OpenRouter) | `cache_creation_input_tokens` |
+| `cost` | what the provider charged, in its own unit (OpenRouter: US dollars) | `cost` (OpenRouter) | — |
+
+Uncached input is `inputTokens - cachedInputTokens - cacheWriteTokens`. The task result's `usage`
+(`owa run --json`, `browser_task.structuredContent`) sums the calls: `inputTokens` and `outputTokens`
+are always present and count a call that reported nothing as zero, `cachedInputTokens` and
+`cacheWriteTokens` add up the calls that reported them, and `cost` appears only when every call
+reported one, because a sum that skipped calls would understate the bill.
+
+`--trace` writes a `model` event for each model response with that call's `usage`, `durationMs` (the
+call's wall-clock time) and `model`, the model the response named. `model` can differ from the
+configured one: OpenAI may name a dated snapshot, and a router such as `openrouter:typesafe/jev-router`
+names the model it chose. A failed call writes no `model` event.
 
 ### Task limits and cancellation
 

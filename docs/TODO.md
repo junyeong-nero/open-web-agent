@@ -16,10 +16,6 @@ Decided work is tracked in issues. Every other item here is an observation. Conf
 
 ## Observed, not filed yet
 
-- **Search loops after a blocked site.**
-  - When a site is blocked, the agent can spend most of its steps on new search queries. Allrecipes--19 and Healthgrades ran 18 and 23 Bing searches on 2026-10-05.
-  - Each query is a new URL, so the revisit check (#136) resets every time.
-  - Options: a budget for consecutive searches that open no result page, or a prompt rule. Either needs a live A/B.
 - **URL guessing persists on some sites.** After #149, `Apple--11` still guessed 6–7 URLs after a 404.
 - **Cookie banners and late popups are rarely dismissed.**
   - Amtrak's cookie banner was in the snapshot, but the model clicked behind it.
@@ -29,9 +25,6 @@ Decided work is tracked in issues. Every other item here is an observation. Conf
   - `browser_get_text` can continue with `offset` (#138). The model used it in only 2 of 6 cut reads.
   - Only the newest text stays in context, so facts from earlier parts drop out unless the model notes them.
   - `ArXiv--6` still undercounts tables.
-- **Step-limit answers can lack the outcome line.**
-  - The early-stop request (#135) asks for the outcome line, but the step-limit request does not.
-  - One run, `Wolfram Alpha--45`, ended with `outcome: unknown`.
 - **Snapshot budget.**
   - About a third of snapshots on real sites hit the 40,000-character cut.
   - Open dialogs now come first (#147), but on many pages navigation menus and footers still use most of the budget.

@@ -26,12 +26,27 @@ export interface ModelRequest {
   signal?: AbortSignal
 }
 
+/** Token counts and cost as the provider reported them. A field the provider did not send is left out, never zero. */
+export interface Usage {
+  /** Every input token, including cache reads and writes. */
+  inputTokens?: number
+  outputTokens?: number
+  /** Input tokens read from the provider's prompt cache. */
+  cachedInputTokens?: number
+  /** Input tokens written to the provider's prompt cache. */
+  cacheWriteTokens?: number
+  /** What the provider charged, in its own unit (OpenRouter: US dollars). */
+  cost?: number
+}
+
 export interface ModelResponse {
   text?: string
   toolCalls: ToolCall[]
   /** Provider-reported termination reason, retained for response diagnostics. */
   finishReason?: string
-  usage?: { inputTokens?: number; outputTokens?: number }
+  /** The model that served the request, as the response named it; a router names the model it chose. */
+  model?: string
+  usage?: Usage
 }
 
 /** The whole model boundary: one provider-neutral request in, one response out. */
@@ -79,6 +94,12 @@ export async function postJson(
     throw new ModelHttpError(response.status, safeText, adapter)
   }
   return JSON.parse(text)
+}
+
+/** Keep the usage fields that hold a number; undefined when none does. Missing or null values are not turned into zeros. */
+export function reportedUsage(fields: { [K in keyof Usage]: unknown }): Usage | undefined {
+  const reported = Object.entries(fields).filter(([, value]) => typeof value === "number" && Number.isFinite(value))
+  return reported.length > 0 ? Object.fromEntries(reported) : undefined
 }
 
 export function parseToolArguments(raw: unknown): Record<string, unknown> {
