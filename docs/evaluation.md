@@ -49,6 +49,72 @@ Do not convert tokens to money without recording the model prices, units, cache 
 price date used. Fixture results are reproducible checks of a small task set, not a claim about
 arbitrary websites. Record external-site smoke tests separately.
 
+## Real-site benchmark
+
+`bun run bench` compares model configurations, called arms, on real websites. It calls real model
+APIs and costs money, so `bun run test` never runs it.
+
+```bash
+bun run bench --tasks ~/owa-bench/tasks.json --arms ~/owa-bench/arms.json \
+  --out ~/owa-bench/2026-10-07 --runs 1 --parallel 4
+```
+
+The task file is a JSON array of `{ id, task }`. The task text goes to `owa run` unchanged, so it
+must name the start URL when the task needs one. Other fields are ignored, so a converted dataset
+can keep its metadata. Ids become directory names and must not contain `/`. Keep WebVoyager and
+Online-Mind2Web tasks outside the repository until their licenses are checked.
+
+```json
+[
+  { "id": "hn-top", "task": "Open https://news.ycombinator.com and report the title of the top story." },
+  { "id": "python-release", "task": "On https://www.python.org, report the latest Python 3 version.", "site": "python.org" }
+]
+```
+
+The arms file gives each arm a `name` and its `--model`. `modelOptions` (`--model-options`), `flags`
+(more `owa run` flags) and `prices` (USD per million tokens) are optional:
+
+```json
+[
+  { "name": "luna", "model": "openai:gpt-6-luna", "modelOptions": { "reasoning_effort": "none" },
+    "prices": { "input": 0.10, "cachedInput": 0.01, "output": 0.50 } },
+  { "name": "jev", "model": "openrouter:typesafe/jev-router" },
+  { "name": "gemma", "model": "openrouter:google/gemma-4-26b-a4b-it", "flags": ["--max-steps", "30"] }
+]
+```
+
+Each run calls `bun src/cli.ts run --json --headless --trace … --model … -- <task>`. Only the arm's
+configuration applies: the runner removes `OWA_*` variables other than `OWA_API_KEY` from the CLI's
+environment. `--runs` (default 1) repeats every task, and `--parallel` (default 1) runs that many at
+once. Runs go task by task with the arms side by side, so the arms see each site at about the same
+time. `--run-timeout` (default 600 seconds) stops a run that outlives the agent's own deadline
+(`--timeout-ms`, default 300 seconds), and the run counts as `run_timeout`.
+
+Each run keeps `result.json` (the `--json` output), `trace.jsonl`, `stderr.log` and `meta.json` (exit
+code, seconds, timeout, CLI arguments) in `<out>/runs/<arm>/<task id>/<run>/`. Run the same command
+again to resume. Finished runs are skipped. Runs stopped with Ctrl-C, and runs whose CLI failed
+without a result (`cli_error`, such as a missing API key), run again. Delete a run's directory to
+repeat it. An arm whose model, options or flags changed since its earlier runs is refused.
+
+At the end the runner writes `summary.md` and `summary.json` to the output directory and prints the
+overall table, which compares the arms side by side:
+
+- results by `outcome.status` and `stopReason`, and steps
+- wall time per run, median and total
+- model calls, their mean and total time, and the models that served them, as each response named
+  it (a router names the model it chose)
+- input, cached input and output tokens, summed as in the task result's `usage` (see "Usage and
+  cost" in the README). The provider's reported cost appears only when every run that called the
+  model reported one. With `prices`, the summary also estimates the cost in US dollars, billing cache
+  reads at `cachedInput` and all other input at `input`.
+- tool errors by class: stale ref, click intercepted, not visible or outside the viewport,
+  navigation failure, download, invalid arguments, and other
+
+`summary.md` adds a per-task table with each run's outcome, median steps and wall time, input tokens
+and tool errors. `summary.json` holds the full summary for every arm, overall and per task, and one
+record per run with its answer. Outcomes remain the model's unverified assessment, so check answers
+against references before claiming accuracy.
+
 ## Recorded baseline (2026-09-28)
 
 With `openai:gpt-6-luna`, `reasoning_effort: none`, 15 steps and one run per case:
