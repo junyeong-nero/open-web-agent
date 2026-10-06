@@ -16,10 +16,6 @@ Decided work is tracked in issues. Every other item here is an observation. Conf
 
 ## Observed, not filed yet
 
-- **Search loops after a blocked site.**
-  - When a site is blocked, the agent can spend most of its steps on new search queries. Allrecipes--19 and Healthgrades ran 18 and 23 Bing searches on 2026-10-05.
-  - Each query is a new URL, so the revisit check (#136) resets every time.
-  - Options: a budget for consecutive searches that open no result page, or a prompt rule. Either needs a live A/B.
 - **URL guessing persists on some sites.** After #149, `Apple--11` still guessed 6–7 URLs after a 404.
 - **Cookie banners and late popups are rarely dismissed.**
   - Amtrak's cookie banner was in the snapshot, but the model clicked behind it.

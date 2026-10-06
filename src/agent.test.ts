@@ -154,6 +154,7 @@ it("gives the model rules for the HTTP statuses that navigation results report",
   // One assertion per prompt rule, so dropping a rule drops only its line.
   expect(missing!.system).toContain("the server responds with HTTP 401, 402, 403, or 429")
   expect(missing!.system).toContain("If a URL you guessed returns HTTP 404")
+  expect(missing!.system).toContain("do not keep rewriting search queries whose results point back to it")
 }, 30_000)
 
 it("asks once without tools for an outcome and preserves the original answer", async () => {
