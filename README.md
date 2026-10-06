@@ -195,7 +195,9 @@ CLI exit code. An unknown outcome is not treated as an execution error, but is n
 
 For an explicit real-model evaluation (separate from unit tests), run `bun run eval --live --model
 openai:gpt-6-luna --model-options '{"reasoning_effort":"none"}'`. See [evaluation instructions](docs/evaluation.md)
-for cases, JSON reports and the direct-operation versus delegation comparison procedure.
+for cases, JSON reports and the direct-operation versus delegation comparison procedure. To compare
+models on real websites, `bun run bench` runs a task file with several model configurations and
+summarizes them side by side ([real-site benchmark](docs/evaluation.md#real-site-benchmark)).
 
 ### Usage and cost
 
