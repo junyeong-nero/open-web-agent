@@ -83,7 +83,7 @@ When you are Codex working on a delegated issue:
 | `src/agent.ts` | `runAgent`: a native function-calling loop. A reply with no tool calls is the final answer. `render()` keeps only the newest snapshot and image in context |
 | `src/model/types.ts` | Provider-neutral `Message` / `ModelAdapter`. This is the whole model boundary |
 | `src/model/openai.ts`, `anthropic.ts` | Wire-format adapters written directly on `fetch` (no SDKs) |
-| `src/model/resolve.ts` | `provider:model` shorthands (`PROVIDERS`), env/flag config, `--model-module` loading |
+| `src/model/resolve.ts` | `provider:model` shorthands (`PROVIDERS`), env/flag config, `--model-module` loading. `roleModelConfig` configures opt-in secondary models (`--<role>-model`, `OWA_<ROLE>_MODEL`), such as `--escalate-model` |
 | `src/cli.ts` | `owa run` / `owa mcp`. In `mcp` mode stdout is reserved for JSON-RPC, so log to stderr |
 
 Rules of thumb:

@@ -34,7 +34,7 @@ const reply = (text: string, usage: Usage, outcome = "succeeded"): Reply => () =
 const replies = (count: number, next: Reply) => Array<Reply>(count).fill(next)
 
 /** Runs the first model's script, and the escalation model's when one is given (named "strong"). */
-async function run(tool: BrowserTool, weak: Reply[], strong?: Reply[], options: Pick<AgentOptions, "maxSteps" | "maxRepeatedSteps"> = {}) {
+async function run(tool: BrowserTool, weak: Reply[], strong?: Reply[], options: Pick<AgentOptions, "maxSteps" | "maxRepeatedSteps" | "escalateStepFraction"> = {}) {
   const model = scriptedModel(weak)
   const escalateModel = strong && { ...scriptedModel(strong), name: "strong" }
   const events: AgentEvent[] = []
@@ -114,6 +114,15 @@ it("escalates on a page revisit cycle, and the escalation model's revisit counts
   expect(result).toMatchObject({ stopReason: "final_answer", steps: 11, escalation: { step: 9, signal: "no_progress" } })
 })
 
+it("escalates once escalateStepFraction of the steps are used, and 1 turns that signal off", async () => {
+  const half = await run(clickTool(moving), replies(3, click(weakUsage)), [reply("Done", strongUsage)], { maxSteps: 6, escalateStepFraction: 0.5 })
+  expect(half.result).toMatchObject({ stopReason: "final_answer", steps: 4, escalation: { step: 3, signal: "step_budget" } })
+  const off = await run(clickTool(moving), [...replies(6, click(weakUsage)), reply("Best effort", weakUsage, "partial")], [], { maxSteps: 6, escalateStepFraction: 1 })
+  expect(off.result).toMatchObject({ stopReason: "step_limit", steps: 6, answer: "Best effort" })
+  expect(off.result).not.toHaveProperty("escalation")
+  expect(off.escalateModel!.requests).toHaveLength(0)
+})
+
 it("stops as before when a stall leaves no step to hand over", async () => {
   const { escalateModel, result } = await run(clickTool(stuck), [...replies(2, click(weakUsage)), reply("Best effort", weakUsage, "partial")], [], { maxSteps: 2, maxRepeatedSteps: 2 })
   expect(result).toMatchObject({ stopReason: "no_progress", steps: 2, answer: "Best effort" })
@@ -174,29 +183,37 @@ it("rejects escalation options that are invalid or have no model, without echoin
     try { parse() } catch (error) { expect(String(error)).not.toContain("secret-token") }
   }
   expect(() => roleModelConfig("escalate", { model: "openai:gpt-6-sol", options: '{"model":"secret-token"}' }, {})).toThrow('cannot set "model"')
-  expect(() => roleModelConfig("escalate", {}, { OWA_ESCALATE_MODEL_OPTIONS: "{}" })).toThrow("need --escalate-model or OWA_ESCALATE_MODEL")
+  expect(() => roleModelConfig("escalate", {}, { OWA_ESCALATE_MODEL_OPTIONS: "{}" })).toThrow("needs --escalate-model or OWA_ESCALATE_MODEL")
 })
 
-it.each([["run", "t"], ["mcp", "--agent"]])("checks the escalation model before any model request: %s %s", async (...command) => {
+it.each([["run", "t"], ["mcp", "--agent"]])("resolves the escalation model from the flag or env before any model request: %s %s", async (command, argument) => {
   let requests = 0
   const endpoint = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch() {
     requests++
-    return Response.json({ choices: [{ message: { content: "done" } }] })
+    return Response.json({ choices: [{ message: { content: 'done\n{"outcome":"succeeded","unfinished":[]}' } }] })
   } })
   const cli = async (args: string[], env: Record<string, string> = {}) => {
     const proc = Bun.spawn([
-      process.execPath, join(import.meta.dir, "cli.ts"), ...command, "--model", "local", "--api", "openai", "--base-url", `http://127.0.0.1:${endpoint.port}`, ...args,
+      process.execPath, join(import.meta.dir, "cli.ts"), command, argument, "--model", "local", "--api", "openai", "--base-url", `http://127.0.0.1:${endpoint.port}`, ...args,
     ], { env: { PATH: process.env.PATH, ...env }, stdin: "ignore", stdout: "ignore", stderr: "pipe" })
     const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited])
     return { code, stderr }
   }
+  // Check fields one by one: Bun's toMatchObject replaces the fields it matched with asymmetric matchers.
+  const fails = async (message: string, args: string[], env?: Record<string, string>) => {
+    const { code, stderr } = await cli(args, env)
+    expect(code).toBe(1)
+    expect(stderr).toContain(message)
+    expect(stderr).not.toContain("secret-token")
+  }
   try {
-    // Only a provider shorthand and that provider's key apply; this environment has no key.
-    expect(await cli(["--escalate-model", "openai:gpt-6-sol"])).toMatchObject({ code: 1, stderr: expect.stringContaining("set OPENAI_API_KEY") })
-    const invalid = await cli(["--escalate-model", "openai:gpt-6-sol", "--escalate-model-options", "invalid secret-token"])
-    expect(invalid).toMatchObject({ code: 1, stderr: expect.stringContaining("--escalate-model-options / OWA_ESCALATE_MODEL_OPTIONS must be a JSON object") })
-    expect(invalid.stderr).not.toContain("secret-token")
-    expect(await cli([], { OWA_ESCALATE_MODEL_OPTIONS: "{}" })).toMatchObject({ code: 1, stderr: expect.stringContaining("need --escalate-model") })
+    // Only a provider shorthand and that provider's own key apply; OWA_API_KEY belongs to the main model.
+    await fails("set OPENAI_API_KEY", ["--escalate-model", "openai:gpt-6-sol"])
+    await fails("set OPENAI_API_KEY", [], { OWA_ESCALATE_MODEL: "openai:gpt-6-sol", OWA_API_KEY: "main-key" })
+    await fails("--escalate-model-options / OWA_ESCALATE_MODEL_OPTIONS must be a JSON object", ["--escalate-model", "openai:gpt-6-sol", "--escalate-model-options", "invalid secret-token"])
+    await fails("needs --escalate-model or OWA_ESCALATE_MODEL", [], { OWA_ESCALATE_MODEL_OPTIONS: "{}" })
     expect(requests).toBe(0)
+    // An empty flag turns off an escalation model set in the environment.
+    expect((await cli(["--escalate-model", ""], { OWA_ESCALATE_MODEL: "openai:gpt-6-sol" })).code).toBe(0)
   } finally { endpoint.stop(true) }
-})
+}, 30_000)

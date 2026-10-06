@@ -41,7 +41,7 @@ export interface AgentResult {
   escalation?: Escalation
 }
 
-/** Where `escalateModel` took over: after `step`, on `signal`. `usage` sums that model's calls alone. */
+/** Where `escalateModel` took over: after `step`, on `signal`. `model` is its adapter name, and `usage` sums its calls alone. */
 export interface Escalation {
   step: number
   signal: "no_progress" | "tool_failures" | "step_budget"
@@ -54,10 +54,13 @@ export interface AgentOptions {
   model: ModelAdapter
   /**
    * Opt-in model, possibly `model` with other options, that takes over the remaining steps and the same transcript on
-   * the run's first stall signal: a no_progress or tool_failures stop, or two thirds of the step budget used. It takes
-   * over once, with fresh stall counts; a second stall stops the run as usual.
+   * the run's first stall signal: where the run would stop for no_progress or tool_failures, or once
+   * `escalateStepFraction` of the steps are used. It takes over once, with fresh stall counts; a second stall stops the
+   * run as usual.
    */
   escalateModel?: ModelAdapter
+  /** Share of `maxSteps` after which a run without a final answer escalates (default 2/3, step 20 of 30); 1 turns this signal off. */
+  escalateStepFraction?: number
   browser: BrowserSession
   tools?: BrowserTool[]
   maxSteps?: number
@@ -222,7 +225,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
         return finish("failed", "tool_failures", await bestEffortAnswer(`Stopping because every browser action failed in the last ${failures} steps.`, `Stopped after ${failures} consecutive steps where every browser action failed.`))
       }
       // Most stalled runs end at the step limit, where no steps would be left to hand over.
-      if (step >= Math.ceil(maxSteps * 2 / 3)) escalate("step_budget", `${step} of ${maxSteps} steps are used.`)
+      if (step >= Math.ceil(maxSteps * (options.escalateStepFraction ?? 2 / 3))) escalate("step_budget", `${step} of ${maxSteps} steps are used.`)
     }
 
     // Out of steps: one last tool-less call so the caller still gets the best available answer.

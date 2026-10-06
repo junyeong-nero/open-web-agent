@@ -90,6 +90,38 @@ export default (config): ModelAdapter => ({
 owa run "..." --model-module ./my-model.ts
 ```
 
+### Escalating stalled runs
+
+`--escalate-model <provider:model>` (or `OWA_ESCALATE_MODEL`) adds an optional second model that takes over a run
+that stalls. It is off by default, and without it nothing changes. On the run's first stall signal, the remaining
+steps go to this model instead of the run stopping. There are three signals:
+
+- `no_progress`: the run would stop for repeated identical steps or a page revisit cycle (see "Task limits and
+  cancellation").
+- `tool_failures`: the run would stop after consecutive steps in which every browser action failed.
+- `step_budget`: two thirds of the step budget are used without a final answer (step 20 of the default 30). Most
+  stalled runs end at the step limit, where no steps would be left to hand over. Library callers can change the
+  fraction with `escalateStepFraction`; `1` turns this signal off.
+
+The escalation model continues the same transcript after a short note that gives the reason and the number of
+remaining steps, and its stall counts start fresh. A run escalates at most once, and only while steps remain. Both
+models share the step budget and the deadline. If the run stalls again, it stops as before, and the escalation model
+writes the best-effort answer.
+
+`--escalate-model-options` (or `OWA_ESCALATE_MODEL_OPTIONS`) is a JSON object like `--model-options`, so the same model
+with more reasoning also works:
+
+```bash
+owa run "..." --model openai:gpt-6-luna --model-options '{"reasoning_effort":"none"}' \
+  --escalate-model openai:gpt-6-luna --escalate-model-options '{"reasoning_effort":"medium"}'
+```
+
+The escalation model is resolved from its `provider:model` shorthand alone and reads that provider's key variable
+(`OPENAI_API_KEY`, …). `--base-url`, `--api`, `--model-module` and `OWA_API_KEY` apply only to the main model, so a key
+never reaches another provider. `--escalate-model ""` turns off a model set in the environment, and options without a
+model are an error. Escalation also applies to `browser_task` in `owa mcp --agent`, and library callers pass
+`escalateModel` to `runAgent`. "Usage and cost" below describes how the result and the trace report it.
+
 ## Tools
 
 | tool | what it does |
@@ -103,7 +135,7 @@ owa run "..." --model-module ./my-model.ts
 | `browser_screenshot` | PNG of the viewport or full page |
 | `browser_evaluate` | run JavaScript in the page (**opt-in**: `--caps unsafe`) |
 
-The agent keeps only the newest snapshot and screenshot in its context. It stops when it runs out of steps, after repeated failed steps, or when it stops making progress. In each of these cases it makes one last call to get a best-effort answer.
+The agent keeps only the newest snapshot and screenshot in its context. It stops when it runs out of steps, after repeated failed steps, or when it stops making progress. In each of these cases it makes one last call to get a best-effort answer. With `--escalate-model`, a stalling run first goes to a second model ([Escalating stalled runs](#escalating-stalled-runs)).
 
 Navigation results report HTTP error statuses, for example `The server responded with HTTP 403.`, and keep the error page's snapshot. A navigation that turns into a file download fails with the file's content type and name instead of Playwright's `Download is starting`. That covers a PDF, or a bot wall that serves `application/blank`. Other failed actions keep Playwright's reason, such as the element that intercepted a click. Optional arguments sent as `null` count as omitted, and `browser_press_key` accepts key names in any case (`END`, `CTRL+A`).
 
@@ -137,6 +169,10 @@ that names it.
 --caps core,unsafe
 --max-steps <n>              default 30
 --timeout-ms <n>             total agent deadline, default 300000
+--escalate-model <provider:model>
+                             OWA_ESCALATE_MODEL, opt-in model that takes over a stalled run once
+--escalate-model-options <json>
+                             OWA_ESCALATE_MODEL_OPTIONS, its extra API request fields (JSON object)
 --trace run.jsonl            append agent events as JSONL
 --json                       (run) print the full result as JSON
 ```
@@ -174,7 +210,8 @@ bun run test          # launches headless Chromium against a local fixture serve
 
 `owa run --json` and MCP `browser_task.structuredContent` return the same compact result:
 `answer`, `status`, `stopReason`, `outcome`, `observedUrls`, `durationMs`, `steps`, and `usage`
-(and `error` for a failed model request). MCP still returns readable text beginning with the answer.
+(and `error` for a failed model request, and `escalation` when a second model took over). MCP still returns
+readable text beginning with the answer.
 
 `status: completed` only means the model produced a final answer. `stopReason` distinguishes
 `final_answer`, `step_limit`, `no_progress`, `tool_failures`, `model_error`, `timeout`, and `cancelled`. The model is asked to write the
@@ -222,6 +259,14 @@ reported one, because a sum that skipped calls would understate the bill.
 call's wall-clock time) and `model`, the model the response named. `model` can differ from the
 configured one: OpenAI may name a dated snapshot, and a router such as `openrouter:typesafe/jev-router`
 names the model it chose. A failed call writes no `model` event.
+
+With `--escalate-model`, a run that escalated also has `escalation` in its result: `step`, the last step before the
+switch; `signal` (`no_progress`, `tool_failures` or `step_budget`); `model`, the escalation model's adapter name, such
+as `openai-chat:gpt-6-sol`; and `usage`, the escalation model's calls summed by the rules above. The result's `usage`
+still covers every call, so the first model's token counts are the difference. Each sum applies the cost rule on its
+own, so when only the escalation model reports a cost, `cost` appears only in `escalation.usage`. In the trace, an
+`escalate` event records the switch (`step`, `signal`, `model`), and every later `model` event has `role: "escalate"`.
+The role tells the two models apart even when they are the same model with different options.
 
 ### Task limits and cancellation
 
