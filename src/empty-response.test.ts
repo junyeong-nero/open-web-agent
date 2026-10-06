@@ -29,8 +29,8 @@ it("preserves a previous partial answer when the final step-limit reply is empty
     () => ({ text: "Found a partial price", toolCalls: [{ id: "1", name: "missing", arguments: {} }] }),
     () => ({ toolCalls: [], finishReason: "length" }),
   ]) })
-  expect(result).toMatchObject({ status: "failed", stopReason: "model_error", answer: "Found a partial price" })
-  expect(result.error).toContain("length")
+  expect(result).toMatchObject({ status: "max_steps", stopReason: "step_limit", answer: "Found a partial price" })
+  expect(result.error).toBeUndefined()
 })
 
 it("marks an empty delegated response as an MCP error", async () => {

@@ -29,9 +29,6 @@ Decided work is tracked in issues. Every other item here is an observation. Conf
   - `browser_get_text` can continue with `offset` (#138). The model used it in only 2 of 6 cut reads.
   - Only the newest text stays in context, so facts from earlier parts drop out unless the model notes them.
   - `ArXiv--6` still undercounts tables.
-- **Step-limit answers can lack the outcome line.**
-  - The early-stop request (#135) asks for the outcome line, but the step-limit request does not.
-  - One run, `Wolfram Alpha--45`, ended with `outcome: unknown`.
 - **Snapshot budget.**
   - About a third of snapshots on real sites hit the 40,000-character cut.
   - Open dialogs now come first (#147), but on many pages navigation menus and footers still use most of the budget.

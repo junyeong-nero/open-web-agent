@@ -1,3 +1,19 @@
+/** Styled controls as many sites draw them: the real input sits under the element after it. */
+const TOGGLES = `<title>Card options</title><style>
+    .covered { position: relative; display: inline-block }
+    .covered > input { position: absolute; left: 0; top: 0; margin: 0; opacity: 0 }
+    .covered > :not(input) { position: relative; display: inline-block; padding-left: 20px }
+  </style>
+    <script>document.addEventListener("change", () => { document.documentElement.dataset.changedAt ??= String(Date.now()) })</script>
+    <p><label class="covered" for="compare"><input id="compare" type="checkbox"><span>Add to compare</span></label></p>
+    <p><span class="covered"><input id="express" type="radio" name="shipping"><label for="express">Express shipping</label></span>
+      <label><input id="standard" type="radio" name="shipping" checked> Standard shipping</label></p>
+    <p><span class="covered"><input id="gift" type="checkbox"><label for="insurance">Insurance</label></span>
+      <input id="insurance" type="checkbox"> <label for="gift">Gift wrap</label></p>
+    <p><label class="covered"><input id="terms" type="checkbox"><a href="/pricing">I accept the terms</a></label></p>
+    <p><label><input id="updates" type="checkbox"> Email me card offers</label></p>
+    <div style="height: 2000px"></div>`
+
 const PAGES: Record<string, string> = {
   "/slow-render": `<!doctype html><title>Slow renderer</title><script>
     // Simulate a renderer blocked during its first text render, independently of network speed.
@@ -45,6 +61,9 @@ const PAGES: Record<string, string> = {
   "/sorry": `<!doctype html><title>Just a moment...</title><h1>Check you are human</h1>`,
   "/overlay": `<!doctype html><title>Overlay</title>
     <button>Buy now</button><div id="overlay" style="position: fixed; inset: 0"></div>`,
+  "/toggles": `<!doctype html>${TOGGLES}`,
+  // Like americanexpress.com, replace window.eval, which breaks Playwright's page-world evaluate but not its actions.
+  "/toggles-no-eval": `<!doctype html><script>window.eval = () => { throw new Error("eval is disabled") }</script>${TOGGLES}`,
   "/async": `<!doctype html><html><head><title>Async lookup</title></head><body>
     <h1>Async lookup</h1><button onclick="document.querySelector('#result').textContent='Loading'; setTimeout(() => document.querySelector('#result').textContent='READY-314', 1500)">Start lookup</button>
     <p id="result">Not started</p></body></html>`,
