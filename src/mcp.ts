@@ -22,6 +22,8 @@ export interface McpServerOptions {
   tools: BrowserTool[]
   /** When set, exposes `browser_task`, which delegates a whole task to the built-in agent on this model. */
   agentModel?: ModelAdapter
+  /** Takes over a stalled `browser_task` run; see `AgentOptions.escalateModel`. */
+  agentEscalateModel?: ModelAdapter
   agentMaxSteps?: number
   agentTimeoutMs?: number
 }
@@ -68,6 +70,7 @@ export function createMcpServer(options: McpServerOptions) {
       result = await runAgent({
         task: parsed.data.task,
         model: options.agentModel as ModelAdapter,
+        escalateModel: options.agentEscalateModel,
         browser: options.session,
         tools: options.tools,
         maxSteps: parsed.data.maxSteps ?? options.agentMaxSteps,

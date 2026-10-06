@@ -19,8 +19,10 @@ export const SYSTEM_PROMPT = `You are a web agent that completes the user's task
 
 export type AgentEvent =
   | { type: "step"; step: number }
-  | { type: "model"; step: number; text?: string; toolCalls: ToolCall[]; model?: string; durationMs: number; usage?: Usage }
+  /** `role: "escalate"` marks a call by `escalateModel`. */
+  | { type: "model"; step: number; text?: string; toolCalls: ToolCall[]; model?: string; durationMs: number; usage?: Usage; role?: "escalate" }
   | { type: "tool"; step: number; call: ToolCall; result: ToolResult }
+  | ({ type: "escalate" } & Omit<Escalation, "usage">)
   | { type: "done"; result: AgentResult }
 
 export interface AgentResult {
@@ -34,13 +36,28 @@ export interface AgentResult {
   durationMs: number
   error?: string
   steps: number
-  /** Summed over the run's model calls; see `sumUsage`. */
+  /** Summed over the run's model calls, escalated ones included; see `sumUsage`. */
   usage: Usage & { inputTokens: number; outputTokens: number }
+  escalation?: Escalation
+}
+
+/** Where `escalateModel` took over: after `step`, on `signal`. `usage` sums that model's calls alone. */
+export interface Escalation {
+  step: number
+  signal: "no_progress" | "tool_failures" | "step_budget"
+  model: string
+  usage: AgentResult["usage"]
 }
 
 export interface AgentOptions {
   task: string
   model: ModelAdapter
+  /**
+   * Opt-in model, possibly `model` with other options, that takes over the remaining steps and the same transcript on
+   * the run's first stall signal: a no_progress or tool_failures stop, or two thirds of the step budget used. It takes
+   * over once, with fresh stall counts; a second stall stops the run as usual.
+   */
+  escalateModel?: ModelAdapter
   browser: BrowserSession
   tools?: BrowserTool[]
   maxSteps?: number
@@ -90,18 +107,22 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   let previousState = ""
   let repeatedSteps = 0
   let partialAnswer = ""
-  const visit = pageVisits()
+  let visit = pageVisits()
+  let model = options.model
+  let escalation: Omit<Escalation, "usage"> | undefined
+  let escalatedCalls = 0
 
   const finish = (status: AgentResult["status"], stopReason: AgentResult["stopReason"], text: string, error?: string, outcome?: AgentResult["outcome"]): AgentResult => {
     const final = parseFinalAnswer(text)
     if (outcome) final.outcome = outcome
     const result: AgentResult = { status, stopReason, ...final, observedUrls: [...observedUrls], durationMs: Math.round(performance.now() - startedAt), steps: step, usage: sumUsage(callUsage), ...(error ? { error } : {}) }
+    if (escalation) result.escalation = { ...escalation, usage: sumUsage(callUsage.slice(escalatedCalls)) }
     emit({ type: "done", result })
     return result
   }
   const ask = async (withTools: boolean, outcomeOnly = false) => {
     const requestedAt = performance.now()
-    const response = await interruptible(() => options.model.complete({
+    const response = await interruptible(() => model.complete({
       system,
       messages: render(entries),
       tools: withTools ? specs : [],
@@ -109,7 +130,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     }), signal)
     const durationMs = Math.round(performance.now() - requestedAt)
     callUsage.push(response.usage)
-    emit({ type: "model", step, text: response.text, toolCalls: response.toolCalls, model: response.model, durationMs, usage: response.usage })
+    emit({ type: "model", step, text: response.text, toolCalls: response.toolCalls, model: response.model, durationMs, usage: response.usage, ...(escalation ? { role: "escalate" as const } : {}) })
     if (!outcomeOnly && response.toolCalls.length === 0 && !parseFinalAnswer(response.text ?? "").answer.trim()) {
       throw new Error(`Model returned no answer or tool calls${response.finishReason ? ` (finish reason: ${response.finishReason})` : ""}`)
     }
@@ -128,6 +149,20 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       if (last.toolCalls.length === 0) return last.text?.trim() ?? ""
     } catch { /* Keep the earlier answer if the best-effort request fails or returns no answer. */ }
     return fallback
+  }
+  /** Hand the remaining steps to `escalateModel` once, after a note to it, with fresh stall counts. False when it cannot take over. */
+  const escalate = (stall: Escalation["signal"], notice: string) => {
+    if (!options.escalateModel || escalation || step >= maxSteps) return false
+    model = options.escalateModel
+    escalation = { step, signal: stall, model: model.name }
+    escalatedCalls = callUsage.length
+    emit({ type: "escalate", ...escalation })
+    entries.push({ role: "user", content: [{ type: "text", text: `${notice} Remaining steps: ${maxSteps - step}. If the current approach is not working, try a different one.` }] })
+    failures = 0
+    repeatedSteps = 0
+    previousState = ""
+    visit = pageVisits()
+    return true
   }
 
   try {
@@ -179,13 +214,15 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       repeatedSteps = fingerprint && fingerprint === previousState ? repeatedSteps + 1 : 1
       previousState = fingerprint
       const stalled = fingerprint && repeatedSteps >= (options.maxRepeatedSteps ?? 3) ? "Stopped after repeated identical actions and page state" : revisited
-      if (stalled) {
+      if (stalled && !escalate("no_progress", "The last steps made no progress.")) {
         return finish("failed", "no_progress", await bestEffortAnswer("Stopping because the last steps made no progress.", partialAnswer), stalled)
       }
       failures = failed === response.toolCalls.length ? failures + 1 : 0
-      if (failures >= maxFailures) {
+      if (failures >= maxFailures && !escalate("tool_failures", `Every browser action failed in the last ${failures} steps.`)) {
         return finish("failed", "tool_failures", await bestEffortAnswer(`Stopping because every browser action failed in the last ${failures} steps.`, `Stopped after ${failures} consecutive steps where every browser action failed.`))
       }
+      // Most stalled runs end at the step limit, where no steps would be left to hand over.
+      if (step >= Math.ceil(maxSteps * 2 / 3)) escalate("step_budget", `${step} of ${maxSteps} steps are used.`)
     }
 
     // Out of steps: one last tool-less call so the caller still gets the best available answer.

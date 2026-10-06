@@ -3,7 +3,7 @@ import { parseArgs } from "node:util"
 import { type AgentEvent, runAgent, taskIncomplete } from "./agent"
 import { BrowserSession } from "./browser"
 import { createMcpServer, serveStdio } from "./mcp"
-import { type ModelConfig, modelConfigFromEnv, parseApi, resolveModel } from "./model/resolve"
+import { type ModelConfig, modelConfigFromEnv, parseApi, resolveModel, roleModelConfig } from "./model/resolve"
 import { jsonlTrace } from "./trace"
 import { type Capability, selectTools } from "./tools"
 import { VERSION } from "./version"
@@ -36,6 +36,10 @@ Browser:
 Agent:
   --max-steps <n>              default 30
   --timeout-ms <n>             total agent deadline, default 300000
+  --escalate-model <provider:model>
+                               OWA_ESCALATE_MODEL  opt-in model that takes over a stalled run once
+  --escalate-model-options <json>
+                               OWA_ESCALATE_MODEL_OPTIONS  its extra API request fields (JSON object)
   --trace <file.jsonl>         append agent events as JSONL
   --json                       (run) print the result as JSON
 `
@@ -59,6 +63,8 @@ export async function main(argv: string[]): Promise<number> {
       caps: { type: "string" },
       "max-steps": { type: "string" },
       "timeout-ms": { type: "string" },
+      "escalate-model": { type: "string" },
+      "escalate-model-options": { type: "string" },
       trace: { type: "string" },
       json: { type: "boolean" },
       agent: { type: "boolean" },
@@ -87,6 +93,7 @@ export async function main(argv: string[]): Promise<number> {
     baseUrl: values["base-url"] ?? env.baseUrl,
     module: values["model-module"] ?? env.module,
   }
+  const escalateConfig = roleModelConfig("escalate", { model: values["escalate-model"], options: values["escalate-model-options"] })
   const browserName = values.browser ?? "chromium"
   if (!["chromium", "firefox", "webkit"].includes(browserName)) throw new Error(`Unknown browser "${browserName}"`)
   const session = new BrowserSession({
@@ -101,7 +108,8 @@ export async function main(argv: string[]): Promise<number> {
 
   if (command === "mcp") {
     const agentModel = values.agent ? await resolveModel(modelConfig) : undefined
-    const server = createMcpServer({ session, tools, agentModel, agentMaxSteps: maxSteps, agentTimeoutMs: timeoutMs })
+    const agentEscalateModel = values.agent && escalateConfig ? await resolveModel(escalateConfig) : undefined
+    const server = createMcpServer({ session, tools, agentModel, agentEscalateModel, agentMaxSteps: maxSteps, agentTimeoutMs: timeoutMs })
     const stop = () => void session.close().finally(() => process.exit(0))
     process.once("SIGINT", stop)
     process.once("SIGTERM", stop)
@@ -117,6 +125,7 @@ export async function main(argv: string[]): Promise<number> {
     const task = rest.join(" ").trim()
     if (!task) throw new Error('Usage: owa run "<task>"')
     const model = await resolveModel(modelConfig)
+    const escalateModel = escalateConfig && await resolveModel(escalateConfig)
     const controller = new AbortController()
     process.once("SIGINT", () => controller.abort(new Error("Interrupted")))
     const trace = values.trace ? jsonlTrace(values.trace) : undefined
@@ -125,6 +134,7 @@ export async function main(argv: string[]): Promise<number> {
       const result = await runAgent({
         task,
         model,
+        escalateModel,
         browser: session,
         tools,
         maxSteps,
@@ -153,6 +163,7 @@ function logEvent(event: AgentEvent): void {
     log(`${event.result.isError ? "✗" : "→"} [${event.step}] ${event.call.name} ${oneLine(args)}`)
     if (event.result.isError) log(`    ${oneLine(event.result.text)}`)
   }
+  if (event.type === "escalate") log(`↑ [${event.step}] ${event.signal}: escalating to ${event.model}`)
   if (event.type === "done") {
     const { status, steps, usage } = event.result
     log(`■ ${status} in ${steps} steps (tokens in ${usage.inputTokens}, out ${usage.outputTokens})`)

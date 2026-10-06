@@ -47,23 +47,44 @@ export function modelConfigFromEnv(env: Record<string, string | undefined> = pro
   }
 }
 
+/**
+ * A secondary model for one role, e.g. `escalate`: `--<role>-model` or `OWA_<ROLE>_MODEL`, and optional
+ * `--<role>-model-options` or `OWA_<ROLE>_MODEL_OPTIONS` (flag > env). Undefined when no model is set. Only the
+ * `provider:model` spec and options apply: the main model's base URL, API format, OWA_API_KEY and module do not.
+ */
+export function roleModelConfig(
+  role: string,
+  flags: { model?: string; options?: string },
+  env: Record<string, string | undefined> = process.env,
+): ModelConfig | undefined {
+  const variable = `OWA_${role.toUpperCase()}_MODEL`
+  const model = flags.model ?? env[variable]
+  const options = flags.options ?? env[`${variable}_OPTIONS`]
+  const label = `--${role}-model-options / ${variable}_OPTIONS`
+  if (!model) {
+    if (options !== undefined) throw new Error(`${label} need --${role}-model or ${variable}`)
+    return undefined
+  }
+  return { model, extraBody: parseModelOptions(options, label) }
+}
+
 const RESERVED_OPTIONS = ["model", "messages", "tools", "system", "stream", "api_key", "apiKey", "authorization", "headers"]
 
-export function parseModelOptions(value: string | undefined): Record<string, unknown> | undefined {
+export function parseModelOptions(value: string | undefined, label = "--model-options / OWA_MODEL_OPTIONS"): Record<string, unknown> | undefined {
   if (value === undefined) return undefined
   let parsed: unknown
   try {
     parsed = JSON.parse(value)
   } catch {
     // Do not echo JSON or parser errors: the supplied value may contain credentials.
-    throw new Error("--model-options / OWA_MODEL_OPTIONS must be a JSON object")
+    throw new Error(`${label} must be a JSON object`)
   }
-  return validateModelOptions(parsed)
+  return validateModelOptions(parsed, label)
 }
 
-function validateModelOptions(value: unknown): Record<string, unknown> {
+function validateModelOptions(value: unknown, label = "--model-options / OWA_MODEL_OPTIONS"): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("--model-options / OWA_MODEL_OPTIONS must be a JSON object")
+    throw new Error(`${label} must be a JSON object`)
   }
   for (const key of RESERVED_OPTIONS) {
     if (Object.hasOwn(value, key)) throw new Error(`Model options cannot set "${key}"; use the dedicated model/auth configuration and let the agent manage messages and tools`)
