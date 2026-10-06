@@ -8,6 +8,7 @@ import {
   ModelHttpError,
   parseToolArguments,
   postJson,
+  reportedUsage,
 } from "./types"
 
 export interface OpenAIChatOptions {
@@ -51,8 +52,14 @@ export function openaiChat(options: OpenAIChatOptions): ModelAdapter {
         }
         throw error
       })) as {
+        model?: string
         choices?: Array<{ message?: { content?: string | null; tool_calls?: OpenAIToolCall[] }; finish_reason?: string }>
-        usage?: { prompt_tokens?: number; completion_tokens?: number }
+        usage?: {
+          prompt_tokens?: number
+          completion_tokens?: number
+          prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number } | null
+          cost?: number
+        }
       }
       const message = json.choices?.[0]?.message
       if (!message) throw new Error(`${name} returned no choices`)
@@ -65,9 +72,15 @@ export function openaiChat(options: OpenAIChatOptions): ModelAdapter {
           name: call.function.name,
           arguments: parseToolArguments(call.function.arguments),
         })),
-        usage: json.usage
-          ? { inputTokens: json.usage.prompt_tokens, outputTokens: json.usage.completion_tokens }
-          : undefined,
+        model: json.model || undefined,
+        // prompt_tokens already includes cache reads and writes. OpenRouter adds cache_write_tokens and cost.
+        usage: reportedUsage({
+          inputTokens: json.usage?.prompt_tokens,
+          outputTokens: json.usage?.completion_tokens,
+          cachedInputTokens: json.usage?.prompt_tokens_details?.cached_tokens,
+          cacheWriteTokens: json.usage?.prompt_tokens_details?.cache_write_tokens,
+          cost: json.usage?.cost,
+        }),
       }
     },
   }

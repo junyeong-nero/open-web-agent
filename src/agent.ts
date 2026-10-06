@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { interruptible } from "./cancel"
 import type { BrowserSession } from "./browser"
-import type { Message, ModelAdapter, ToolCall } from "./model/types"
+import type { Message, ModelAdapter, ToolCall, Usage } from "./model/types"
 import { type BrowserTool, callTool, resultContent, selectTools, type ToolResult, toolSpec } from "./tools"
 
 export const SYSTEM_PROMPT = `You are a web agent that completes the user's task by operating a real browser through tools.
@@ -18,7 +18,7 @@ export const SYSTEM_PROMPT = `You are a web agent that completes the user's task
 
 export type AgentEvent =
   | { type: "step"; step: number }
-  | { type: "model"; step: number; text?: string; toolCalls: ToolCall[]; usage?: { inputTokens?: number; outputTokens?: number } }
+  | { type: "model"; step: number; text?: string; toolCalls: ToolCall[]; model?: string; durationMs: number; usage?: Usage }
   | { type: "tool"; step: number; call: ToolCall; result: ToolResult }
   | { type: "done"; result: AgentResult }
 
@@ -33,7 +33,8 @@ export interface AgentResult {
   durationMs: number
   error?: string
   steps: number
-  usage: { inputTokens: number; outputTokens: number }
+  /** Summed over the run's model calls; see `sumUsage`. */
+  usage: Usage & { inputTokens: number; outputTokens: number }
 }
 
 export interface AgentOptions {
@@ -79,7 +80,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   const maxSteps = options.maxSteps ?? 30
   const maxFailures = options.maxConsecutiveFailures ?? 3
   const system = options.systemPrompt ?? SYSTEM_PROMPT
-  const usage = { inputTokens: 0, outputTokens: 0 }
+  const callUsage: Array<Usage | undefined> = []
   const emit = options.onEvent ?? (() => {})
 
   const entries: Entry[] = []
@@ -93,20 +94,21 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   const finish = (status: AgentResult["status"], stopReason: AgentResult["stopReason"], text: string, error?: string, outcome?: AgentResult["outcome"]): AgentResult => {
     const final = parseFinalAnswer(text)
     if (outcome) final.outcome = outcome
-    const result: AgentResult = { status, stopReason, ...final, observedUrls: [...observedUrls], durationMs: Math.round(performance.now() - startedAt), steps: step, usage, ...(error ? { error } : {}) }
+    const result: AgentResult = { status, stopReason, ...final, observedUrls: [...observedUrls], durationMs: Math.round(performance.now() - startedAt), steps: step, usage: sumUsage(callUsage), ...(error ? { error } : {}) }
     emit({ type: "done", result })
     return result
   }
   const ask = async (withTools: boolean, outcomeOnly = false) => {
+    const requestedAt = performance.now()
     const response = await interruptible(() => options.model.complete({
       system,
       messages: render(entries),
       tools: withTools ? specs : [],
       signal,
     }), signal)
-    usage.inputTokens += response.usage?.inputTokens ?? 0
-    usage.outputTokens += response.usage?.outputTokens ?? 0
-    emit({ type: "model", step, text: response.text, toolCalls: response.toolCalls, usage: response.usage })
+    const durationMs = Math.round(performance.now() - requestedAt)
+    callUsage.push(response.usage)
+    emit({ type: "model", step, text: response.text, toolCalls: response.toolCalls, model: response.model, durationMs, usage: response.usage })
     if (!outcomeOnly && response.toolCalls.length === 0 && !parseFinalAnswer(response.text ?? "").answer.trim()) {
       throw new Error(`Model returned no answer or tool calls${response.finishReason ? ` (finish reason: ${response.finishReason})` : ""}`)
     }
@@ -227,6 +229,22 @@ function parseFinalAnswer(text: string): Pick<AgentResult, "answer" | "outcome">
 /** A finished model response is not proof that the task succeeded. */
 export function taskIncomplete(result: AgentResult): boolean {
   return result.status !== "completed" || result.outcome.status === "blocked" || result.outcome.status === "partial"
+}
+
+/**
+ * Sum per-call usage. Input and output tokens count a missing value as zero; cache counts add up the calls
+ * that reported them. Cost appears only when every call reported one, since a partial sum would understate it.
+ */
+export function sumUsage(calls: Array<Usage | undefined>): AgentResult["usage"] {
+  const total: AgentResult["usage"] = { inputTokens: 0, outputTokens: 0 }
+  for (const call of calls) {
+    for (const key of ["inputTokens", "outputTokens", "cachedInputTokens", "cacheWriteTokens", "cost"] as const) {
+      const value = call?.[key]
+      if (value !== undefined) total[key] = (total[key] ?? 0) + value
+    }
+  }
+  if (calls.some((call) => call?.cost === undefined)) delete total.cost
+  return total
 }
 
 async function taskMessage(options: AgentOptions): Promise<Entry> {

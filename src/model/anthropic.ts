@@ -6,6 +6,7 @@ import {
   type ModelResponse,
   parseToolArguments,
   postJson,
+  reportedUsage,
 } from "./types"
 
 export interface AnthropicMessagesOptions {
@@ -48,15 +49,24 @@ export function anthropicMessages(options: AnthropicMessagesOptions): ModelAdapt
       if (options.apiKey) headers["x-api-key"] = options.apiKey
 
       const json = (await postJson(fetchImpl, name, `${baseUrl}/messages`, headers, body, request.signal)) as {
+        model?: string
         content?: Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown }>
         stop_reason?: string
-        usage?: { input_tokens?: number; output_tokens?: number }
+        usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null }
       }
       const blocks = json.content ?? []
       const text = blocks
         .filter((block) => block.type === "text" && block.text)
         .map((block) => block.text)
         .join("\n")
+      const usage = reportedUsage({
+        inputTokens: json.usage?.input_tokens,
+        outputTokens: json.usage?.output_tokens,
+        cachedInputTokens: json.usage?.cache_read_input_tokens,
+        cacheWriteTokens: json.usage?.cache_creation_input_tokens,
+      })
+      // input_tokens leaves out cache reads and writes; add them so inputTokens is the total input, as in the OpenAI format.
+      if (usage?.inputTokens !== undefined) usage.inputTokens += (usage.cachedInputTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
 
       return {
         text: text || undefined,
@@ -64,7 +74,8 @@ export function anthropicMessages(options: AnthropicMessagesOptions): ModelAdapt
         toolCalls: blocks
           .filter((block) => block.type === "tool_use")
           .map((block) => ({ id: block.id ?? "", name: block.name ?? "", arguments: parseToolArguments(block.input) })),
-        usage: json.usage ? { inputTokens: json.usage.input_tokens, outputTokens: json.usage.output_tokens } : undefined,
+        model: json.model || undefined,
+        usage,
       }
     },
   }
