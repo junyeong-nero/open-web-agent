@@ -114,7 +114,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     entries.push({ role: "assistant", text: response.text, toolCalls: response.toolCalls })
     return response
   }
-  /** Before an early stop, ask once without tools for the best answer so far; keep `fallback` if that fails or is empty. */
+  /** Before stopping without a final answer, ask once without tools for the best answer so far; keep `fallback` if that fails or is empty. */
   const bestEffortAnswer = async (notice: string, fallback: string) => {
     entries.push({
       role: "user",
@@ -186,12 +186,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     }
 
     // Out of steps: one last tool-less call so the caller still gets the best available answer.
-    entries.push({
-      role: "user",
-      content: [{ type: "text", text: "Step limit reached. Reply now with your best final answer from what you have seen." }],
-    })
-    const last = await ask(false)
-    return finish("max_steps", "step_limit", last.text?.trim() ?? "")
+    return finish("max_steps", "step_limit", await bestEffortAnswer("Step limit reached.", partialAnswer))
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (signal.aborted) return finish("failed", signal.reason === deadline.signal.reason ? "timeout" : "cancelled", partialAnswer, message)
