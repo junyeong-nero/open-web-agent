@@ -14,7 +14,8 @@
     "owa": "bun run src/cli.ts",
     "typecheck": "tsc -p tsconfig.json",
     "test": "bun test --timeout 30000 src",
-    "eval": "bun scripts/evaluate.ts"
+    "eval": "bun scripts/evaluate.ts",
+    "bench": "bun scripts/bench.ts"
   },
   "dependencies": {
     "playwright": "1.61.0",

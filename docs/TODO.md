@@ -37,7 +37,7 @@ Decided work is tracked in issues. Every other item here is an observation. Conf
 ## Maintenance
 
 - **Runtime size.** The runtime source is about 1.9k lines, above the ~1.5k target in [positioning.md](positioning.md). `src/tools.ts`, at 437 lines, is the first place to look for consolidation.
-- **Benchmark runner.** The real-site runner lives outside the repository. An opt-in script would make before/after runs reproducible. Like `bun run eval --live`, it must stay out of `bun run test`, and dataset licenses need checking before any tasks are committed.
+- **Benchmark tasks.** `bun run bench` runs real-site comparisons, but its tasks stay outside the repository until the WebVoyager and Online-Mind2Web licenses are checked.
 - **Cloud environment.**
   - In the October batches, the cloud environment blocked Chromium downloads from `cdn.playwright.dev`.
   - Sessions therefore tested on a preinstalled, older Chromium (1194) through the cached-browser fallback.
