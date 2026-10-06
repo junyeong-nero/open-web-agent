@@ -78,6 +78,89 @@ describe("anthropicMessages", () => {
   })
 })
 
+// Response bodies in each API's documented shape; 11,268 input tokens with 11,265 cached is the probe in #161.
+describe("usage and serving model", () => {
+  const toolCall = { id: "call_1", type: "function", function: { name: "browser_click", arguments: '{"ref":"e2"}' } }
+
+  it("reads OpenAI cached tokens and reports no cost", async () => {
+    const { fetchImpl } = recordingFetch({
+      id: "chatcmpl-1", object: "chat.completion", created: 1791331200, model: "gpt-6-luna",
+      choices: [{ index: 0, message: { role: "assistant", content: null, tool_calls: [toolCall], refusal: null, annotations: [] }, logprobs: null, finish_reason: "tool_calls" }],
+      usage: {
+        prompt_tokens: 11268, completion_tokens: 26, total_tokens: 11294,
+        prompt_tokens_details: { cached_tokens: 11265, audio_tokens: 0 },
+        completion_tokens_details: { reasoning_tokens: 0, audio_tokens: 0, accepted_prediction_tokens: 0, rejected_prediction_tokens: 0 },
+      },
+      service_tier: "default", system_fingerprint: null,
+    })
+    const response = await openaiChat({ model: "gpt-6-luna", fetch: fetchImpl }).complete(request)
+    expect(response.model).toBe("gpt-6-luna")
+    expect(response.usage).toStrictEqual({ inputTokens: 11268, outputTokens: 26, cachedInputTokens: 11265 })
+  })
+
+  it("reads the model a router chose, the cost and cache writes from OpenRouter", async () => {
+    const routed = recordingFetch({
+      id: "gen-1791331200-a", provider: "Azure", model: "openai/gpt-6-luna", object: "chat.completion", created: 1791331200,
+      choices: [{ logprobs: null, finish_reason: "tool_calls", native_finish_reason: "tool_calls", index: 0, message: { role: "assistant", content: "", tool_calls: [toolCall] } }],
+      usage: {
+        prompt_tokens: 11268, completion_tokens: 26, total_tokens: 11294, cost: 0.00012595,
+        cost_details: { upstream_inference_cost: null }, prompt_tokens_details: { cached_tokens: 11265, audio_tokens: 0 },
+        completion_tokens_details: { reasoning_tokens: 0 },
+      },
+    })
+    const response = await openaiChat({ model: "typesafe/jev-router", fetch: routed.fetchImpl }).complete(request)
+    expect(routed.calls[0].body.model).toBe("typesafe/jev-router")
+    expect(response.model).toBe("openai/gpt-6-luna")
+    expect(response.usage).toStrictEqual({ inputTokens: 11268, outputTokens: 26, cachedInputTokens: 11265, cost: 0.00012595 })
+
+    // Models with explicit caching also report the tokens written to the cache. A reported zero stays zero.
+    const written = recordingFetch({
+      id: "gen-1791331200-b", provider: "Anthropic", model: "anthropic/claude-haiku-4.5", object: "chat.completion", created: 1791331200,
+      choices: [{ logprobs: null, finish_reason: "tool_calls", native_finish_reason: "tool_use", index: 0, message: { role: "assistant", content: "", tool_calls: [toolCall] } }],
+      usage: {
+        prompt_tokens: 11268, completion_tokens: 26, total_tokens: 11294, cost: 0.01421425,
+        prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 11265, audio_tokens: 0 },
+      },
+    })
+    expect((await openaiChat({ model: "anthropic/claude-haiku-4.5", fetch: written.fetchImpl }).complete(request)).usage)
+      .toStrictEqual({ inputTokens: 11268, outputTokens: 26, cachedInputTokens: 0, cacheWriteTokens: 11265, cost: 0.01421425 })
+  })
+
+  it("adds Anthropic cache reads and writes to the input tokens", async () => {
+    const { fetchImpl } = recordingFetch({
+      id: "msg_01", type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
+      content: [{ type: "tool_use", id: "toolu_01", name: "browser_click", input: { ref: "e2" } }],
+      stop_reason: "tool_use", stop_sequence: null,
+      usage: {
+        input_tokens: 3, cache_creation_input_tokens: 200, cache_read_input_tokens: 11065,
+        cache_creation: { ephemeral_5m_input_tokens: 200, ephemeral_1h_input_tokens: 0 }, output_tokens: 26, service_tier: "standard",
+      },
+    })
+    const response = await anthropicMessages({ model: "claude-haiku-4-5", fetch: fetchImpl }).complete(request)
+    expect(response.model).toBe("claude-haiku-4-5-20251001")
+    expect(response.usage).toStrictEqual({ inputTokens: 11268, outputTokens: 26, cachedInputTokens: 11065, cacheWriteTokens: 200 })
+  })
+
+  it("leaves out values an endpoint does not send instead of writing zeros", async () => {
+    const replies = [
+      // Gemini's OpenAI endpoint: no cache details or cost.
+      { model: "gemini-3.1-flash-lite", usage: { prompt_tokens: 120, completion_tokens: 5, total_tokens: 125 } },
+      // vLLM: details sent as null.
+      { model: "Qwen/Qwen3-8B", usage: { prompt_tokens: 120, completion_tokens: 5, total_tokens: 125, prompt_tokens_details: null } },
+    ]
+    for (const reply of replies) {
+      const { fetchImpl } = recordingFetch({ object: "chat.completion", choices: [{ index: 0, message: { role: "assistant", content: "done" }, finish_reason: "stop" }], ...reply })
+      const response = await openaiChat({ model: "m", fetch: fetchImpl }).complete(request)
+      expect(response.model).toBe(reply.model)
+      expect(response.usage).toStrictEqual({ inputTokens: 120, outputTokens: 5 })
+    }
+    const { fetchImpl } = recordingFetch({ content: [{ type: "text", text: "done" }], usage: { input_tokens: 7, output_tokens: 1, cache_read_input_tokens: null, cache_creation_input_tokens: null } })
+    const response = await anthropicMessages({ model: "m", fetch: fetchImpl }).complete(request)
+    expect(response.model).toBeUndefined()
+    expect(response.usage).toStrictEqual({ inputTokens: 7, outputTokens: 1 })
+  })
+})
+
 describe("model request diagnostics", () => {
   it("suggests explicit reasoning options for the reported compatibility error", async () => {
     const { fetchImpl } = recordingFetch({ error: { message: "Function tools with reasoning_effort are not supported. Set reasoning_effort to 'none'." } }, 400)
