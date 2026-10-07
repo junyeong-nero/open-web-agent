@@ -32,10 +32,10 @@ export interface AgentResult {
   answer: string
   outcome: {
     status: "succeeded" | "partial" | "blocked" | "unknown"
-    /** `judged` when the judge model checked this succeeded answer against the page evidence; see `judge`. */
+    /** `judged` when the judge model checked this answer, which claimed success, against the page evidence; see `judge`. */
     verification: "unverified" | "judged"
     unfinished: string[]
-    /** The judge's verdict: the model that judged, its probability that the evidence supports the answer, and why. */
+    /** The judge's verdict: the judge model's adapter name, its probability that the evidence supports the answer, and why. */
     judge?: { model: string; supported: number; reason?: string }
   }
   /** Last 20 distinct HTTP(S) URLs actually observed; not verified citations. */
@@ -47,6 +47,8 @@ export interface AgentResult {
   usage: Usage & { inputTokens: number; outputTokens: number }
   /** The judge model's calls, summed the same way and kept apart because its tokens have another price; set once the judge replied. */
   judgeUsage?: Usage & { inputTokens: number; outputTokens: number }
+  /** Why the last judge request gave no verdict. The answer and outcome stay as they were. */
+  judgeError?: string
 }
 
 export interface AgentOptions {
@@ -65,7 +67,7 @@ export interface AgentOptions {
   /**
    * Checks a final answer whose outcome is succeeded against the page content still in context, in one tool-less request.
    * When the judge is sure the answer is unsupported, the agent continues once with its finding, or marks the outcome
-   * partial when no step is left. A failed judge request changes nothing.
+   * partial when no step is left. A failed judge request changes nothing; the result's `judgeError` says why it failed.
    */
   judgeModel?: ModelAdapter
   signal?: AbortSignal
@@ -109,6 +111,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   let repeatedSteps = 0
   let partialAnswer = ""
   let sentBack = false
+  let judgeError: string | undefined
   const visit = pageVisits()
 
   const finish = (status: AgentResult["status"], stopReason: AgentResult["stopReason"], text: string, error?: string, outcome?: AgentResult["outcome"]): AgentResult => {
@@ -116,7 +119,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     if (outcome) final.outcome = outcome
     const result: AgentResult = {
       status, stopReason, ...final, observedUrls: [...observedUrls], durationMs: Math.round(performance.now() - startedAt), steps: step, usage: sumUsage(callUsage),
-      ...(judgeUsage.length ? { judgeUsage: sumUsage(judgeUsage) } : {}), ...(error ? { error } : {}),
+      ...(judgeUsage.length ? { judgeUsage: sumUsage(judgeUsage) } : {}), ...(judgeError ? { judgeError } : {}), ...(error ? { error } : {}),
     }
     emit({ type: "done", result })
     return result
@@ -151,7 +154,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     } catch { /* Keep the earlier answer if the best-effort request fails or returns no answer. */ }
     return fallback
   }
-  /** Ask the judge whether the page content in context supports the answer; undefined when the request fails or holds no verdict. */
+  /** Ask the judge whether the page content in context supports the answer; undefined, with `judgeError` set, when the request fails or holds no verdict. */
   const judge = async (judgeModel: ModelAdapter, answer: string) => {
     const requestedAt = performance.now()
     try {
@@ -159,8 +162,10 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       judgeUsage.push(response.usage)
       emit({ type: "model", role: "judge", step, text: response.text, toolCalls: response.toolCalls, model: response.model, durationMs: Math.round(performance.now() - requestedAt), usage: response.usage })
       const verdict = parseVerdict(response.text)
-      return verdict && { model: response.model ?? judgeModel.name, ...verdict }
-    } catch {
+      if (!verdict) throw new Error(`${judgeModel.name} replied without a verdict`)
+      return { model: judgeModel.name, ...verdict }
+    } catch (error) {
+      judgeError = error instanceof Error ? error.message : String(error)
       return undefined
     }
   }
@@ -178,7 +183,8 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       const response = await ask(true)
       if (response.toolCalls.length === 0) {
         const answer = response.text?.trim() ?? ""
-        let { outcome } = parseFinalAnswer(answer)
+        const final = parseFinalAnswer(answer)
+        let { outcome } = final
         signal.throwIfAborted()
         if (outcome.status === "unknown") {
           entries.push({
@@ -190,19 +196,21 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
             if (followUp.toolCalls.length === 0) outcome = parseFinalAnswer(`${answer}\n${followUp.text ?? ""}`).outcome
           } catch { /* Keep the original answer if the optional outcome request fails. */ }
         }
-        // A failed judge request leaves the answer and outcome as they were.
-        const verdict = outcome.status === "succeeded" && options.judgeModel ? await judge(options.judgeModel, parseFinalAnswer(answer).answer) : undefined
+        // Only an answer that claims success is judged. A failed judge request leaves the answer and outcome as they were.
+        const verdict = outcome.status === "succeeded" && options.judgeModel ? await judge(options.judgeModel, final.answer) : undefined
         if (verdict) {
           outcome = { ...outcome, verification: "judged", judge: verdict }
           if (verdict.supported <= UNSUPPORTED_AT) {
             const finding = `A check against the page evidence found the answer unsupported.${verdict.reason ? ` Reason: ${verdict.reason}` : ""}`
-            // Send the answer back once; a second unsupported answer, or one at the step limit, becomes partial.
+            outcome = { ...outcome, status: "partial", unfinished: [...outcome.unfinished, finding] }
+            // With a step left, send the answer back once. The corrected answer is judged again but not sent back.
             if (step < maxSteps && !sentBack) {
               sentBack = true
+              // A run that ends before the corrected answer reports this one as partial, not as succeeded.
+              partialAnswer = `${final.answer}\n${JSON.stringify({ outcome: "partial", unfinished: outcome.unfinished })}`
               entries.push({ role: "user", content: [{ type: "text", text: `${finding}\nVerify the facts in the browser, then reply with your corrected final answer and the outcome line.` }] })
               continue
             }
-            outcome = { ...outcome, status: "partial", unfinished: [...outcome.unfinished, finding] }
           }
         }
         return finish("completed", "final_answer", answer, undefined, outcome)

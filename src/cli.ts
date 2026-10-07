@@ -3,7 +3,7 @@ import { parseArgs } from "node:util"
 import { type AgentEvent, runAgent, taskIncomplete } from "./agent"
 import { BrowserSession } from "./browser"
 import { createMcpServer, serveStdio } from "./mcp"
-import { type ModelConfig, modelConfigFromEnv, parseApi, resolveModel, resolveRoleModel } from "./model/resolve"
+import { type ModelConfig, modelConfigFromEnv, parseApi, resolveModel, roleModelConfig } from "./model/resolve"
 import { jsonlTrace } from "./trace"
 import { type Capability, selectTools } from "./tools"
 import { VERSION } from "./version"
@@ -24,11 +24,6 @@ Model (flag > env):
   --model-module <path>        OWA_MODEL_MODULE  module default-exporting a ModelAdapter
   API keys: OWA_API_KEY, or OPENAI_API_KEY / ANTHROPIC_API_KEY / OPENROUTER_API_KEY / GEMINI_API_KEY
 
-Judge (optional, run and mcp --agent; flag > env):
-  --judge-model <provider:model>  OWA_JUDGE_MODEL  checks an answer that claims success against the page,
-                               e.g. gemini:gemini-3.1-flash-lite, or typesafe:jev-latest with TYPESAFE_API_KEY
-  --judge-model-options <json>    OWA_JUDGE_MODEL_OPTIONS  extra API request fields for the judge model
-
 Browser:
   --headless                   OWA_HEADLESS=1
   --locale <tag>               OWA_LOCALE   BCP 47 tag, e.g. ko-KR (existing CDP contexts unchanged)
@@ -41,6 +36,11 @@ Browser:
 Agent:
   --max-steps <n>              default 30
   --timeout-ms <n>             total agent deadline, default 300000
+  --judge-model <provider:model>
+                               OWA_JUDGE_MODEL  opt-in model that checks an answer claiming success,
+                               e.g. gemini:gemini-3.1-flash-lite or typesafe:jev-latest (TYPESAFE_API_KEY)
+  --judge-model-options <json>
+                               OWA_JUDGE_MODEL_OPTIONS  its extra API request fields (JSON object)
   --trace <file.jsonl>         append agent events as JSONL
   --json                       (run) print the result as JSON
 `
@@ -94,6 +94,7 @@ export async function main(argv: string[]): Promise<number> {
     baseUrl: values["base-url"] ?? env.baseUrl,
     module: values["model-module"] ?? env.module,
   }
+  const judgeConfig = roleModelConfig("judge", { model: values["judge-model"], options: values["judge-model-options"] })
   const browserName = values.browser ?? "chromium"
   if (!["chromium", "firefox", "webkit"].includes(browserName)) throw new Error(`Unknown browser "${browserName}"`)
   const session = new BrowserSession({
@@ -105,13 +106,11 @@ export async function main(argv: string[]): Promise<number> {
     executablePath: values["executable-path"],
   })
   const tools = selectTools(parseCaps(values.caps))
-  const judgeModel = () => resolveRoleModel("judge", { model: values["judge-model"], options: values["judge-model-options"] })
 
   if (command === "mcp") {
     const agentModel = values.agent ? await resolveModel(modelConfig) : undefined
-    const server = createMcpServer({
-      session, tools, agentModel, agentMaxSteps: maxSteps, agentTimeoutMs: timeoutMs, judgeModel: agentModel && await judgeModel(),
-    })
+    const agentJudgeModel = values.agent && judgeConfig ? await resolveModel(judgeConfig) : undefined
+    const server = createMcpServer({ session, tools, agentModel, agentJudgeModel, agentMaxSteps: maxSteps, agentTimeoutMs: timeoutMs })
     const stop = () => void session.close().finally(() => process.exit(0))
     process.once("SIGINT", stop)
     process.once("SIGTERM", stop)
@@ -127,7 +126,7 @@ export async function main(argv: string[]): Promise<number> {
     const task = rest.join(" ").trim()
     if (!task) throw new Error('Usage: owa run "<task>"')
     const model = await resolveModel(modelConfig)
-    const judge = await judgeModel()
+    const judgeModel = judgeConfig && await resolveModel(judgeConfig)
     const controller = new AbortController()
     process.once("SIGINT", () => controller.abort(new Error("Interrupted")))
     const trace = values.trace ? jsonlTrace(values.trace) : undefined
@@ -140,7 +139,7 @@ export async function main(argv: string[]): Promise<number> {
         tools,
         maxSteps,
         timeoutMs,
-        judgeModel: judge,
+        judgeModel,
         signal: controller.signal,
         onEvent: (event) => {
           trace?.(event)
@@ -167,7 +166,8 @@ function logEvent(event: AgentEvent): void {
     if (event.result.isError) log(`    ${oneLine(event.result.text)}`)
   }
   if (event.type === "done") {
-    const { status, steps, usage, judgeUsage } = event.result
+    const { status, steps, usage, judgeUsage, judgeError } = event.result
+    if (judgeError) log(`  judge failed: ${oneLine(judgeError)}`)
     const judge = judgeUsage ? `; judge in ${judgeUsage.inputTokens}, out ${judgeUsage.outputTokens}` : ""
     log(`■ ${status} in ${steps} steps (tokens in ${usage.inputTokens}, out ${usage.outputTokens}${judge})`)
   }

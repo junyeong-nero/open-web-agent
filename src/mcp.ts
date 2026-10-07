@@ -22,10 +22,10 @@ export interface McpServerOptions {
   tools: BrowserTool[]
   /** When set, exposes `browser_task`, which delegates a whole task to the built-in agent on this model. */
   agentModel?: ModelAdapter
+  /** Checks a `browser_task` answer that claims success; see `AgentOptions.judgeModel`. */
+  agentJudgeModel?: ModelAdapter
   agentMaxSteps?: number
   agentTimeoutMs?: number
-  /** With `agentModel`, checks browser_task answers that claim success; see `AgentOptions.judgeModel`. */
-  judgeModel?: ModelAdapter
 }
 
 const BrowserTaskSchema = z.object({
@@ -74,7 +74,7 @@ export function createMcpServer(options: McpServerOptions) {
         tools: options.tools,
         maxSteps: parsed.data.maxSteps ?? options.agentMaxSteps,
         timeoutMs: parsed.data.timeoutMs ?? options.agentTimeoutMs,
-        judgeModel: options.judgeModel,
+        judgeModel: options.agentJudgeModel,
         signal,
       })
     } catch (error) {

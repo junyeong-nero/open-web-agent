@@ -8,7 +8,7 @@ import type { ModelAdapter } from "./types"
 export type ApiFormat = "openai" | "anthropic"
 
 interface ProviderPreset {
-  /** `systemone` answers yes/no questions only, so it serves as a judge model, never as the agent model. */
+  /** `systemone` answers yes/no questions only, so it can serve as the judge model but not as the agent model. */
   api: ApiFormat | "systemone"
   baseUrl: string
   keyEnv?: string
@@ -36,6 +36,8 @@ export interface ModelConfig {
   maxTokens?: number
   /** Additional API request fields, supplied explicitly without model-specific defaults. */
   extraBody?: Record<string, unknown>
+  /** The flag and environment variable that set `extraBody`, for error hints; defaults to the main model's. */
+  optionsSetting?: { flag: string; env: string }
 }
 
 export function modelConfigFromEnv(env: Record<string, string | undefined> = process.env): ModelConfig {
@@ -50,24 +52,44 @@ export function modelConfigFromEnv(env: Record<string, string | undefined> = pro
   }
 }
 
+/**
+ * Config for an opt-in secondary model with one role, such as `judge`: `--<role>-model` or `OWA_<ROLE>_MODEL`, and
+ * optional `--<role>-model-options` or `OWA_<ROLE>_MODEL_OPTIONS`, flag before env as for the main model. Undefined when
+ * the model is unset or empty, so an empty flag turns off an environment setting. Only the `provider:model` spec and
+ * options apply: the main model's base URL, API format, module and OWA_API_KEY do not, so a key never reaches another
+ * provider. Pass the result to `resolveModel`, which reads that provider's own key variable.
+ */
+export function roleModelConfig(
+  role: string,
+  flags: { model?: string; options?: string },
+  env: Record<string, string | undefined> = process.env,
+): ModelConfig | undefined {
+  const variable = `OWA_${role.toUpperCase()}_MODEL`
+  const optionsSetting = { flag: `--${role}-model-options`, env: `${variable}_OPTIONS` }
+  const model = flags.model ?? env[variable]
+  const options = flags.options ?? env[optionsSetting.env]
+  const label = `${optionsSetting.flag} / ${optionsSetting.env}`
+  if (model === undefined && options !== undefined) throw new Error(`${label} needs --${role}-model or ${variable}`)
+  return model ? { model, extraBody: parseModelOptions(options, label), optionsSetting } : undefined
+}
+
 const RESERVED_OPTIONS = ["model", "messages", "tools", "system", "stream", "api_key", "apiKey", "authorization", "headers"]
 
-/** `source` names the flag and variable in error messages. */
-export function parseModelOptions(value: string | undefined, source = "--model-options / OWA_MODEL_OPTIONS"): Record<string, unknown> | undefined {
+export function parseModelOptions(value: string | undefined, label = "--model-options / OWA_MODEL_OPTIONS"): Record<string, unknown> | undefined {
   if (value === undefined) return undefined
   let parsed: unknown
   try {
     parsed = JSON.parse(value)
   } catch {
     // Do not echo JSON or parser errors: the supplied value may contain credentials.
-    throw new Error(`${source} must be a JSON object`)
+    throw new Error(`${label} must be a JSON object`)
   }
-  return validateModelOptions(parsed, source)
+  return validateModelOptions(parsed, label)
 }
 
-function validateModelOptions(value: unknown, source = "--model-options / OWA_MODEL_OPTIONS"): Record<string, unknown> {
+function validateModelOptions(value: unknown, label = "--model-options / OWA_MODEL_OPTIONS"): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${source} must be a JSON object`)
+    throw new Error(`${label} must be a JSON object`)
   }
   for (const key of RESERVED_OPTIONS) {
     if (Object.hasOwn(value, key)) throw new Error(`Model options cannot set "${key}"; use the dedicated model/auth configuration and let the agent manage messages and tools`)
@@ -120,23 +142,7 @@ export async function resolveModel(
   if (api === "systemone") return typesafeSystemOne({ model: spec.model, baseUrl, apiKey, extraBody })
   return api === "anthropic"
     ? anthropicMessages({ model: spec.model, baseUrl, apiKey, maxTokens: config.maxTokens, extraBody })
-    : openaiChat({ model: spec.model, baseUrl, apiKey, extraBody })
-}
-
-/**
- * The model for one secondary role, such as the judge: `--judge-model` or OWA_JUDGE_MODEL, with request fields from
- * `--judge-model-options` or OWA_JUDGE_MODEL_OPTIONS (flag > env). Undefined when the role has no model.
- */
-export async function resolveRoleModel(
-  role: string,
-  flags: { model?: string; options?: string } = {},
-  env: Record<string, string | undefined> = process.env,
-): Promise<ModelAdapter | undefined> {
-  const variable = `OWA_${role.toUpperCase()}_MODEL`
-  const model = flags.model ?? env[variable]
-  if (!model) return undefined
-  const extraBody = parseModelOptions(flags.options ?? env[`${variable}_OPTIONS`], `--${role}-model-options / ${variable}_OPTIONS`)
-  return resolveModel({ model, extraBody }, env)
+    : openaiChat({ model: spec.model, baseUrl, apiKey, extraBody, optionsSetting: config.optionsSetting })
 }
 
 async function loadModelModule(path: string, config: ModelConfig): Promise<ModelAdapter> {

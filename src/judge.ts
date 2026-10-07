@@ -6,10 +6,10 @@ import type { ModelRequest } from "./model/types"
  */
 export const JUDGE_PROMPT = `Is the web agent's answer to the task supported by the page evidence?
 - Supported: the names, numbers, counts and dates the answer states agree with the evidence, and the answer does what the task asked.
-- Not supported: the evidence contradicts the answer, or shows that the answer misses or misreads what the task asked.
+- Not supported: the evidence contradicts the answer or shows that it misses or misreads what the task asked, or there is no evidence because the agent opened no page.
 - The evidence is the page content the agent saw last, possibly cut to an excerpt. A fact it does not mention may come from an earlier page and does not count against the answer.`
 
-/** At or below this probability of support, the judge sends the answer back or marks it partial. Live A/B runs (#162) tune it. */
+/** At or below this probability of support the judge is sure the answer is unsupported. Live A/B runs (#162) tune it. */
 export const UNSUPPORTED_AT = 0.2
 
 /** Evidence characters sent to the judge, shared by the newest page text and snapshot. */
