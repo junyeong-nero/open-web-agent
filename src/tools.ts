@@ -130,21 +130,25 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
     let previous: string | undefined
     // How long the last check took; the next one is skipped when it could not finish before the deadline.
     let took = 0
+    // After a check that saw a change or timed out, the next one waits as long as that check took, so that checks
+    // take at most half of a busy renderer's time.
+    let rest = false
     // A renderer that is still starting up holds up any snapshot, so the cap starts once the page answers a check. A
     // page that never answers is returned as before, without the note, and its snapshot waits for it.
     let answered: Page | undefined
     while (!stopped) {
       if (performance.now() + took >= deadline) return { note: answered ? "\nThe page may still be changing." : "" }
-      const deciding = deadline < Infinity
+      // When this round's check started, or the round itself when the page was too busy for one.
+      let checked = performance.now()
       try {
         // A new tab opened by the action is the page the snapshot shows.
         const current = await session.page()
         if (answered !== current) answered = undefined
-        if (deciding) await current.waitForLoadState("domcontentloaded", { timeout: Math.max(1, deadline - performance.now()) })
+        if (deadline < Infinity) await current.waitForLoadState("domcontentloaded", { timeout: Math.max(1, deadline - performance.now()) })
         // Tracked requests in flight mean the page is still loading; no snapshot is needed to know that.
         if (current !== page || !pending.size) {
-          const started = performance.now()
-          const check = current.ariaSnapshot({ mode: "ai", timeout: Math.max(1, Math.min(SETTLE_CHECK_TIMEOUT_MS, deadline - started)) })
+          checked = performance.now()
+          const check = current.ariaSnapshot({ mode: "ai", timeout: Math.max(1, Math.min(SETTLE_CHECK_TIMEOUT_MS, deadline - checked)) })
           // A check given up for a new document fails on its own, before Playwright's retry could take a snapshot.
           check.catch(() => {})
           let replaced = false
@@ -153,7 +157,7 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
             tree = await Promise.race([check, new Promise<string>((resolve) => { interrupt = () => { replaced = true; resolve("") } })])
           } finally {
             interrupt = () => {}
-            if (!replaced) took = performance.now() - started
+            if (!replaced) took = performance.now() - checked
           }
           if (!replaced) {
             if (answered !== current) {
@@ -163,26 +167,28 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
             const url = current.url()
             const state = `${url}\n${tree}`
             const same = state === previous
-            if (previous !== undefined && !same) touch()
+            rest = previous !== undefined && !same
+            if (rest) touch()
             previous = state
             // An empty tree has not rendered yet, unless the tab is blank on purpose.
-            if (deciding && same && (tree || url === "about:blank") && performance.now() - activity >= SETTLE_CHECK_MS) {
+            if (deadline < Infinity && same && (tree || url === "about:blank") && performance.now() - activity >= SETTLE_CHECK_MS) {
               return { note: "", last: { page: current, tree } }
             }
           }
         }
       } catch (error) {
-        // A timeout means the page is still busy; anything else, such as a closed page or a cancelled session, ends the wait.
+        // A check that timed out saw nothing, so the next one decides. Anything else, such as a closed page or a
+        // cancelled session, ends the wait.
         if (!(error instanceof errors.TimeoutError)) return { note: "" }
-        touch()
+        rest = true
       }
       if (stopped) break
       const now = performance.now()
-      // Check again SETTLE_CHECK_MS after the last change, but spend at most half the time taking snapshots.
-      const quietIn = activity + SETTLE_CHECK_MS - now
+      // Check again SETTLE_CHECK_MS after the last change and the last check.
+      const delay = Math.max(Math.max(activity, checked) + SETTLE_CHECK_MS - now, rest ? took : 0)
       await new Promise<void>((resolve) => {
         wake = resolve
-        setTimeout(resolve, Math.max(0, Math.min(Math.max(quietIn > 0 ? quietIn : SETTLE_CHECK_MS, took), deadline - now)))
+        setTimeout(resolve, Math.max(0, Math.min(delay, deadline - now)))
       })
     }
     return { note: "" }
