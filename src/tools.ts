@@ -52,6 +52,8 @@ const SETTLE_CHECK_MS = 150
  * load event, or this long after DOMContentLoaded when slow images or third-party scripts hold up the load event.
  */
 const SETTLE_LOAD_MS = 1_000
+/** A WebSocket reply can come in parts, so a socket holds the wait until it has received nothing for this long. */
+const SETTLE_SOCKET_QUIET_MS = 1_000
 /**
  * A check made while the action may still start a navigation gives up after this long. Playwright retries a snapshot
  * that ran into a navigation one second later, so a check that was given up never takes its snapshot after the final one.
@@ -101,10 +103,11 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
   // The page's own requests started since the action began, each marked when it is a navigation. Requests that started
   // before, such as an open long poll, are never tracked.
   const pending = new Map<Request, boolean>()
-  // The page's own WebSockets that it wrote to since the action began, and those of them that have not answered since.
-  const engaged = new Set<WebSocket>()
-  const awaiting = new Set<WebSocket>()
-  const busy = () => pending.size > 0 || awaiting.size > 0
+  // The page's own WebSockets that opened or that it wrote to since the action began, with when each last sent and
+  // received a frame. Each holds the wait while a reply is due, and until it has received nothing for SETTLE_SOCKET_QUIET_MS.
+  const engaged = new Map<WebSocket, { sent: number; received: number }>()
+  const answering = () => [...engaged.values()].some(({ sent, received }) => sent > received || performance.now() - received < SETTLE_SOCKET_QUIET_MS)
+  const busy = () => pending.size > 0 || answering()
   const navigating = () => [...pending.values()].includes(true)
   // Ends a check that a new document is about to replace; it would otherwise wait for Playwright's retry.
   let interrupt = () => {}
@@ -128,18 +131,26 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
   const onLoad = () => { touch(); loading = undefined }
   const loaded = () => loading === undefined || performance.now() - loading >= SETTLE_LOAD_MS
   const sockets: Array<{ socket: WebSocket; sent(): void; received(): void; closed(): void }> = []
-  const onSocket = (socket: WebSocket) => {
+  const watchSocket = (socket: WebSocket, opened: boolean) => {
+    const own = ownSite(socket.url())
+    if (own && opened) engaged.set(socket, { sent: performance.now(), received: -Infinity })
     const watched = {
       socket,
-      sent: () => { if (ownSite(socket.url())) { engaged.add(socket); awaiting.add(socket) } },
-      received: () => { if (engaged.has(socket)) { awaiting.delete(socket); touch() } },
-      closed: () => { if (awaiting.delete(socket)) touch() },
+      sent: () => { if (own) engaged.set(socket, { sent: performance.now(), received: engaged.get(socket)?.received ?? -Infinity }) },
+      received: () => {
+        const times = engaged.get(socket)
+        if (!times) return
+        times.received = performance.now()
+        touch()
+      },
+      closed: () => { if (engaged.delete(socket)) touch() },
     }
     socket.on("framesent", watched.sent)
     socket.on("framereceived", watched.received)
     socket.on("close", watched.closed)
     sockets.push(watched)
   }
+  const onSocket = (socket: WebSocket) => watchSocket(socket, true)
   let stopped = false
   let wake = () => {}
   const stop = () => {
@@ -171,7 +182,7 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
     page.on("domcontentloaded", onContentLoaded)
     page.on("load", onLoad)
     page.on("websocket", onSocket)
-    for (const socket of session.webSockets(page)) onSocket(socket)
+    for (const socket of session.webSockets(page)) watchSocket(socket, false)
   } catch {
     stop()
     return undefined
