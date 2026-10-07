@@ -99,9 +99,9 @@ that claims success against the page it rests on. It is off by default, and with
 When a final answer's outcome is `succeeded`, the agent sends the judge one request without tools. It holds the task,
 the answer without its outcome line, and the page content still in the agent's context: the newest `browser_get_text`
 text and the newest snapshot, without refs. The two share 16,000 characters. A longer part is cut to the lines that
-share uncommon words or numbers with the task and the answer, plus the lines next to them (or to its start when no
-line matches), and `…` marks the lines left out. The judge replies with its probability that the evidence supports
-the answer, as `{"reason":"<one sentence>","supported":0.05}`; a boolean or a bare number such as `0.82` also works.
+share uncommon words or numbers with the task and the answer, plus the lines next to them, or to its start when no
+line matches; `…` marks the lines left out. The judge replies with its probability that the evidence supports the
+answer, as `{"reason":"<one sentence>","supported":0.05}`; a boolean or a bare number such as `0.82` also works.
 The prompt tells the judge that a fact the newest page does not mention does not count against the answer, because
 it may come from an earlier page, and that an answer with no page content at all is unsupported.
 
@@ -122,10 +122,11 @@ outcome stay as they were, and the result's `judgeError` says why.
 
 Any `provider:model` can judge, for example `gemini:gemini-3.1-flash-lite`. Unlike the agent's step requests, the
 judge's request offers no tools, so it can use reasoning options that OpenAI's chat completions API rejects together
-with tools, such as a gpt-6 model's `reasoning_effort` other than `"none"`. `typesafe:jev-latest` uses a
-small client for TypeSafe's System One API (`POST /v1/systemone`). The judge prompt becomes one yes/no (Noul)
-question about the request text, and Jev's probability of yes is the verdict, without a reason. It works only as a
-judge, since System One models do not call tools.
+with tools, such as a gpt-6 model's `reasoning_effort` other than `"none"`.
+
+`typesafe:jev-latest` uses a small client for TypeSafe's System One API (`POST /v1/systemone`). The judge prompt
+becomes one yes/no (Noul) question about the request text, and Jev's probability of yes is the verdict, without a
+reason. It works only as a judge, since System One models do not call tools.
 
 ```bash
 owa run "..." --model openai:gpt-6-luna --model-options '{"reasoning_effort":"none"}' \
