@@ -14,6 +14,11 @@ const TOGGLES = `<title>Card options</title><style>
     <p><label><input id="updates" type="checkbox"> Email me card offers</label></p>
     <div style="height: 2000px"></div>`
 
+/** Render a result list 800 ms after DOMContentLoaded. */
+const LATE_LIST = `<script>
+    setTimeout(() => document.body.insertAdjacentHTML("beforeend", "<h1>Search results</h1><ul><li>Result one</li><li>Result two</li></ul>"), 800)
+  </script>`
+
 const PAGES: Record<string, string> = {
   "/slow-render": `<!doctype html><title>Slow renderer</title><script>
     // Simulate a renderer blocked during its first text render, independently of network speed.
@@ -71,23 +76,21 @@ const PAGES: Record<string, string> = {
     <h1>Pricing</h1><p>The Pro plan costs $42 per month.</p>
   </body></html>`,
   // Like client-rendered pages: the body is still empty at DOMContentLoaded.
-  "/late-list": `<!doctype html><title>Late list</title><body><script>
-    setTimeout(() => document.body.insertAdjacentHTML("beforeend", "<h1>Search results</h1><ul><li>Result one</li><li>Result two</li></ul>"), 800)
-  </script></body>`,
+  "/late-list": `<!doctype html><title>Late list</title><body>${LATE_LIST}</body>`,
+  "/late-list-no-eval": `<!doctype html><title>Late list</title><body><script>window.eval = () => { throw new Error("eval is disabled") }</script>${LATE_LIST}</body>`,
   "/late-fetch": `<!doctype html><title>Late results</title><body><h1>Late results</h1>
     <button onclick="fetch('/late-data').then((response) => response.text()).then((text) => { document.querySelector('#results').textContent = text })">Search</button>
     <p id="results">No results yet</p></body>`,
-  // Like Bing: after load, add redirect parameters to the URL and render the search box again.
+  // Like Bing: its first page has no results, and 500 ms after load, once a request it sent has returned, the page adds
+  // redirect parameters to the URL and renders the search box again.
   "/late-redirect": `<!doctype html><title>Late redirect</title><body><h1>Search</h1><form id="search"><input aria-label="Query" name="q"></form><script>
-    addEventListener("load", () => setTimeout(() => {
+    addEventListener("load", () => fetch("/late-data?ms=500").then(() => {
       history.replaceState(null, "", location.pathname + "?rdr=1")
       document.querySelector("#search").innerHTML = '<input aria-label="Query" name="q">'
-    }, 500))
+    }))
   </script></body>`,
-  // Like bot-check interstitials that reload into the real page.
-  "/interstitial": `<!doctype html><title>Redirecting</title><body><p>Checking your browser</p><script>
-    setTimeout(() => location.replace("/pricing"), 300)
-  </script></body>`,
+  // Like the blank bot-check pages, without a title or text, that reload into the real page.
+  "/interstitial": `<!doctype html><body><script>setTimeout(() => location.replace("/pricing"), 300)</script></body>`,
   "/never-settles": `<!doctype html><title>Live ticker</title><body><h1>Live ticker</h1><button>Refresh</button><p id="tick">0</p><script>
     let ticks = 0
     setInterval(() => { document.querySelector("#tick").textContent = String(++ticks) }, 100)
@@ -131,7 +134,7 @@ export function startFixtureServer(): { url: string; stop(): void } {
         })
         return new Response(body, { headers: { "content-type": "text/html", "cache-control": "no-store" } })
       }
-      if (url.pathname === "/late-data") return later(800, () => new Response("Found 3 results", { headers: { "cache-control": "no-store" } }))
+      if (url.pathname === "/late-data") return later(Number(url.searchParams.get("ms") ?? 800), () => new Response("Found 3 results", { headers: { "cache-control": "no-store" } }))
       if (url.pathname === "/slow-ack") return later(2_500, () => new Response(null, { status: 204 }))
       if (url.pathname === "/slow-page") return later(1_200, () => new Response("<!doctype html><title>Slow results</title><h1>Slow results</h1>", { headers: { "content-type": "text/html" } }))
       if (url.pathname === "/stream") {

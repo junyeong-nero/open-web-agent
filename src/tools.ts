@@ -45,9 +45,13 @@ const element = z
 
 /** Main-frame requests that can still change a snapshot. Streams (EventSource, WebSocket), beacons, images and fonts never hold it. */
 const SETTLE_REQUESTS = new Set(["document", "stylesheet", "script", "xhr", "fetch"])
-/** How long the URL, the accessibility tree and the tracked requests must stay unchanged for the page to count as settled. */
-const SETTLE_QUIET_MS = 600
-const SETTLE_POLL_MS = 150
+/** The page has settled when two checks this far apart see the same URL and tree, and no tracked request is in flight. */
+const SETTLE_CHECK_MS = 150
+/**
+ * A check that runs into a navigation would wait for Playwright's retry one second later. Giving up before then keeps
+ * the wait short, and a check that was given up never takes its snapshot after the final one.
+ */
+const SETTLE_CHECK_TIMEOUT_MS = 900
 
 interface Settling {
   /** Start comparing snapshots while the action still waits for its own navigation. */
@@ -59,33 +63,41 @@ interface Settling {
 
 /**
  * Watch a page from just before an action until it settles: the main-frame documents, scripts, styles and data
- * requests started since then have finished, a new document has reached DOMContentLoaded, and the URL and the
- * accessibility tree have not changed for SETTLE_QUIET_MS. An empty tree has not rendered yet. Only request events
- * and ariaSnapshot, which runs in Playwright's utility world, are used, never page-world evaluate, so pages that
- * override `window.eval` settle too. Undefined when settling is off or the page cannot be watched.
+ * requests started since then have finished, a new document has reached DOMContentLoaded, and two checks
+ * SETTLE_CHECK_MS apart, with nothing else happening in between, see the same URL and accessibility tree. An empty
+ * tree has not rendered yet. Only request events and ariaSnapshot, which runs in Playwright's utility world, are used,
+ * never page-world evaluate, so pages that override `window.eval` settle too. Undefined when settling is off or the
+ * page cannot be watched.
  */
 function watchSettling(session: BrowserSession, page: Page): Settling | undefined {
   const cap = session.options.settleTimeoutMs ?? 3_000
   if (!(cap > 0)) return undefined
-  const quiet = Math.min(SETTLE_QUIET_MS, cap / 2)
   // Requests that started before the action, such as an open long poll, are never tracked.
   const pending = new Set<Request>()
   let activity = performance.now()
   const touch = () => { activity = performance.now() }
+  // Ends a check that a new document is about to replace; it would otherwise wait for Playwright's retry.
+  let interrupt = () => {}
   const onRequest = (request: Request) => {
     try {
-      if (SETTLE_REQUESTS.has(request.resourceType()) && request.frame() === page.mainFrame()) pending.add(request)
+      if (!SETTLE_REQUESTS.has(request.resourceType()) || request.frame() !== page.mainFrame()) return
+      pending.add(request)
+      if (request.isNavigationRequest()) interrupt()
     } catch { /* A service worker request has no frame. */ }
   }
   const onFinished = (request: Request) => { if (pending.delete(request)) touch() }
+  // A page may never read a fetch body, and then its request never finishes, so a fetch counts once its response arrives.
+  const onResponse = (response: Response) => { if (response.request().resourceType() === "fetch") onFinished(response.request()) }
   const onNavigated = (frame: Frame) => { if (frame === page.mainFrame()) touch() }
   let stopped = false
   let wake = () => {}
   const stop = () => {
     stopped = true
     wake()
+    interrupt()
     try {
       page.off("request", onRequest)
+      page.off("response", onResponse)
       page.off("requestfinished", onFinished)
       page.off("requestfailed", onFinished)
       page.off("framenavigated", onNavigated)
@@ -95,6 +107,7 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
   }
   try {
     page.on("request", onRequest)
+    page.on("response", onResponse)
     page.on("requestfinished", onFinished)
     page.on("requestfailed", onFinished)
     page.on("framenavigated", onNavigated)
@@ -109,36 +122,51 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
   let loop: Promise<string> | undefined
   const run = async (): Promise<string> => {
     let previous: string | undefined
+    // How long the last check took; the next one is skipped when it could not finish before the deadline.
+    let took = 0
     while (!stopped) {
-      if (performance.now() >= deadline) return "\nThe page may still be changing."
+      if (performance.now() + took >= deadline) return "\nThe page may still be changing."
       const deciding = deadline < Infinity
-      let took = 0
       try {
         // A new tab opened by the action is the page the snapshot shows.
         const current = await session.page()
         if (deciding) await current.waitForLoadState("domcontentloaded", { timeout: Math.max(1, deadline - performance.now()) })
+        // Tracked requests in flight mean the page is still loading; no snapshot is needed to know that.
         if (current !== page || !pending.size) {
           const started = performance.now()
-          const tree = await current.ariaSnapshot({ mode: "ai", timeout: Math.max(1, Math.min(deadline, started + 1_000) - started) })
-          took = performance.now() - started
-          const url = current.url()
-          const state = `${url}\n${tree}`
-          if (previous !== undefined && state !== previous) touch()
-          previous = state
-          // An empty tree has not rendered yet, unless the tab is blank on purpose.
-          if (deciding && (tree || url === "about:blank") && performance.now() - activity >= quiet) return ""
+          const check = current.ariaSnapshot({ mode: "ai", timeout: Math.max(1, Math.min(SETTLE_CHECK_TIMEOUT_MS, deadline - started)) })
+          // A check given up for a new document fails on its own, before Playwright's retry could take a snapshot.
+          check.catch(() => {})
+          let replaced = false
+          let tree: string
+          try {
+            tree = await Promise.race([check, new Promise<string>((resolve) => { interrupt = () => { replaced = true; resolve("") } })])
+          } finally {
+            interrupt = () => {}
+            if (!replaced) took = performance.now() - started
+          }
+          if (!replaced) {
+            const url = current.url()
+            const state = `${url}\n${tree}`
+            const same = state === previous
+            if (previous !== undefined && !same) touch()
+            previous = state
+            // An empty tree has not rendered yet, unless the tab is blank on purpose.
+            if (deciding && same && (tree || url === "about:blank") && performance.now() - activity >= SETTLE_CHECK_MS) return ""
+          }
         }
       } catch (error) {
         // A timeout means the page is still busy; anything else, such as a closed page or a cancelled session, ends the wait.
         if (!(error instanceof errors.TimeoutError)) return ""
         touch()
       }
+      if (stopped) break
       const now = performance.now()
-      // Poll every SETTLE_POLL_MS and when the quiet period ends, but spend at most half the time taking snapshots.
-      const next = activity + quiet > now ? Math.min(SETTLE_POLL_MS, activity + quiet - now) : SETTLE_POLL_MS
+      // Check again SETTLE_CHECK_MS after the last change, but spend at most half the time taking snapshots.
+      const quietIn = activity + SETTLE_CHECK_MS - now
       await new Promise<void>((resolve) => {
         wake = resolve
-        setTimeout(resolve, Math.max(0, Math.min(Math.max(next, took), deadline - now)))
+        setTimeout(resolve, Math.max(0, Math.min(Math.max(quietIn > 0 ? quietIn : SETTLE_CHECK_MS, took), deadline - now)))
       })
     }
     return ""

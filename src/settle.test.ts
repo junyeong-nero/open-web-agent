@@ -3,7 +3,7 @@ import { runAgent } from "./agent"
 import { BrowserSession } from "./browser"
 import { refFor, startFixtureServer } from "./testing/fixture"
 import { scriptedModel } from "./testing/scripted-model"
-import { callTool, selectTools } from "./tools"
+import { callTool, selectTools, type ToolResult } from "./tools"
 
 const fixture = startFixtureServer()
 const session = new BrowserSession({ headless: true })
@@ -62,6 +62,8 @@ it("returns refs that survive a late URL change and re-render", async () => {
 
   session.options.settleTimeoutMs = undefined
   const result = await call("browser_navigate", { url: `${fixture.url}/late-redirect` })
+  // The page never reads the body of the request it waits for, so that request never finishes.
+  expect(result.text).not.toContain(changing)
   expect(result.snapshot).toContain(`Page URL: ${fixture.url}/late-redirect?rdr=1\n`)
   const typed = await call("browser_type", { ref: refFor(result.snapshot!, /textbox "Query"/), text: "shoes" })
   expect(typed.isError).toBeUndefined()
@@ -116,16 +118,33 @@ it("stops waiting as soon as the task is cancelled", async () => {
   } finally { await browser.close() }
 }, 30_000)
 
-it("adds little delay on static pages", async () => {
-  const navigated = await timed("browser_navigate", { url: `${fixture.url}/pricing` })
-  expect(navigated.result.text).not.toContain(changing)
-  expect(navigated.ms).toBeLessThan(1_500)
+it("adds less than 300 ms to navigations and clicks on static pages", async () => {
+  // The fastest of three runs, so that a busy machine does not fail the test while a fixed longer wait still would.
+  const fastest = async (run: () => Promise<{ result: ToolResult; ms: number }>) => {
+    const runs = [await run(), await run(), await run()]
+    for (const { result } of runs) expect(result.text).not.toContain(changing)
+    return Math.min(...runs.map(({ ms }) => ms))
+  }
+  const navigate = () => timed("browser_navigate", { url: `${fixture.url}/pricing` })
+  const click = async () => {
+    const { snapshot } = await call("browser_navigate", { url: fixture.url })
+    const clicked = await timed("browser_click", { ref: refFor(snapshot!, /button "Search"/) })
+    expect(clicked.result.snapshot).toContain("Searched")
+    return clicked
+  }
+  session.options.settleTimeoutMs = 0
+  const before = { navigate: await fastest(navigate), click: await fastest(click) }
+  session.options.settleTimeoutMs = undefined
+  expect(await fastest(navigate) - before.navigate).toBeLessThan(300)
+  expect(await fastest(click) - before.click).toBeLessThan(300)
+}, 30_000)
 
-  const { snapshot } = await call("browser_navigate", { url: fixture.url })
-  const clicked = await timed("browser_click", { ref: refFor(snapshot!, /button "Search"/) })
-  expect(clicked.result.text).not.toContain(changing)
-  expect(clicked.result.snapshot).toContain("Searched")
-  expect(clicked.ms).toBeLessThan(1_500)
+it("settles a page that replaces window.eval", async () => {
+  const result = await call("browser_navigate", { url: `${fixture.url}/late-list-no-eval` })
+  // As on americanexpress.com, Playwright's page-world evaluate fails here, so the wait must not depend on it.
+  await expect((await session.page()).evaluate(() => 1)).rejects.toThrow("eval is disabled")
+  expect(result.text).not.toContain(changing)
+  expect(result.snapshot).toContain("Result two")
 }, 30_000)
 
 it("does not wait for event streams, beacons, or requests started before the action", async () => {
