@@ -58,9 +58,10 @@ export class BrowserSession {
     return this.opening
   }
 
-  async snapshot(): Promise<string> {
+  /** `last` is a tree of the current page that was just taken; it is used instead of taking another. */
+  async snapshot(last?: { page: Page; tree: string }): Promise<string> {
     const page = await this.page()
-    const tree = await page.ariaSnapshot({ mode: "ai" })
+    const tree = last?.page === page ? last.tree : await page.ariaSnapshot({ mode: "ai" })
     this.lastSnapshot = { page, url: page.url(), tree }
     const max = this.options.maxSnapshotChars ?? 40_000
     const body = tree.length > max ? truncate(tree, max) : tree

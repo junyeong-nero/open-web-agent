@@ -48,22 +48,28 @@ const SETTLE_REQUESTS = new Set(["document", "stylesheet", "script", "xhr", "fet
 /** The page has settled when two checks this far apart see the same URL and tree, and no tracked request is in flight. */
 const SETTLE_CHECK_MS = 150
 /**
- * A check that runs into a navigation would wait for Playwright's retry one second later. Giving up before then keeps
- * the wait short, and a check that was given up never takes its snapshot after the final one.
+ * Each check gives up after this long. Playwright retries a snapshot that ran into a navigation one second later, so a
+ * check that was given up never takes its snapshot after the final one.
  */
 const SETTLE_CHECK_TIMEOUT_MS = 900
+
+/** A note when the page was still changing, or the tree of the settled page, which is the latest snapshot taken. */
+interface Settled {
+  note: string
+  last?: { page: Page; tree: string }
+}
 
 interface Settling {
   /** Start comparing snapshots while the action still waits for its own navigation. */
   observe(): void
-  /** Wait at most settleTimeoutMs more; resolves to a note when the page was still changing, and never rejects. */
-  settle(): Promise<string>
+  /** Wait at most settleTimeoutMs more; never rejects. */
+  settle(): Promise<Settled>
   stop(): void
 }
 
 /**
  * Watch a page from just before an action until it settles: the main-frame documents, scripts, styles and data
- * requests started since then have finished, a new document has reached DOMContentLoaded, and two checks
+ * requests started since then have returned, a new document has reached DOMContentLoaded, and two checks
  * SETTLE_CHECK_MS apart, with nothing else happening in between, see the same URL and accessibility tree. An empty
  * tree has not rendered yet. Only request events and ariaSnapshot, which runs in Playwright's utility world, are used,
  * never page-world evaluate, so pages that override `window.eval` settle too. Undefined when settling is off or the
@@ -119,13 +125,13 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
   }
 
   let deadline = Infinity
-  let loop: Promise<string> | undefined
-  const run = async (): Promise<string> => {
+  let loop: Promise<Settled> | undefined
+  const run = async (): Promise<Settled> => {
     let previous: string | undefined
     // How long the last check took; the next one is skipped when it could not finish before the deadline.
     let took = 0
     while (!stopped) {
-      if (performance.now() + took >= deadline) return "\nThe page may still be changing."
+      if (performance.now() + took >= deadline) return { note: "\nThe page may still be changing." }
       const deciding = deadline < Infinity
       try {
         // A new tab opened by the action is the page the snapshot shows.
@@ -152,12 +158,14 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
             if (previous !== undefined && !same) touch()
             previous = state
             // An empty tree has not rendered yet, unless the tab is blank on purpose.
-            if (deciding && same && (tree || url === "about:blank") && performance.now() - activity >= SETTLE_CHECK_MS) return ""
+            if (deciding && same && (tree || url === "about:blank") && performance.now() - activity >= SETTLE_CHECK_MS) {
+              return { note: "", last: { page: current, tree } }
+            }
           }
         }
       } catch (error) {
         // A timeout means the page is still busy; anything else, such as a closed page or a cancelled session, ends the wait.
-        if (!(error instanceof errors.TimeoutError)) return ""
+        if (!(error instanceof errors.TimeoutError)) return { note: "" }
         touch()
       }
       if (stopped) break
@@ -169,7 +177,7 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
         setTimeout(resolve, Math.max(0, Math.min(Math.max(quietIn > 0 ? quietIn : SETTLE_CHECK_MS, took), deadline - now)))
       })
     }
-    return ""
+    return { note: "" }
   }
   return {
     observe() {
@@ -177,7 +185,7 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
       loop ??= run()
     },
     async settle() {
-      if (stopped) return ""
+      if (stopped) return { note: "" }
       deadline = performance.now() + cap
       wake()
       if (!loop) {
@@ -292,9 +300,10 @@ function failureReason(error: unknown): string {
 
 /** A failed observation must not turn an already completed action into a retryable failure. */
 async function snapshotAfterAction(session: BrowserSession, summary: string, settling?: Settling): Promise<ToolResult> {
-  if (settling) summary += await settling.settle()
+  const { note, last } = (await settling?.settle()) ?? { note: "" }
+  summary += note
   try {
-    return snapshotResult(summary, await session.snapshot())
+    return snapshotResult(summary, await session.snapshot(last))
   } catch (error) {
     return {
       text: `${summary}\nThe browser action completed, but its follow-up snapshot failed: ${failureReason(error)}\nDo not repeat the action just to recover the snapshot. Call browser_snapshot to inspect the current page before taking another action.`,
