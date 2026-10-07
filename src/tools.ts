@@ -43,12 +43,15 @@ const element = z
   .optional()
   .describe("Short human-readable description of the element, shown to humans approving the action")
 
-/** Main-frame requests that can still change a snapshot. Streams (EventSource, WebSocket), beacons, images and fonts never hold it. */
+/** Main-frame requests that can still change a snapshot. Streams (EventSource), beacons, images and fonts never hold it. */
 const SETTLE_REQUESTS = new Set(["document", "stylesheet", "script", "xhr", "fetch"])
-/** Requests to other sites, such as analytics, ads, chat widgets and maps, hold the wait at most this long each. */
-const SETTLE_OTHER_SITE_MS = 1_000
 /** The page has settled when two checks this far apart see the same URL and tree, and nothing is in flight. */
 const SETTLE_CHECK_MS = 150
+/**
+ * A page's scripts often start its data requests only after DOMContentLoaded, so a new document settles only after its
+ * load event, or this long after DOMContentLoaded when slow images or third-party scripts hold up the load event.
+ */
+const SETTLE_LOAD_MS = 1_000
 /**
  * A check made while the action may still start a navigation gives up after this long. Playwright retries a snapshot
  * that ran into a navigation one second later, so a check that was given up never takes its snapshot after the final one.
@@ -81,26 +84,28 @@ function siteOf(url: string): string {
 }
 
 /**
- * Watch a page from just before an action until it settles: the main-frame documents, scripts, styles and data
- * requests started since then have returned, a WebSocket the page wrote to since then has answered, a new document has
- * reached DOMContentLoaded, and two checks SETTLE_CHECK_MS apart, with nothing else happening in between, see the same
- * URL and the same snapshot as the model will get it. An empty tree has not rendered yet. Only network events and
- * ariaSnapshot, which runs in Playwright's utility world, are used, never page-world evaluate, so pages that override
- * `window.eval` settle too. Undefined when settling is off or the page cannot be watched.
+ * Watch a page from just before an action until it settles: the page's own documents, scripts, styles and data
+ * requests started since then have returned, a WebSocket of its own that it wrote to since then has answered, a new
+ * document has reached DOMContentLoaded, and two checks SETTLE_CHECK_MS apart, with nothing else happening in between,
+ * see the same URL and the same snapshot as the model will get it. An empty tree has not rendered yet. Requests to other
+ * sites, such as analytics, ads, maps and chat widgets, never hold the wait. Only network events and ariaSnapshot, which
+ * runs in Playwright's utility world, are used, never page-world evaluate, so pages that override `window.eval` settle
+ * too. Undefined when settling is off or the page cannot be watched.
  */
 function watchSettling(session: BrowserSession, page: Page): Settling | undefined {
   const cap = session.options.settleTimeoutMs ?? 3_000
   if (!(cap > 0)) return undefined
   let activity = performance.now()
   const touch = () => { activity = performance.now() }
-  // Requests started since the action began, and whether each holds the wait until it returns, as the page's own
-  // requests do. Requests that started before, such as an open long poll, are never tracked.
-  const pending = new Map<Request, { started: number; holds: boolean }>()
-  // WebSockets the page wrote to since the action began, and those of them that have not answered since.
+  const ownSite = (url: string) => siteOf(url) === siteOf(page.url())
+  // The page's own requests started since the action began, each marked when it is a navigation. Requests that started
+  // before, such as an open long poll, are never tracked.
+  const pending = new Map<Request, boolean>()
+  // The page's own WebSockets that it wrote to since the action began, and those of them that have not answered since.
   const engaged = new Set<WebSocket>()
   const awaiting = new Set<WebSocket>()
-  const busy = () => awaiting.size > 0
-    || [...pending.values()].some(({ started, holds }) => holds || performance.now() - started < SETTLE_OTHER_SITE_MS)
+  const busy = () => pending.size > 0 || awaiting.size > 0
+  const navigating = () => [...pending.values()].includes(true)
   // Ends a check that a new document is about to replace; it would otherwise wait for Playwright's retry.
   let interrupt = () => {}
   const onRequest = (request: Request) => {
@@ -108,7 +113,8 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
       // blob: and data: requests never report that they finished.
       if (!SETTLE_REQUESTS.has(request.resourceType()) || request.frame() !== page.mainFrame() || !/^https?:/.test(request.url())) return
       const navigation = request.isNavigationRequest()
-      pending.set(request, { started: performance.now(), holds: navigation || siteOf(request.url()) === siteOf(page.url()) })
+      if (!navigation && !ownSite(request.url())) return
+      pending.set(request, navigation)
       if (navigation) interrupt()
     } catch { /* A service worker request has no frame. */ }
   }
@@ -116,11 +122,16 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
   // A page may never read a fetch body, and then its request never finishes, so a fetch counts once its response arrives.
   const onResponse = (response: Response) => { if (response.request().resourceType() === "fetch") onFinished(response.request()) }
   const onNavigated = (frame: Frame) => { if (frame === page.mainFrame()) touch() }
+  // When a new document reached DOMContentLoaded during the wait and has not reached load yet.
+  let loading: number | undefined
+  const onContentLoaded = () => { touch(); loading = performance.now() }
+  const onLoad = () => { touch(); loading = undefined }
+  const loaded = () => loading === undefined || performance.now() - loading >= SETTLE_LOAD_MS
   const sockets: Array<{ socket: WebSocket; sent(): void; received(): void; closed(): void }> = []
   const onSocket = (socket: WebSocket) => {
     const watched = {
       socket,
-      sent: () => { engaged.add(socket); awaiting.add(socket) },
+      sent: () => { if (ownSite(socket.url())) { engaged.add(socket); awaiting.add(socket) } },
       received: () => { if (engaged.has(socket)) { awaiting.delete(socket); touch() } },
       closed: () => { if (awaiting.delete(socket)) touch() },
     }
@@ -141,8 +152,8 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
       page.off("requestfinished", onFinished)
       page.off("requestfailed", onFinished)
       page.off("framenavigated", onNavigated)
-      page.off("domcontentloaded", touch)
-      page.off("load", touch)
+      page.off("domcontentloaded", onContentLoaded)
+      page.off("load", onLoad)
       page.off("websocket", onSocket)
       for (const { socket, sent, received, closed } of sockets) {
         socket.off("framesent", sent)
@@ -157,8 +168,8 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
     page.on("requestfinished", onFinished)
     page.on("requestfailed", onFinished)
     page.on("framenavigated", onNavigated)
-    page.on("domcontentloaded", touch)
-    page.on("load", touch)
+    page.on("domcontentloaded", onContentLoaded)
+    page.on("load", onLoad)
     page.on("websocket", onSocket)
     for (const socket of session.webSockets(page)) onSocket(socket)
   } catch {
@@ -175,8 +186,8 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
     let previous: string | undefined
     // How long the last check took; the next one is skipped when it could not finish before the deadline.
     let took = 0
-    // After a check that saw a change or failed, the next one waits as long as that check took, so that checks take
-    // at most half of a busy renderer's time.
+    // After a check that saw a change or failed, and while requests are in flight, the next check waits as long as the
+    // last one took, so that checks take at most half of a busy renderer's time.
     let rest = false
     let answered: Page | undefined
     while (!stopped) {
@@ -190,7 +201,9 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
         if (answered !== current) answered = undefined
         const deciding = deadline < Infinity
         if (deciding) await current.waitForLoadState("domcontentloaded", { timeout: Math.max(1, deadline - performance.now()) })
-        if (current !== page || !busy()) {
+        // Checks go on while requests are in flight, so that one check can settle the page once they have returned, but
+        // not while a new document is on its way.
+        if (current !== page || !navigating()) {
           checked = performance.now()
           // While the action may still navigate, a check gives up early and a new document ends it; afterwards it
           // follows the page through a reload.
@@ -218,7 +231,7 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
             if (rest) touch()
             previous = state
             // An empty tree has not rendered yet, unless the tab is blank on purpose.
-            if (deadline < Infinity && same && (tree || url === "about:blank") && !busy() && performance.now() - activity >= SETTLE_CHECK_MS) {
+            if (deadline < Infinity && same && (tree || url === "about:blank") && !busy() && loaded() && performance.now() - activity >= SETTLE_CHECK_MS) {
               return { note: "", last: { page: current, tree } }
             }
           }
@@ -232,7 +245,7 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
       if (stopped) break
       const now = performance.now()
       // Check again SETTLE_CHECK_MS after the last change and the last check.
-      const delay = Math.max(Math.max(activity, checked) + SETTLE_CHECK_MS - now, rest ? took : 0)
+      const delay = Math.max(Math.max(activity, checked) + SETTLE_CHECK_MS - now, rest || busy() ? took : 0)
       await new Promise<void>((resolve) => {
         wake = resolve
         setTimeout(resolve, Math.max(0, Math.min(delay, deadline - now)))
