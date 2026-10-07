@@ -111,8 +111,9 @@ DOMContentLoaded, and two checks 0.15 seconds apart see the same URL and accessi
 has not rendered yet. A fetch counts as returned once its response arrives, since pages do not always read
 the body. Event streams, WebSockets, beacons and requests that were already open do not count, and neither
 does a timer that changes the page later. A static page waits about 0.15 seconds. The wait adds at most
-3 seconds (`BrowserOptions.settleTimeoutMs`; 0 turns it off), and a page still changing then is returned
-with `The page may still be changing.`
+3 seconds (`BrowserOptions.settleTimeoutMs`; 0 turns it off), counted from the page's first answer, because
+a renderer that is still starting up holds up any snapshot. A page still changing then is returned with
+`The page may still be changing.`
 
 Navigation results report HTTP error statuses, for example `The server responded with HTTP 403.`, and keep the error page's snapshot. A navigation that turns into a file download fails with the file's content type and name instead of Playwright's `Download is starting`. That covers a PDF, or a bot wall that serves `application/blank`. Other failed actions keep Playwright's reason, such as the element that intercepted a click. Optional arguments sent as `null` count as omitted, and `browser_press_key` accepts key names in any case (`END`, `CTRL+A`).
 

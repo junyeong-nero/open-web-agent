@@ -91,6 +91,13 @@ const PAGES: Record<string, string> = {
   </script></body>`,
   // Like the blank bot-check pages, without a title or text, that reload into the real page.
   "/interstitial": `<!doctype html><body><script>setTimeout(() => location.replace("/pricing"), 300)</script></body>`,
+  // Like a new renderer's first render on macOS: nothing answers for 2.5 s after DOMContentLoaded.
+  "/busy-start": `<!doctype html><title>Busy start</title><h1>Busy start</h1><script>
+    addEventListener("DOMContentLoaded", () => setTimeout(() => {
+      const started = performance.now()
+      while (performance.now() - started < 2500) {}
+    }))
+  </script>`,
   "/never-settles": `<!doctype html><title>Live ticker</title><body><h1>Live ticker</h1><button>Refresh</button><p id="tick">0</p><script>
     let ticks = 0
     setInterval(() => { document.querySelector("#tick").textContent = String(++ticks) }, 100)

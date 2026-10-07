@@ -130,8 +130,11 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
     let previous: string | undefined
     // How long the last check took; the next one is skipped when it could not finish before the deadline.
     let took = 0
+    // A renderer that is still starting up holds up any snapshot, so the cap starts once the page answers a check. A
+    // page that never answers is returned as before, without the note, and its snapshot waits for it.
+    let answered: Page | undefined
     while (!stopped) {
-      if (performance.now() + took >= deadline) return { note: "\nThe page may still be changing." }
+      if (performance.now() + took >= deadline) return { note: answered ? "\nThe page may still be changing." : "" }
       const deciding = deadline < Infinity
       try {
         // A new tab opened by the action is the page the snapshot shows.
@@ -152,6 +155,10 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
             if (!replaced) took = performance.now() - started
           }
           if (!replaced) {
+            if (answered !== current) {
+              answered = current
+              deadline = Math.max(deadline, performance.now() + cap)
+            }
             const url = current.url()
             const state = `${url}\n${tree}`
             const same = state === previous

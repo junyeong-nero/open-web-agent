@@ -100,6 +100,13 @@ it("returns within the cap, with a note, from a page that never settles", async 
   expect(clicked.ms).toBeLessThan(5_000)
 }, 30_000)
 
+it("starts the cap once a busy renderer answers, without a note", async () => {
+  const result = await call("browser_navigate", { url: `${fixture.url}/busy-start` })
+  expect(result.isError).toBeUndefined()
+  expect(result.text).not.toContain(changing)
+  expect(result.snapshot).toContain('heading "Busy start"')
+}, 30_000)
+
 it("stops waiting as soon as the task is cancelled", async () => {
   // Cancelling closes the browser, so use a session of its own.
   const browser = new BrowserSession({ headless: true })
