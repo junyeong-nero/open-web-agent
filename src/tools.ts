@@ -62,7 +62,7 @@ interface Settled {
 interface Settling {
   /** Start comparing snapshots while the action still waits for its own navigation. */
   observe(): void
-  /** Wait at most settleTimeoutMs more; never rejects. */
+  /** Wait at most settleTimeoutMs more, counted from the page's first answer to a check; never rejects. */
   settle(): Promise<Settled>
   stop(): void
 }
