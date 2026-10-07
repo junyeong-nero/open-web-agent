@@ -105,8 +105,8 @@ answer, as `{"reason":"<one sentence>","supported":0.05}`; a boolean or a bare n
 The prompt tells the judge that a fact the newest page does not mention does not count against the answer, because
 it may come from an earlier page, and that an answer with no page content at all is unsupported.
 
-At `supported` 0.2 or below, the judge counts as sure that the answer is unsupported. Live A/B runs set this
-threshold (#162).
+At `supported` 0.2 or below, the judge counts as sure that the answer is unsupported. The live check below kept this
+threshold: the wrong answers its judge caught scored 0.05 or less.
 
 - If a step is left, the agent gets the finding ("A check against the page evidence found the answer unsupported.
   Reason: …") and continues to verify and correct its answer. This happens once per run. The corrected answer is
@@ -120,9 +120,13 @@ step limit, for `no_progress` or for `tool_failures` are not, since those runs a
 finish. If the judge request fails, is cancelled, outlasts the task deadline, or returns no verdict, the answer and
 outcome stay as they were, and the result's `judgeError` says why.
 
-Any `provider:model` can judge, for example `gemini:gemini-3.1-flash-lite`. Unlike the agent's step requests, the
-judge's request offers no tools, so it can use reasoning options that OpenAI's chat completions API rejects together
-with tools, such as a gpt-6 model's `reasoning_effort` other than `"none"`.
+Any `provider:model` can judge. Unlike the agent's step requests, the judge's request offers no tools, so it can use
+reasoning options that OpenAI's chat completions API rejects together with tools, such as a gpt-6 model's
+`reasoning_effort` other than `"none"`. A judge that reasons pays off. In a live check on the 16 WebVoyager tasks with
+reference answers, two runs each with `openai:gpt-6-luna` (`reasoning_effort: "none"`) as the agent, answers wrongly
+reported as succeeded went from 5 without a judge to 3 with `openai:gpt-6-sol` at `reasoning_effort: "medium"`, for
+about $0.007 more per run. With gpt-6-luna at `"low"` as the judge, they only went to 4. No correct answer ended up
+rejected.
 
 `typesafe:jev-latest` uses a small client for TypeSafe's System One API (`POST /v1/systemone`). The judge prompt
 becomes one yes/no (Noul) question about the request text, and Jev's probability of yes is the verdict, without a
@@ -130,7 +134,7 @@ reason. It works only as a judge, since System One models do not call tools.
 
 ```bash
 owa run "..." --model openai:gpt-6-luna --model-options '{"reasoning_effort":"none"}' \
-  --judge-model gemini:gemini-3.1-flash-lite
+  --judge-model openai:gpt-6-sol --judge-model-options '{"reasoning_effort":"medium"}'
 ```
 
 `--judge-model-options` (or `OWA_JUDGE_MODEL_OPTIONS`) is a JSON object like `--model-options`. The judge model is
