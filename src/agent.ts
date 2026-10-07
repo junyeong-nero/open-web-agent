@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { interruptible } from "./cancel"
 import type { BrowserSession } from "./browser"
-import type { Message, ModelAdapter, ToolCall, Usage } from "./model/types"
+import type { Message, ModelAdapter, ModelResponse, ToolCall, Usage } from "./model/types"
 import { type BrowserTool, callTool, resultContent, selectTools, type ToolResult, toolSpec } from "./tools"
 
 export const SYSTEM_PROMPT = `You are a web agent that completes the user's task by operating a real browser through tools.
@@ -22,7 +22,9 @@ export type AgentEvent =
   /** `role: "escalate"` marks a call by `escalateModel`. */
   | { type: "model"; step: number; text?: string; toolCalls: ToolCall[]; model?: string; durationMs: number; usage?: Usage; role?: "escalate" }
   | { type: "tool"; step: number; call: ToolCall; result: ToolResult }
-  | ({ type: "escalate" } & Omit<Escalation, "usage">)
+  | ({ type: "escalate" } & Omit<Escalation, "usage" | "error">)
+  /** A request to `escalateModel` failed, so the first model takes this step and the remaining ones back. */
+  | { type: "escalate_failed"; step: number; error: string }
   | { type: "done"; result: AgentResult }
 
 export interface AgentResult {
@@ -47,6 +49,8 @@ export interface Escalation {
   signal: "no_progress" | "tool_failures" | "step_budget"
   model: string
   usage: AgentResult["usage"]
+  /** Why a request to `escalateModel` failed; the first model then ran the remaining steps. */
+  error?: string
 }
 
 export interface AgentOptions {
@@ -56,7 +60,7 @@ export interface AgentOptions {
    * Opt-in model, possibly `model` with other options, that takes over the remaining steps and the same transcript on
    * the run's first stall signal: where the run would stop for no_progress or tool_failures, or once
    * `escalateStepFraction` of the steps are used. It takes over once, with fresh stall counts; a second stall stops the
-   * run as usual.
+   * run as usual. If one of its requests fails, `model` retries that request and runs the remaining steps.
    */
   escalateModel?: ModelAdapter
   /** Share of `maxSteps` after which a run without a final answer escalates (default 2/3, step 20 of 30); 1 turns this signal off. */
@@ -113,33 +117,45 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   let visit = pageVisits()
   let model = options.model
   let escalation: Omit<Escalation, "usage"> | undefined
-  let escalatedCalls = 0
+  const escalationUsage: Array<Usage | undefined> = []
 
   const finish = (status: AgentResult["status"], stopReason: AgentResult["stopReason"], text: string, error?: string, outcome?: AgentResult["outcome"]): AgentResult => {
     const final = parseFinalAnswer(text)
     if (outcome) final.outcome = outcome
     const result: AgentResult = { status, stopReason, ...final, observedUrls: [...observedUrls], durationMs: Math.round(performance.now() - startedAt), steps: step, usage: sumUsage(callUsage), ...(error ? { error } : {}) }
-    if (escalation) result.escalation = { ...escalation, usage: sumUsage(callUsage.slice(escalatedCalls)) }
+    if (escalation) result.escalation = { ...escalation, usage: sumUsage(escalationUsage) }
     emit({ type: "done", result })
     return result
   }
-  const ask = async (withTools: boolean, outcomeOnly = false) => {
+  const ask = async (withTools: boolean, outcomeOnly = false): Promise<ModelResponse> => {
+    // Set while `escalateModel` answers, until one of its requests fails.
+    const escalated = escalation && escalation.error === undefined ? escalation : undefined
     const requestedAt = performance.now()
-    const response = await interruptible(() => model.complete({
-      system,
-      messages: render(entries),
-      tools: withTools ? specs : [],
-      signal,
-    }), signal)
-    const durationMs = Math.round(performance.now() - requestedAt)
-    callUsage.push(response.usage)
-    emit({ type: "model", step, text: response.text, toolCalls: response.toolCalls, model: response.model, durationMs, usage: response.usage, ...(escalation ? { role: "escalate" as const } : {}) })
-    if (!outcomeOnly && response.toolCalls.length === 0 && !parseFinalAnswer(response.text ?? "").answer.trim()) {
-      throw new Error(`Model returned no answer or tool calls${response.finishReason ? ` (finish reason: ${response.finishReason})` : ""}`)
+    try {
+      const response = await interruptible(() => model.complete({
+        system,
+        messages: render(entries),
+        tools: withTools ? specs : [],
+        signal,
+      }), signal)
+      const durationMs = Math.round(performance.now() - requestedAt)
+      callUsage.push(response.usage)
+      if (escalated) escalationUsage.push(response.usage)
+      emit({ type: "model", step, text: response.text, toolCalls: response.toolCalls, model: response.model, durationMs, usage: response.usage, ...(escalated ? { role: "escalate" as const } : {}) })
+      if (!outcomeOnly && response.toolCalls.length === 0 && !parseFinalAnswer(response.text ?? "").answer.trim()) {
+        throw new Error(`Model returned no answer or tool calls${response.finishReason ? ` (finish reason: ${response.finishReason})` : ""}`)
+      }
+      if (!outcomeOnly && response.text?.trim()) partialAnswer = response.text
+      entries.push({ role: "assistant", text: response.text, toolCalls: response.toolCalls })
+      return response
+    } catch (error) {
+      // A failed escalation request goes back to the first model, so the step is not lost. Cancellation and the deadline still end the run.
+      if (!escalated || signal.aborted) throw error
+      escalated.error = error instanceof Error ? error.message : String(error)
+      model = options.model
+      emit({ type: "escalate_failed", step, error: escalated.error })
+      return ask(withTools, outcomeOnly)
     }
-    if (!outcomeOnly && response.text?.trim()) partialAnswer = response.text
-    entries.push({ role: "assistant", text: response.text, toolCalls: response.toolCalls })
-    return response
   }
   /** Before stopping without a final answer, ask once without tools for the best answer so far; keep `fallback` if that fails or is empty. */
   const bestEffortAnswer = async (notice: string, fallback: string) => {
@@ -158,8 +174,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     if (!options.escalateModel || escalation || step >= maxSteps) return false
     model = options.escalateModel
     escalation = { step, signal: stall, model: model.name }
-    escalatedCalls = callUsage.length
-    emit({ type: "escalate", ...escalation })
+    emit({ type: "escalate", step, signal: stall, model: model.name })
     entries.push({ role: "user", content: [{ type: "text", text: `${notice} Remaining steps: ${maxSteps - step}. If the current approach is not working, try a different one.` }] })
     failures = 0
     repeatedSteps = 0

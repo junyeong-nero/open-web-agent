@@ -164,7 +164,12 @@ describe("usage and serving model", () => {
 describe("model request diagnostics", () => {
   it("suggests explicit reasoning options for the reported compatibility error", async () => {
     const { fetchImpl } = recordingFetch({ error: { message: "Function tools with reasoning_effort are not supported. Set reasoning_effort to 'none'." } }, 400)
-    await expect(openaiChat({ model: "m", fetch: fetchImpl }).complete(request)).rejects.toThrow('--model-options \'{"reasoning_effort":"none"}\'')
+    await expect(openaiChat({ model: "m", fetch: fetchImpl }).complete(request)).rejects.toThrow(
+      `Try --model-options '{"reasoning_effort":"none"}' (or OWA_MODEL_OPTIONS) if supported by this endpoint. No model options are changed automatically.`,
+    )
+    // A secondary model's hint names the setting that configured it.
+    const escalate = openaiChat({ model: "m", fetch: fetchImpl, optionsSetting: { flag: "--escalate-model-options", env: "OWA_ESCALATE_MODEL_OPTIONS" } })
+    await expect(escalate.complete(request)).rejects.toThrow(`Try --escalate-model-options '{"reasoning_effort":"none"}' (or OWA_ESCALATE_MODEL_OPTIONS) if supported`)
   })
 
   it("redacts API keys echoed by an endpoint from the error and its body", async () => {

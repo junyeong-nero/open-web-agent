@@ -106,15 +106,20 @@ steps go to this model instead of the run stopping. There are three signals:
 The escalation model continues the same transcript after a short note that gives the reason and the number of
 remaining steps, and its stall counts start fresh. A run escalates at most once, and only while steps remain. Both
 models share the step budget and the deadline. If the run stalls again, it stops as before, and the escalation model
-writes the best-effort answer.
+writes the best-effort answer. If a request to the escalation model fails, for example with an HTTP error or an empty
+reply, the first model retries that request and runs the remaining steps, and the escalation counts as used.
+Cancellation and the deadline still end the run.
 
-`--escalate-model-options` (or `OWA_ESCALATE_MODEL_OPTIONS`) is a JSON object like `--model-options`, so the same model
-with more reasoning also works:
+`--escalate-model-options` (or `OWA_ESCALATE_MODEL_OPTIONS`) is a JSON object like `--model-options`:
 
 ```bash
 owa run "..." --model openai:gpt-6-luna --model-options '{"reasoning_effort":"none"}' \
-  --escalate-model openai:gpt-6-luna --escalate-model-options '{"reasoning_effort":"medium"}'
+  --escalate-model openai:gpt-6-sol --escalate-model-options '{"reasoning_effort":"none"}'
 ```
+
+The escalation model can also be the main model with other options, such as a higher reasoning effort. OpenAI's chat
+completions API accepts function tools with gpt-6 models only at `reasoning_effort: "none"`, so a higher-effort
+escalation needs a provider that supports reasoning with tools.
 
 The escalation model is resolved from its `provider:model` shorthand alone and reads that provider's key variable
 (`OPENAI_API_KEY`, …). `--base-url`, `--api`, `--model-module` and `OWA_API_KEY` apply only to the main model, so a key
@@ -262,11 +267,13 @@ names the model it chose. A failed call writes no `model` event.
 
 With `--escalate-model`, a run that escalated also has `escalation` in its result: `step`, the last step before the
 switch; `signal` (`no_progress`, `tool_failures` or `step_budget`); `model`, the escalation model's adapter name, such
-as `openai-chat:gpt-6-sol`; and `usage`, the escalation model's calls summed by the rules above. The result's `usage`
-still covers every call, so the first model's token counts are the difference. Each sum applies the cost rule on its
-own, so when only the escalation model reports a cost, `cost` appears only in `escalation.usage`. In the trace, an
-`escalate` event records the switch (`step`, `signal`, `model`), and every later `model` event has `role: "escalate"`.
-The role tells the two models apart even when they are the same model with different options.
+as `openai-chat:gpt-6-sol`; `usage`, the escalation model's calls summed by the rules above; and `error` when one of
+its requests failed and the first model took the run back. The result's `usage` still covers every call, so the first
+model's token counts are the difference. Each sum applies the cost rule on its own, so when only the escalation model
+reports a cost, `cost` appears only in `escalation.usage`. In the trace, an `escalate` event records the switch
+(`step`, `signal`, `model`), and the escalation model's `model` events have `role: "escalate"`. The role tells the two
+models apart even when they are the same model with different options. A failed escalation request writes an
+`escalate_failed` event (`step`, `error`), and `owa run` logs it to stderr.
 
 ### Task limits and cancellation
 

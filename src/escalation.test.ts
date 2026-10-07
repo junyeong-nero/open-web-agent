@@ -5,11 +5,11 @@ import { type AgentEvent, type AgentOptions, type Escalation, runAgent } from ".
 import { BrowserSession } from "./browser"
 import { createMcpServer } from "./mcp"
 import { resolveModel, roleModelConfig } from "./model/resolve"
-import type { ModelRequest, ModelResponse, Usage } from "./model/types"
+import { ModelHttpError, type ModelRequest, type ModelResponse, type Usage } from "./model/types"
 import { scriptedModel } from "./testing/scripted-model"
 import type { BrowserTool } from "./tools"
 
-type Reply = (request: ModelRequest) => ModelResponse
+type Reply = (request: ModelRequest) => ModelResponse | Promise<ModelResponse>
 
 /** browser_click whose page after the nth click is `page(n)`; an Error fails the click. */
 function clickTool(page: (click: number) => string | Error): BrowserTool {
@@ -34,7 +34,7 @@ const reply = (text: string, usage: Usage, outcome = "succeeded"): Reply => () =
 const replies = (count: number, next: Reply) => Array<Reply>(count).fill(next)
 
 /** Runs the first model's script, and the escalation model's when one is given (named "strong"). */
-async function run(tool: BrowserTool, weak: Reply[], strong?: Reply[], options: Pick<AgentOptions, "maxSteps" | "maxRepeatedSteps" | "escalateStepFraction"> = {}) {
+async function run(tool: BrowserTool, weak: Reply[], strong?: Reply[], options: Pick<AgentOptions, "maxSteps" | "maxRepeatedSteps" | "escalateStepFraction" | "signal" | "timeoutMs"> = {}) {
   const model = scriptedModel(weak)
   const escalateModel = strong && { ...scriptedModel(strong), name: "strong" }
   const events: AgentEvent[] = []
@@ -130,6 +130,81 @@ it("stops as before when a stall leaves no step to hand over", async () => {
   expect(escalateModel!.requests).toHaveLength(0)
 })
 
+const httpError: Reply = () => { throw new ModelHttpError(400, "bad request", "strong") }
+// how the escalation model's first request fails, its error, its usage, and the trace after the escalate event
+const breakdowns: Array<[string, Reply, string, Escalation["usage"], string[]]> = [
+  ["an HTTP error", httpError, "strong request failed with HTTP 400: bad request", { inputTokens: 0, outputTokens: 0 }, ["step", "escalate_failed", "model", "done"]],
+  ["an empty reply", () => ({ toolCalls: [], usage: strongUsage }), "Model returned no answer or tool calls", strongUsage, ["step", "model:escalate", "escalate_failed", "model", "done"]],
+]
+
+it.each(breakdowns)("hands the step back to the first model when the escalation model fails with %s", async (_kind, breakdown, error, usage, trace) => {
+  const { model, escalateModel, events, result } = await run(clickTool(stuck), [...replies(3, click(weakUsage)), reply("Done", weakUsage)], [breakdown])
+  // The first model retries step 4 with the request the escalation model got, so no step is lost.
+  expect(result).toMatchObject({ status: "completed", stopReason: "final_answer", steps: 4, answer: "Done" })
+  expect(escalateModel!.requests).toHaveLength(1)
+  expect(model.requests).toHaveLength(4)
+  expect(model.requests[3]!.messages).toEqual(escalateModel!.requests[0]!.messages)
+  expect(result.escalation).toEqual({ step: 3, signal: "no_progress", model: "strong", error, usage })
+  const kinds = events.map(event => (event.type === "model" && event.role ? `model:${event.role}` : event.type))
+  expect(kinds.slice(kinds.indexOf("escalate") + 1)).toEqual(trace)
+  expect(events.find(event => event.type === "escalate_failed")).toEqual({ type: "escalate_failed", step: 4, error })
+})
+
+it("stops on a later stall after the escalation model failed, without escalating again", async () => {
+  const { model, escalateModel, result } = await run(clickTool(stuck), [...replies(6, click(weakUsage)), reply("Best effort", weakUsage, "partial")], [httpError])
+  expect(result).toMatchObject({ stopReason: "no_progress", steps: 6, answer: "Best effort", escalation: { step: 3, signal: "no_progress" } })
+  expect(escalateModel!.requests).toHaveLength(1)
+  expect(model.requests).toHaveLength(7)
+})
+
+it("still ends the run when it is cancelled or times out during an escalated request", async () => {
+  const controller = new AbortController()
+  // Like fetch, this adapter turns the abort into an error of its own.
+  const cancel: Reply = request => new Promise((_resolve, reject) => {
+    request.signal!.addEventListener("abort", () => reject(new Error("The operation was aborted")))
+    controller.abort(new Error("stop"))
+  })
+  const hang: Reply = () => new Promise(() => {})
+  for (const [options, escalated, stopReason] of [[{ signal: controller.signal }, cancel, "cancelled"], [{ timeoutMs: 500 }, hang, "timeout"]] as const) {
+    const { model, escalateModel, events, result } = await run(clickTool(stuck), replies(3, click(weakUsage)), [escalated], options)
+    expect(result).toMatchObject({ status: "failed", stopReason, steps: 4, escalation: { step: 3, signal: "no_progress" } })
+    expect(result.escalation).not.toHaveProperty("error")
+    expect(model.requests).toHaveLength(3)
+    expect(escalateModel!.requests).toHaveLength(1)
+    expect(events.some(event => event.type === "escalate_failed")).toBe(false)
+  }
+})
+
+it("falls back when the endpoint rejects the escalation model's reasoning effort, with a hint that names its options flag", async () => {
+  const efforts: Array<string | undefined> = []
+  const endpoint = Bun.serve({
+    hostname: "127.0.0.1", port: 0,
+    async fetch(request) {
+      const body = await request.json() as { reasoning_effort?: string }
+      efforts.push(body.reasoning_effort)
+      // OpenAI's chat completions API takes function tools with gpt-6 models only at reasoning_effort "none".
+      if (body.reasoning_effort !== "none") {
+        return Response.json({ error: { message: "Function tools with reasoning_effort are not supported for gpt-6-sol in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'." } }, { status: 400 })
+      }
+      const message = efforts.length <= 3
+        ? { content: null, tool_calls: [{ id: `c${efforts.length}`, type: "function", function: { name: "browser_click", arguments: '{"ref":"e1"}' } }] }
+        : { content: 'Done\n{"outcome":"succeeded","unfinished":[]}' }
+      return Response.json({ choices: [{ message }] })
+    },
+  })
+  try {
+    const local = { api: "openai" as const, baseUrl: `http://127.0.0.1:${endpoint.port}` }
+    const model = await resolveModel({ model: "gpt-6-luna", extraBody: { reasoning_effort: "none" }, ...local }, {})
+    const escalateModel = await resolveModel({ ...roleModelConfig("escalate", { model: "gpt-6-sol" }, {})!, ...local }, {})
+    const result = await runAgent({ task: "t", browser: new BrowserSession({ headless: true }), tools: [clickTool(stuck)], model, escalateModel })
+    expect(result).toMatchObject({ stopReason: "final_answer", steps: 4, answer: "Done", escalation: { step: 3, signal: "no_progress", model: "openai-chat:gpt-6-sol" } })
+    expect(efforts).toEqual(["none", "none", "none", undefined, "none"])
+    expect(result.escalation!.error).toContain("openai-chat:gpt-6-sol request failed with HTTP 400")
+    expect(result.escalation!.error).toContain(`Try --escalate-model-options '{"reasoning_effort":"none"}' (or OWA_ESCALATE_MODEL_OPTIONS)`)
+    expect(result.escalation!.error).not.toContain("--model-options")
+  } finally { endpoint.stop(true) }
+})
+
 it("escalates to the same model when only its options differ", async () => {
   const bodies: Array<{ model: string; reasoning_effort?: string }> = []
   const endpoint = Bun.serve({
@@ -166,12 +241,14 @@ it("hands a stalled browser_task to the MCP server's escalation model", async ()
 
 it("reads --escalate-model and its options before the environment", () => {
   const env = { OWA_ESCALATE_MODEL: "openai:gpt-6-sol", OWA_ESCALATE_MODEL_OPTIONS: '{"reasoning_effort":"high"}' }
+  // Error hints from the adapter name the escalation model's own options setting.
+  const optionsSetting = { flag: "--escalate-model-options", env: "OWA_ESCALATE_MODEL_OPTIONS" }
   expect(roleModelConfig("escalate", {}, {})).toBeUndefined()
-  expect(roleModelConfig("escalate", {}, env)).toEqual({ model: "openai:gpt-6-sol", extraBody: { reasoning_effort: "high" } })
+  expect(roleModelConfig("escalate", {}, env)).toEqual({ model: "openai:gpt-6-sol", extraBody: { reasoning_effort: "high" }, optionsSetting })
   expect(roleModelConfig("escalate", { model: "openai:gpt-6-luna", options: '{"reasoning_effort":"medium"}' }, env))
-    .toEqual({ model: "openai:gpt-6-luna", extraBody: { reasoning_effort: "medium" } })
+    .toEqual({ model: "openai:gpt-6-luna", extraBody: { reasoning_effort: "medium" }, optionsSetting })
   // As with --model-options, the flag's object replaces the environment's, and {} clears it.
-  expect(roleModelConfig("escalate", { options: "{}" }, env)).toEqual({ model: "openai:gpt-6-sol", extraBody: {} })
+  expect(roleModelConfig("escalate", { options: "{}" }, env)).toEqual({ model: "openai:gpt-6-sol", extraBody: {}, optionsSetting })
   // An empty model turns escalation off.
   expect(roleModelConfig("escalate", { model: "" }, env)).toBeUndefined()
 })

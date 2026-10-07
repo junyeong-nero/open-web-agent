@@ -33,6 +33,8 @@ export interface ModelConfig {
   maxTokens?: number
   /** Additional API request fields, supplied explicitly without model-specific defaults. */
   extraBody?: Record<string, unknown>
+  /** The flag and environment variable that set `extraBody`, for error hints; defaults to the main model's. */
+  optionsSetting?: { flag: string; env: string }
 }
 
 export function modelConfigFromEnv(env: Record<string, string | undefined> = process.env): ModelConfig {
@@ -60,11 +62,12 @@ export function roleModelConfig(
   env: Record<string, string | undefined> = process.env,
 ): ModelConfig | undefined {
   const variable = `OWA_${role.toUpperCase()}_MODEL`
+  const optionsSetting = { flag: `--${role}-model-options`, env: `${variable}_OPTIONS` }
   const model = flags.model ?? env[variable]
-  const options = flags.options ?? env[`${variable}_OPTIONS`]
-  const label = `--${role}-model-options / ${variable}_OPTIONS`
+  const options = flags.options ?? env[optionsSetting.env]
+  const label = `${optionsSetting.flag} / ${optionsSetting.env}`
   if (model === undefined && options !== undefined) throw new Error(`${label} needs --${role}-model or ${variable}`)
-  return model ? { model, extraBody: parseModelOptions(options, label) } : undefined
+  return model ? { model, extraBody: parseModelOptions(options, label), optionsSetting } : undefined
 }
 
 const RESERVED_OPTIONS = ["model", "messages", "tools", "system", "stream", "api_key", "apiKey", "authorization", "headers"]
@@ -135,7 +138,7 @@ export async function resolveModel(
 
   return api === "anthropic"
     ? anthropicMessages({ model: spec.model, baseUrl, apiKey, maxTokens: config.maxTokens, extraBody })
-    : openaiChat({ model: spec.model, baseUrl, apiKey, extraBody })
+    : openaiChat({ model: spec.model, baseUrl, apiKey, extraBody, optionsSetting: config.optionsSetting })
 }
 
 async function loadModelModule(path: string, config: ModelConfig): Promise<ModelAdapter> {

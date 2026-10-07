@@ -164,6 +164,7 @@ function logEvent(event: AgentEvent): void {
     if (event.result.isError) log(`    ${oneLine(event.result.text)}`)
   }
   if (event.type === "escalate") log(`↑ [${event.step}] ${event.signal}: escalating to ${event.model}`)
+  if (event.type === "escalate_failed") log(`↓ [${event.step}] escalation failed, back to the first model: ${oneLine(event.error)}`)
   if (event.type === "done") {
     const { status, steps, usage } = event.result
     log(`■ ${status} in ${steps} steps (tokens in ${usage.inputTokens}, out ${usage.outputTokens})`)
