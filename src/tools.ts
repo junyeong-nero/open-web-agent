@@ -139,6 +139,7 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
       try {
         // A new tab opened by the action is the page the snapshot shows.
         const current = await session.page()
+        if (answered !== current) answered = undefined
         if (deciding) await current.waitForLoadState("domcontentloaded", { timeout: Math.max(1, deadline - performance.now()) })
         // Tracked requests in flight mean the page is still loading; no snapshot is needed to know that.
         if (current !== page || !pending.size) {
