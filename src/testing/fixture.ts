@@ -105,6 +105,15 @@ const PAGES: Record<string, string> = {
   "/live-connections": `<!doctype html><title>Live connections</title><body><h1>Live connections</h1>
     <button onclick="navigator.sendBeacon('/slow-ack', 'saved'); document.querySelector('#status').textContent = 'Saved'">Save</button>
     <p id="status">Not saved</p><script>new EventSource("/stream")</script></body>`,
+  // Like Wolfram|Alpha: the page sends its query over a WebSocket, whose answer comes in parts, and a second socket
+  // pushes ticks that the page keeps without showing them.
+  "/socket-results": `<!doctype html><title>Socket results</title><body><h1>Socket results</h1>
+    <button disabled onclick="queries.send('6 times 7')">Compute</button><ul id="parts"></ul><script>
+    const queries = new WebSocket("ws://" + location.host + "/socket")
+    queries.onopen = () => { document.querySelector("button").disabled = false }
+    queries.onmessage = (event) => document.querySelector("#parts").insertAdjacentHTML("beforeend", "<li>" + event.data + "</li>")
+    new WebSocket("ws://" + location.host + "/ticker").onmessage = (event) => { window.lastTick = event.data }
+  </script></body>`,
 }
 
 export function startFixtureServer(): { url: string; stop(): void } {
@@ -116,11 +125,36 @@ export function startFixtureServer(): { url: string; stop(): void } {
     }, ms)
     timers.add(timer)
   })
-  const server = Bun.serve({
+  const after = (ms: number, run: () => void) => {
+    const timer = setTimeout(() => {
+      timers.delete(timer)
+      run()
+    }, ms)
+    timers.add(timer)
+  }
+  const server = Bun.serve<{ ticker: boolean; ticks?: ReturnType<typeof setInterval> }>({
     hostname: "127.0.0.1",
     port: 0,
-    fetch(request) {
+    websocket: {
+      open(socket) {
+        if (!socket.data.ticker) return
+        socket.data.ticks = setInterval(() => socket.send(`tick ${Date.now()}`), 200)
+        timers.add(socket.data.ticks)
+      },
+      // Answer a query in two parts, 800 ms apart.
+      message(socket) {
+        after(300, () => socket.send("Input interpretation: 6 times 7"))
+        after(1_100, () => socket.send("Result: 42"))
+      },
+      close(socket) {
+        if (socket.data.ticks) clearInterval(socket.data.ticks)
+      },
+    },
+    fetch(request, server) {
       const url = new URL(request.url)
+      if (url.pathname === "/socket" || url.pathname === "/ticker") {
+        return server.upgrade(request, { data: { ticker: url.pathname === "/ticker" } }) ? undefined : new Response("upgrade failed", { status: 400 })
+      }
       if (url.pathname === "/locale") return Response.json({ acceptLanguage: request.headers.get("accept-language") })
       if (url.pathname === "/slow-body") {
         let timer: ReturnType<typeof setTimeout>

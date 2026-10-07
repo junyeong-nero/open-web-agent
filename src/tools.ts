@@ -103,10 +103,16 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
   // The page's own requests started since the action began, each marked when it is a navigation. Requests that started
   // before, such as an open long poll, are never tracked.
   const pending = new Map<Request, boolean>()
-  // The page's own WebSockets that opened or that it wrote to since the action began, with when each last sent and
-  // received a frame. Each holds the wait while a reply is due, and until it has received nothing for SETTLE_SOCKET_QUIET_MS.
-  const engaged = new Map<WebSocket, { sent: number; received: number }>()
-  const answering = () => [...engaged.values()].some(({ sent, received }) => sent > received || performance.now() - received < SETTLE_SOCKET_QUIET_MS)
+  // The page's own WebSockets that opened or that it wrote to since the action began, with when each opened, last sent
+  // and last received a frame. One the page wrote to holds the wait while a reply is due and until it has received
+  // nothing for SETTLE_SOCKET_QUIET_MS, since replies can come in parts. One that only opened holds it until its first
+  // frame, at most that long, so sockets that stay silent or only push, such as tickers, never hold it for long.
+  const engaged = new Map<WebSocket, { opened: number; sent: number; received: number }>()
+  const answering = () => [...engaged.values()].some(({ opened, sent, received }) => {
+    const now = performance.now()
+    if (sent > -Infinity) return sent > received || now - received < SETTLE_SOCKET_QUIET_MS
+    return received < opened && now - opened < SETTLE_SOCKET_QUIET_MS
+  })
   const busy = () => pending.size > 0 || answering()
   const navigating = () => [...pending.values()].includes(true)
   // Ends a check that a new document is about to replace; it would otherwise wait for Playwright's retry.
@@ -133,15 +139,21 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
   const sockets: Array<{ socket: WebSocket; sent(): void; received(): void; closed(): void }> = []
   const watchSocket = (socket: WebSocket, opened: boolean) => {
     const own = ownSite(socket.url())
-    if (own && opened) engaged.set(socket, { sent: performance.now(), received: -Infinity })
+    if (own && opened) engaged.set(socket, { opened: performance.now(), sent: -Infinity, received: -Infinity })
     const watched = {
       socket,
-      sent: () => { if (own) engaged.set(socket, { sent: performance.now(), received: engaged.get(socket)?.received ?? -Infinity }) },
+      sent: () => {
+        if (!own) return
+        const times = engaged.get(socket) ?? { opened: -Infinity, sent: -Infinity, received: -Infinity }
+        times.sent = performance.now()
+        engaged.set(socket, times)
+      },
       received: () => {
         const times = engaged.get(socket)
         if (!times) return
         times.received = performance.now()
-        touch()
+        // Only the replies to what the page sent are activity; a ticker's pushes are not.
+        if (times.sent > -Infinity) touch()
       },
       closed: () => { if (engaged.delete(socket)) touch() },
     }

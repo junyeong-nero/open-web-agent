@@ -146,6 +146,24 @@ it("adds less than 300 ms to navigations and clicks on static pages", async () =
   expect(await fastest(click) - before.click).toBeLessThan(300)
 }, 30_000)
 
+it("waits for a WebSocket answer that comes in parts, but not for a socket that only pushes", async () => {
+  session.options.settleTimeoutMs = 0
+  const early = await call("browser_navigate", { url: `${fixture.url}/socket-results` })
+  await (await session.page()).locator("button:enabled").waitFor()
+  const partial = await call("browser_click", { ref: refFor(early.snapshot!, /button "Compute"/) })
+  expect(partial.snapshot).toContain("Input interpretation")
+  expect(partial.snapshot).not.toContain("Result: 42")
+
+  session.options.settleTimeoutMs = undefined
+  const opened = await timed("browser_navigate", { url: `${fixture.url}/socket-results` })
+  expect(opened.result.text).not.toContain(changing)
+  // A socket that opens holds the wait for at most a second, and the ticker's pushes do not hold it.
+  expect(opened.ms).toBeLessThan(2_000)
+  const clicked = await call("browser_click", { ref: refFor(opened.result.snapshot!, /button "Compute"/) })
+  expect(clicked.text).not.toContain(changing)
+  expect(clicked.snapshot).toContain("Result: 42")
+}, 30_000)
+
 it("settles a page that replaces window.eval", async () => {
   const result = await call("browser_navigate", { url: `${fixture.url}/late-list-no-eval` })
   // As on americanexpress.com, Playwright's page-world evaluate fails here, so the wait must not depend on it.
