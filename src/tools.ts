@@ -213,8 +213,12 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
     // last one took, so that checks take at most half of a busy renderer's time.
     let rest = false
     let answered: Page | undefined
+    // An empty page is no use to the model, so while the latest check found nothing on it, as on a bot check that
+    // computes for seconds before it reloads into the real page, the wait may take as long as an action.
+    let empty = false
+    const limit = () => empty ? Math.max(deadline, firstAnswerBy) : deadline
     while (!stopped) {
-      if (performance.now() + took >= deadline) return { note: "\nThe page may still be changing." }
+      if (performance.now() + took >= limit()) return { note: "\nThe page may still be changing." }
       // When this round's check started, or the round itself when the page was too busy for one.
       let checked = performance.now()
       let current: Page | undefined
@@ -223,14 +227,14 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
         current = await session.page()
         if (answered !== current) answered = undefined
         const deciding = deadline < Infinity
-        if (deciding) await current.waitForLoadState("domcontentloaded", { timeout: Math.max(1, deadline - performance.now()) })
+        if (deciding) await current.waitForLoadState("domcontentloaded", { timeout: Math.max(1, limit() - performance.now()) })
         // Checks go on while requests are in flight, so that one check can settle the page once they have returned, but
         // not while a new document is on its way.
         if (current !== page || !navigating()) {
           checked = performance.now()
           // While the action may still navigate, a check gives up early and a new document ends it; afterwards it
           // follows the page through a reload.
-          const until = deciding ? (answered ? deadline : Math.max(deadline, firstAnswerBy)) : checked + SETTLE_CHECK_TIMEOUT_MS
+          const until = deciding ? (answered ? limit() : Math.max(limit(), firstAnswerBy)) : checked + SETTLE_CHECK_TIMEOUT_MS
           const check = current.ariaSnapshot({ mode: "ai", timeout: Math.max(1, until - checked) })
           check.catch(() => {})
           let replaced = false
@@ -254,7 +258,8 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
             if (rest) touch()
             previous = state
             // An empty tree has not rendered yet, unless the tab is blank on purpose.
-            if (deadline < Infinity && same && (tree || url === "about:blank") && !busy() && loaded() && performance.now() - activity >= SETTLE_CHECK_MS) {
+            empty = !tree && url !== "about:blank"
+            if (deadline < Infinity && same && !empty && !busy() && loaded() && performance.now() - activity >= SETTLE_CHECK_MS) {
               return { note: "", last: { page: current, tree } }
             }
           }
@@ -271,7 +276,7 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
       const delay = Math.max(Math.max(activity, checked) + SETTLE_CHECK_MS - now, rest || busy() ? took : 0)
       await new Promise<void>((resolve) => {
         wake = resolve
-        setTimeout(resolve, Math.max(0, Math.min(delay, deadline - now)))
+        setTimeout(resolve, Math.max(0, Math.min(delay, limit() - now)))
       })
     }
     return { note: "" }
