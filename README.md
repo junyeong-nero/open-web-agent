@@ -105,14 +105,16 @@ owa run "..." --model-module ./my-model.ts
 
 The agent keeps only the newest snapshot and screenshot in its context. It stops when it runs out of steps, after repeated failed steps, or when it stops making progress. In each of these cases it makes one last call to get a best-effort answer.
 
-Before an action or navigation returns its snapshot, it waits for the page to settle: the main-frame
-documents, scripts, styles and XHR/fetch requests it started have returned, a new document has reached
-DOMContentLoaded, and two checks 0.15 seconds apart see the same URL and accessibility tree. An empty tree
-has not rendered yet. A fetch counts as returned once its response arrives, since pages do not always read
-the body. Event streams, WebSockets, beacons and requests that were already open do not count, and neither
-does a timer that changes the page later. A static page waits about 0.15 seconds. The wait adds at most
-3 seconds (`BrowserOptions.settleTimeoutMs`; 0 turns it off), counted from the page's first answer, because
-a renderer that is still starting up holds up any snapshot. A page still changing then is returned with
+Before an action or navigation returns its snapshot, it waits for the page to settle: the page's own
+documents, scripts, styles and XHR/fetch requests started since the action have returned, a WebSocket of
+its own that it wrote to has answered and gone quiet for a second, a new document has reached its load
+event (or one second past DOMContentLoaded), and two checks 0.15 seconds apart see the same URL and the
+same snapshot the model will get. A fetch counts as returned once its response arrives, since pages do not
+always read the body. Requests to other sites (analytics, ads, maps, chat widgets), event streams, beacons,
+`blob:` URLs and requests that were already open do not count, and neither does a timer that changes the
+page later. An empty tree has not rendered yet. A static page waits about 0.15 seconds. The wait adds at
+most 3 seconds (`BrowserOptions.settleTimeoutMs`; 0 turns it off), counted from the page's first answer to
+a check, and an empty page may wait as long as an action. A page still changing then is returned with
 `The page may still be changing.`
 
 Navigation results report HTTP error statuses, for example `The server responded with HTTP 403.`, and keep the error page's snapshot. A navigation that turns into a file download fails with the file's content type and name instead of Playwright's `Download is starting`. That covers a PDF, or a bot wall that serves `application/blank`. Other failed actions keep Playwright's reason, such as the element that intercepted a click. Optional arguments sent as `null` count as omitted, and `browser_press_key` accepts key names in any case (`END`, `CTRL+A`).
