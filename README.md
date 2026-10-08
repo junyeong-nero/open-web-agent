@@ -145,6 +145,54 @@ without a judge model are an error. The judge also checks `browser_task` answers
 callers pass `judgeModel` to `runAgent`; a custom `ModelAdapter` gets the same tool-less request and can reply with
 the JSON or a bare probability.
 
+### Checking the page from a screenshot
+
+`--vision-model <provider:model>` (or `OWA_VISION_MODEL`) adds an optional model that looks at a screenshot when the
+snapshot may not show what is wrong with the page. It is off by default, and without it nothing changes: no
+screenshots and no extra requests.
+
+A step calls for a check when one of its actions fails because something on top of the page caught it (the error
+names the element that `intercepts pointer events`), or when an action or navigation leaves a snapshot tree of fewer
+than five lines, as a page that is loading, blocked or covered often does. Read-only tools such as
+`browser_snapshot` never call for one, and neither does the first page of a new site, so most steps take no
+screenshot. After the
+step's tool calls, the agent sends one JPEG screenshot of the viewport to the vision model in a request without tools,
+and the model answers three questions as JSON:
+
+```json
+{"overlay":"cookie banner","loading":false,"blocked":false}
+```
+
+`overlay` is `cookie banner`, `sign-in popup`, `popup` or `none`; `loading` says that the page is still loading, and
+`blocked` that it is a bot check, CAPTCHA or access-denied page. A finding becomes one line after the step's tool
+results, such as `Screenshot check: a cookie banner covers the page.` or `Screenshot check: a popup covers the page;
+the page is still loading.` A block page gives only `Screenshot check: the page is a bot check or an access-denied
+page.`, and a verdict that finds nothing gives no line. The line is built from fixed phrases, so no text from the
+page reaches the transcript through it.
+
+The screenshot and the request together have 5 seconds. A check that fails, runs out of time or gets a reply other
+than this JSON is skipped and changes nothing in the run; the trace records why ([Usage and cost](#usage-and-cost)).
+The task deadline and cancellation still apply during a check. Tools and tool results stay the same, so MCP clients
+see the same tools; in `owa mcp --agent`, `browser_task` runs the checks.
+
+Any `provider:model` that reads images can be the vision model; TypeSafe System One reads only text. Since the
+request offers no tools, a gpt-6 model may use a `reasoning_effort` other than `"none"`, which OpenAI's chat
+completions API rejects only together with tools, as long as it still answers within the 5 seconds. In a probe that
+asked about overlays and block pages on four fixture screenshots, `gemini:gemini-3.1-flash-lite` answered all four
+correctly in 1.5–1.9 seconds, and `openai:gpt-6-luna` in 2.4–3.4 seconds.
+
+```bash
+owa run "..." --model openai:gpt-6-luna --model-options '{"reasoning_effort":"none"}' \
+  --vision-model gemini:gemini-3.1-flash-lite
+```
+
+`--vision-model-options` (or `OWA_VISION_MODEL_OPTIONS`) is a JSON object like `--model-options`. Like the judge
+model, the vision model is resolved from its `provider:model` shorthand alone and reads that provider's key
+variable; `--base-url`, `--api`, `--model-module` and `OWA_API_KEY` apply only to the main model. `--vision-model ""`
+turns off a vision model set in the environment, and options without a vision model are an error. Library callers
+pass `visionModel` to `runAgent` (or `agentVisionModel` to `createMcpServer`); a custom `ModelAdapter` gets the
+screenshot as an `image` part of the same tool-less request.
+
 ## Tools
 
 | tool | what it does |
@@ -208,6 +256,11 @@ that names it.
                              OWA_JUDGE_MODEL, opt-in model that checks an answer claiming success
 --judge-model-options <json>
                              OWA_JUDGE_MODEL_OPTIONS, its extra API request fields (JSON object)
+--vision-model <provider:model>
+                             OWA_VISION_MODEL, opt-in model that checks a screenshot after an intercepted
+                             action or a nearly empty snapshot
+--vision-model-options <json>
+                             OWA_VISION_MODEL_OPTIONS, its extra API request fields (JSON object)
 --trace run.jsonl            append agent events as JSONL
 --json                       (run) print the full result as JSON
 ```
@@ -245,7 +298,8 @@ bun run test          # launches headless Chromium against a local fixture serve
 
 `owa run --json` and MCP `browser_task.structuredContent` return the same compact result:
 `answer`, `status`, `stopReason`, `outcome`, `observedUrls`, `durationMs`, `steps`, and `usage`
-(and `error` for a failed model request, and `judgeUsage` and `judgeError` with a judge model). MCP still returns
+(and `error` for a failed model request, `judgeUsage` and `judgeError` with a judge model, and `visionUsage` with a
+vision model). MCP still returns
 readable text beginning with the answer.
 
 `status: completed` only means the model produced a final answer. `stopReason` distinguishes
@@ -306,6 +360,14 @@ verdict still writes its `model` event, but a judge request that fails writes no
 `judgeError` keeps the reason, and `owa run` prints it to stderr. The
 `browser_task` text shows the verification next to the outcome, for example `outcome: partial (judged)`, and the
 judge's tokens after the agent's.
+
+With `--vision-model`, the result's `visionUsage` sums the vision model's calls by the same rules, and `usage` leaves
+them out, because the vision model has its own price. Like `judgeUsage`, it appears once the vision model has
+replied. In the trace, each screenshot check is a `model` event with `role: "vision"`, after the `tool` events of the
+step that called for it, and its `durationMs` covers the screenshot and the request. Unlike other model calls, a
+check that gives no verdict still writes its event, with `error` saying why, such as `Screenshot check took longer
+than 5000ms`; a reply that is not a verdict keeps its `text` and `usage` there. `owa run` prints each check's reply
+or failure to stderr, and its last line and the `browser_task` text show the vision tokens after the agent's.
 
 ### Task limits and cancellation
 

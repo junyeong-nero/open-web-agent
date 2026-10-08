@@ -82,9 +82,10 @@ When you are Codex working on a delegated issue:
 | `src/mcp.ts` | Hand-written MCP server (`initialize`, `ping`, `tools/list`, `tools/call`), newline-delimited JSON-RPC over stdio. Tool calls are serialized. `browser_task` exists only when an agent model is configured |
 | `src/agent.ts` | `runAgent`: a native function-calling loop. A reply with no tool calls is the final answer. `render()` keeps only the newest snapshot and image in context |
 | `src/judge.ts` | The optional judge model's tool-less request (task, answer, and the newest page content cut to relevant lines), verdict parsing and threshold. `runAgent` calls it for a final answer that claims success |
+| `src/screenshot-check.ts` | The optional vision model's screenshot check: which tool results call for it (an intercepted action, a nearly empty snapshot), its tool-less request, and the one-line note built from its JSON verdict. `runAgent` runs it after a step's tool calls |
 | `src/model/types.ts` | Provider-neutral `Message` / `ModelAdapter`. This is the whole model boundary |
 | `src/model/openai.ts`, `anthropic.ts` | Wire-format adapters written directly on `fetch` (no SDKs). `typesafe.ts` is TypeSafe System One, which can only judge |
-| `src/model/resolve.ts` | `provider:model` shorthands (`PROVIDERS`), env/flag config, `--model-module` loading. `roleModelConfig` configures opt-in secondary models (`--<role>-model`, `OWA_<ROLE>_MODEL`), such as `--judge-model` |
+| `src/model/resolve.ts` | `provider:model` shorthands (`PROVIDERS`), env/flag config, `--model-module` loading. `roleModelConfig` configures opt-in secondary models (`--<role>-model`, `OWA_<ROLE>_MODEL`), such as `--judge-model` and `--vision-model` |
 | `src/cli.ts` | `owa run` / `owa mcp`. In `mcp` mode stdout is reserved for JSON-RPC, so log to stderr |
 
 Rules of thumb:

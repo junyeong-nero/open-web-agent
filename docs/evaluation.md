@@ -121,6 +121,11 @@ variables. The summary then counts the judge's calls among the model calls, with
 its token sums and cost estimate cover only the result's `usage`, which leaves out the judge. Read `judgeUsage`,
 `judgeError` and `outcome.judge` from each run's `result.json`.
 
+A [vision model](../README.md#checking-the-page-from-a-screenshot) goes in an arm's flags the same way, for example
+`"flags": ["--vision-model", "gemini:gemini-3.1-flash-lite"]`. Its screenshot checks count among the model calls,
+failed ones included, but its tokens are only in each run's `visionUsage`. The trace's `model` events with
+`role: "vision"` show each check's verdict or `error`.
+
 ## Recorded baseline (2026-09-28)
 
 With `openai:gpt-6-luna`, `reasoning_effort: none`, 15 steps and one run per case:
