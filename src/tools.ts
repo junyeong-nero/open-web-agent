@@ -209,8 +209,9 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
     let previous: string | undefined
     // How long the last check took; the next one is skipped when it could not finish before the deadline.
     let took = 0
-    // After a check that saw a change or failed, and while requests are in flight, the next check waits as long as the
-    // last one took, so that checks take at most half of a busy renderer's time.
+    // While requests are in flight, the next check waits as long as the last one took, so that checks take at most half
+    // of a loading page's renderer. After a check that saw a change or failed, it waits that long too, but at most
+    // 2 * SETTLE_CHECK_MS, since a check that waited behind the page's own scripts took longer than it cost.
     let rest = false
     let answered: Page | undefined
     // An empty page is no use to the model, so while the latest check found nothing on it, as on a bot check that
@@ -273,7 +274,7 @@ function watchSettling(session: BrowserSession, page: Page): Settling | undefine
       if (stopped) break
       const now = performance.now()
       // Check again SETTLE_CHECK_MS after the last change and the last check.
-      const delay = Math.max(Math.max(activity, checked) + SETTLE_CHECK_MS - now, rest || busy() ? took : 0)
+      const delay = Math.max(Math.max(activity, checked) + SETTLE_CHECK_MS - now, busy() ? took : rest ? Math.min(took, 2 * SETTLE_CHECK_MS) : 0)
       await new Promise<void>((resolve) => {
         wake = resolve
         setTimeout(resolve, Math.max(0, Math.min(delay, limit() - now)))
