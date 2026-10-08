@@ -29,10 +29,12 @@ Decided work is tracked in issues. Every other item here is an observation. Conf
   - About a third of snapshots on real sites hit the 40,000-character cut.
   - Open dialogs now come first (#147), but on many pages navigation menus and footers still use most of the budget.
 - **Complex widgets.** Date pickers (Google Flights, Booking) take many clicks, and runs there often reach the step limit.
+  - `--caps vision` (#166) adds coordinate clicks backed by a grounding model. Its live A/B is pending.
+  - A custom slider under an overlay takes keys only once something focuses it. An optional `ref` on `browser_press_key`, pressing with `locator.press`, would set such sliders without a model.
 
 ## Maintenance
 
-- **Runtime size.** The runtime source is about 1.9k lines, above the ~1.5k target in [positioning.md](positioning.md). `src/tools.ts`, at 437 lines, is the first place to look for consolidation.
+- **Runtime size.** The runtime source is about 2.4k lines, above the ~1.5k target in [positioning.md](positioning.md). `src/tools.ts`, at about 650 lines, is the first place to look for consolidation.
 - **Benchmark tasks.** `bun run bench` runs real-site comparisons, but its tasks stay outside the repository until the WebVoyager and Online-Mind2Web licenses are checked.
 - **Cloud environment.**
   - In the October batches, the cloud environment blocked Chromium downloads from `cdn.playwright.dev`.

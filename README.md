@@ -6,7 +6,7 @@ A small browser agent that is also a browser MCP server.
 - **`owa run "<task>"`**: runs the built-in agent loop on the *same* tools and prints the answer.
 - **`owa mcp --agent`**: also exposes `browser_task`. Your coding agent can hand off a whole web task to the built-in agent, running on a model you choose, and only the final answer comes back into its context.
 
-Models plug in by **API format** (OpenAI Chat Completions or Anthropic Messages) or by a module you write yourself. No provider SDKs are involved. The runtime depends only on `playwright` and `zod`, and the runtime source is about 1.9k lines.
+Models plug in by **API format** (OpenAI Chat Completions or Anthropic Messages) or by a module you write yourself. No provider SDKs are involved. The runtime depends only on `playwright` and `zod`, and the runtime source is about 2.4k lines.
 
 Why this shape? See [docs/positioning.md](docs/positioning.md) for how it compares with playwright-mcp, agent-browser, browser-use, Stagehand, and others.
 
@@ -145,6 +145,63 @@ without a judge model are an error. The judge also checks `browser_task` answers
 callers pass `judgeModel` to `runAgent`; a custom `ModelAdapter` gets the same tool-less request and can reply with
 the JSON or a bare probability.
 
+### Clicking by coordinates with a grounding model
+
+`--caps vision` adds two tools for what refs cannot reach, such as a button drawn on a canvas, a custom slider or
+date picker, or a popup that is not exposed as a dialog. The capability is off by default, and without it the tools
+and requests stay as they were.
+
+- `browser_click_at {x, y}` clicks a point of the viewport, in CSS pixels from its top-left corner. Like the other
+  actions, it returns a fresh snapshot. A point outside the viewport fails without a click.
+- `browser_locate {description}` sends a screenshot of the viewport and the description to a grounding model, and
+  returns the point to pass to `browser_click_at`. It exists only with `--grounding-model`, as `browser_task` exists
+  only with an agent model. Without one, `--caps vision` adds only `browser_click_at`, for an MCP client that reads
+  coordinates from screenshots itself.
+
+```bash
+owa run "..." --model openai:gpt-6-luna --model-options '{"reasoning_effort":"none"}' \
+  --caps vision --grounding-model openrouter:bytedance/ui-tars-1.5-7b
+```
+
+The screenshot is taken at CSS scale, so each of its pixels is one viewport CSS pixel at any device scale factor
+(1280×800 by default). The request asks for `{"x": <x>, "y": <y>}` in pixels of that screenshot, or on a 0–n scale
+with `--grounding-scale n` (or `OWA_GROUNDING_SCALE`). Grounding models often answer in a format of their own, so
+the reply is read in the first of these formats it holds:
+
+| reply | read as |
+|---|---|
+| Gemini's `"box_2d": [ymin, xmin, ymax, xmax]` or `"point": [y, x]` | y before x, on a 0–1000 scale whatever `--grounding-scale` says |
+| `{"x": 300, "y": 240}`, `x=300 y=240`, Molmo's `<point x="…" y="…">` | x and y |
+| the first two numbers in parentheses, brackets or a tag: `(300, 240)`, UI-TARS's `click(start_box='(300,240)')`, `<point>300 240</point>`, Qwen's `"point_2d": [300, 240]` | x, then y |
+| four numbers there, a box such as Qwen's `"bbox_2d": [x1, y1, x2, y2]` | the box's center |
+| a bare `300, 240` | x, then y |
+
+Apart from Gemini's formats, values are screenshot pixels, or run 0–n with `--grounding-scale n`: 1000 suits models
+that answer in normalized coordinates, such as UI-TARS 1.0 and Qwen3-VL, and 100 suits Molmo's percentages. Values
+that are all between 0 and 1, with a fraction among them, are fractions of the screenshot. A reply without a point
+inside the screenshot fails the call and quotes the reply; so does `not found`, which the request asks for when the
+element is not on screen. Some models answer in pixels of an image they resized: UI-TARS-1.5 and Qwen2.5-VL round
+each side to a multiple of 28, so 1280×800 becomes 1288×812 and their points land up to 8 px right and 12 px low near
+the far edges. Nothing corrects for that.
+
+A grounding request that fails, or gets no reply within 30 seconds, fails only that `browser_locate` call with the
+reason, and the run goes on with the other tools. Like any failed tool call, it counts toward the stop after three
+steps in a row where every action failed.
+
+Only the agent model's step requests offer tools. The grounding request offers none: a short system prompt, then one
+user message with the screenshot and the description. So the grounding model, like the judge, can use reasoning
+options that OpenAI's chat completions API rejects together with tools, such as a gpt-6 model's `reasoning_effort`
+other than `"none"`.
+
+`--grounding-model-options` (or `OWA_GROUNDING_MODEL_OPTIONS`) is a JSON object like `--model-options`. As with the
+judge, the grounding model is resolved from its `provider:model` shorthand alone and reads that provider's key
+variable; `--base-url`, `--api`, `--model-module` and `OWA_API_KEY` apply only to the main model. `--grounding-model
+""` turns off a grounding model set in the environment, and options without a grounding model are an error. Without
+`--caps vision` the grounding model is neither resolved nor used, so a comparison can switch the capability alone. In
+`owa mcp`, `browser_locate` is a tool like the others, and `browser_task` gives the delegated agent the same tools.
+Library callers pass the model to `selectTools(["core", "vision"], { groundingModel, groundingScale })` and give the
+tools to `runAgent` or `createMcpServer`.
+
 ## Tools
 
 | tool | what it does |
@@ -157,6 +214,7 @@ the JSON or a bare probability.
 | `browser_get_text` | visible text of the page or of one element; `offset` reads past the length limit |
 | `browser_screenshot` | PNG of the viewport or full page |
 | `browser_evaluate` | run JavaScript in the page (**opt-in**: `--caps unsafe`) |
+| `browser_click_at`, `browser_locate` | click a viewport point; find an element's point in a screenshot with a [grounding model](#clicking-by-coordinates-with-a-grounding-model) (**opt-in**: `--caps vision`) |
 
 The agent keeps only the newest snapshot and screenshot in its context. It stops when it runs out of steps, after repeated failed steps, or when it stops making progress. In each of these cases it makes one last call to get a best-effort answer.
 
@@ -189,7 +247,12 @@ that names it.
 --cdp http://127.0.0.1:9222  attach to your running Chrome instead of launching one
 --user-data-dir <dir>        persistent profile (logins survive restarts)
 --executable-path <path>
---caps core,unsafe
+--caps core,unsafe,vision
+--grounding-model <provider:model>
+                             OWA_GROUNDING_MODEL, answers browser_locate (with --caps vision)
+--grounding-model-options <json>
+                             OWA_GROUNDING_MODEL_OPTIONS, its extra API request fields (JSON object)
+--grounding-scale <n>        OWA_GROUNDING_SCALE, the grounding model answers on a 0–n scale
 --max-steps <n>              default 30
 --timeout-ms <n>             total agent deadline, default 300000
 --judge-model <provider:model>
@@ -233,8 +296,8 @@ bun run test          # launches headless Chromium against a local fixture serve
 
 `owa run --json` and MCP `browser_task.structuredContent` return the same compact result:
 `answer`, `status`, `stopReason`, `outcome`, `observedUrls`, `durationMs`, `steps`, and `usage`
-(and `error` for a failed model request, and `judgeUsage` and `judgeError` with a judge model). MCP still returns
-readable text beginning with the answer.
+(and `error` for a failed model request, `judgeUsage` and `judgeError` with a judge model, and `groundingUsage` with
+a grounding model). MCP still returns readable text beginning with the answer.
 
 `status: completed` only means the model produced a final answer. `stopReason` distinguishes
 `final_answer`, `step_limit`, `no_progress`, `tool_failures`, `model_error`, `timeout`, and `cancelled`. The model is asked to write the
@@ -294,6 +357,14 @@ verdict still writes its `model` event, but a judge request that fails writes no
 `judgeError` keeps the reason, and `owa run` prints it to stderr. The
 `browser_task` text shows the verification next to the outcome, for example `outcome: partial (judged)`, and the
 judge's tokens after the agent's.
+
+With `--grounding-model`, the result's `groundingUsage` sums the grounding model's calls by the same rules, and
+`usage` leaves them out, because that model has its own price too. In the trace, each `browser_locate` request is a
+`model` event with `role: "grounding"` and `toolCalls: []`, written before that step's `tool` event, with the raw
+reply as `text`; `owa run` also prints the reply to stderr. A reply without a usable point still writes its event and
+counts in `groundingUsage`, but a request that fails writes none. Over MCP, a `browser_locate` result's
+`structuredContent` holds the point and the grounding call's `model`, `durationMs` and `usage`, and the
+`browser_task` text shows the grounding tokens after the agent's.
 
 ### Task limits and cancellation
 

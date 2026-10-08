@@ -121,6 +121,12 @@ variables. The summary then counts the judge's calls among the model calls, with
 its token sums and cost estimate cover only the result's `usage`, which leaves out the judge. Read `judgeUsage`,
 `judgeError` and `outcome.judge` from each run's `result.json`.
 
+To compare runs with and without [coordinate clicks](../README.md#clicking-by-coordinates-with-a-grounding-model),
+give one arm `"flags": ["--caps", "vision", "--grounding-model", "openrouter:bytedance/ui-tars-1.5-7b"]` and leave
+the other without them. The runner removes `OWA_GROUNDING_*` like other `OWA_*` variables. As with the judge, the
+grounding model's calls count among the model calls but not in the token sums or the cost estimate; read
+`groundingUsage` from each run's `result.json`. A failed `browser_locate` call counts as an `other` tool error.
+
 ## Recorded baseline (2026-09-28)
 
 With `openai:gpt-6-luna`, `reasoning_effort: none`, 15 steps and one run per case:

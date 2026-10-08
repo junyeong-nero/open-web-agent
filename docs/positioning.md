@@ -40,6 +40,17 @@ Concretely:
 | browser-use | Context hygiene: keep only the latest snapshot or screenshot in the transcript and replace older ones with a placeholder. Stop after repeated failures |
 | browser-use | A model protocol so users can plug in their own models |
 | Stagehand | `extract`-style reading. `browser_get_text` returns the page's visible text for answer extraction without an LLM-inside-a-tool |
+| playwright-mcp | Coordinate tools behind an opt-in `vision` capability |
+
+## Decision: an opt-in vision capability
+
+Refs reach most of what people click, but not all of it: a button drawn on a canvas, a custom slider that another element covers, some date pickers, a popup that is not exposed as a dialog. In the October 2026 benchmark runs (#160), Google Flights' date picker and the sliders of Chase's retirement calculator kept runs going until the step limit. `--caps vision` (#166) is for these widgets. We keep it, behind a capability, for these reasons:
+
+- **It is small.** It adds two tools and no dependency. `browser_click_at` clicks viewport coordinates through the same action path as the other tools, and `browser_locate` asks a grounding model, any `provider:model` through the existing adapters, where a described element is in a screenshot.
+- **It is off by default, twice.** Without `--caps vision`, the tool list, the requests and the results stay as they were. `browser_locate` exists only when a grounding model is configured, as `browser_task` exists only with an agent model.
+- **It is the one tool that calls a model.** Elsewhere, secondary models such as the judge run in the agent loop, and tools stay free of LLMs (#160). Grounding has to be a tool, because an MCP client has no agent loop of ours to hook into and both front doors must see the same tools. The grounding model only perceives: it maps a description to a point, and the calling agent decides whether to click.
+- **The keyboard comes first.** A native range input takes `browser_type`, and a custom slider that implements the ARIA keyboard pattern takes `browser_click` and then `browser_press_key` (Home, arrows), all without a model. Coordinates are for what neither reaches.
+- **It has to earn its place.** The capability stays only if a live A/B on those tasks, with the benchmark runner from #162, shows a gain in success, steps or cost. If it shows none, we remove it.
 
 ## Non-goals
 
