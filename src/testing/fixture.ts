@@ -64,6 +64,23 @@ const PAGES: Record<string, string> = {
   "/toggles": `<!doctype html>${TOGGLES}`,
   // Like americanexpress.com, replace window.eval, which breaks Playwright's page-world evaluate but not its actions.
   "/toggles-no-eval": `<!doctype html><script>window.eval = () => { throw new Error("eval is disabled") }</script>${TOGGLES}`,
+  // A button drawn on a canvas is not in the accessibility tree. The page also replaces window.eval, as above, so the
+  // vision tools must work without Playwright's page-world evaluate.
+  "/canvas": `<!doctype html><title>Seat map</title>
+    <script>window.eval = () => { throw new Error("eval is disabled") }</script>
+    <h1>Seat map</h1><p id="status">No seat booked</p>
+    <canvas width="400" height="200" style="position: absolute; left: 100px; top: 150px"></canvas>
+    <script>
+      const canvas = document.querySelector("canvas")
+      const context = canvas.getContext("2d")
+      context.fillStyle = "#1a73e8"; context.fillRect(150, 70, 100, 40)
+      context.fillStyle = "white"; context.font = "16px sans-serif"; context.fillText("Book", 182, 95)
+      // The button covers x 250–350 and y 220–260 of the viewport, around (300, 240).
+      canvas.addEventListener("click", (event) => {
+        const box = canvas.getBoundingClientRect(), x = event.clientX - box.left, y = event.clientY - box.top
+        if (x >= 150 && x <= 250 && y >= 70 && y <= 110) document.querySelector("#status").textContent = "Seat booked"
+      })
+    </script>`,
   "/async": `<!doctype html><html><head><title>Async lookup</title></head><body>
     <h1>Async lookup</h1><button onclick="document.querySelector('#result').textContent='Loading'; setTimeout(() => document.querySelector('#result').textContent='READY-314', 1500)">Start lookup</button>
     <p id="result">Not started</p></body></html>`,
