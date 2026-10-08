@@ -18,6 +18,8 @@ export interface OpenAIChatOptions {
   headers?: Record<string, string>
   /** Merged into every request body, e.g. `{ temperature: 0 }` or `{ reasoning_effort: "low" }`. */
   extraBody?: Record<string, unknown>
+  /** The flag and environment variable that set `extraBody`, named in error hints (default `--model-options`, `OWA_MODEL_OPTIONS`). */
+  optionsSetting?: { flag: string; env: string }
   fetch?: FetchLike
 }
 
@@ -48,7 +50,8 @@ export function openaiChat(options: OpenAIChatOptions): ModelAdapter {
 
       const json = (await postJson(fetchImpl, name, `${baseUrl}/chat/completions`, headers, body, request.signal).catch((error: unknown) => {
         if (error instanceof ModelHttpError && error.status === 400 && /set reasoning_effort to ["']none["']/i.test(error.body)) {
-          error.message += `\nTry --model-options '{"reasoning_effort":"none"}' (or OWA_MODEL_OPTIONS) if supported by this endpoint. No model options are changed automatically.`
+          const { flag, env } = options.optionsSetting ?? { flag: "--model-options", env: "OWA_MODEL_OPTIONS" }
+          error.message += `\nTry ${flag} '{"reasoning_effort":"none"}' (or ${env}) if supported by this endpoint. No model options are changed automatically.`
         }
         throw error
       })) as {

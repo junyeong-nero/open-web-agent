@@ -115,6 +115,12 @@ and tool errors. `summary.json` holds the full summary for every arm, overall an
 record per run with its answer. Outcomes remain the model's unverified assessment, so check answers
 against references before claiming accuracy.
 
+To try a [judge model](../README.md#checking-answers-with-a-judge-model), give it in an arm's flags, for example
+`"flags": ["--judge-model", "gemini:gemini-3.1-flash-lite"]`; the runner removes `OWA_JUDGE_MODEL` like other `OWA_*`
+variables. The summary then counts the judge's calls among the model calls, with their time and served model, but
+its token sums and cost estimate cover only the result's `usage`, which leaves out the judge. Read `judgeUsage`,
+`judgeError` and `outcome.judge` from each run's `result.json`.
+
 ## Recorded baseline (2026-09-28)
 
 With `openai:gpt-6-luna`, `reasoning_effort: none`, 15 steps and one run per case:
