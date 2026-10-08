@@ -23,7 +23,8 @@ export type AgentEvent =
   | { type: "step"; step: number }
   /**
    * `role` is set on a secondary model's calls: `judge` checked a final answer, `vision` a screenshot. Agent model calls
-   * leave it out. A screenshot check that gave no verdict has `error`, and its `durationMs` includes the screenshot.
+   * leave it out. A `vision` event's `durationMs` includes taking the screenshot, and its `error` says why the check gave
+   * no verdict.
    */
   | { type: "model"; step: number; text?: string; toolCalls: ToolCall[]; model?: string; durationMs: number; usage?: Usage; role?: "judge" | "vision"; error?: string }
   | { type: "tool"; step: number; call: ToolCall; result: ToolResult }
