@@ -156,7 +156,8 @@ and requests stay as they were.
 - `browser_locate {description}` sends a screenshot of the viewport and the description to a grounding model, and
   returns the point to pass to `browser_click_at`. It exists only with `--grounding-model`, as `browser_task` exists
   only with an agent model. Without one, `--caps vision` adds only `browser_click_at`, for an MCP client that reads
-  coordinates from screenshots itself.
+  coordinates from screenshots itself. `browser_screenshot` keeps the device scale, though, so with `--cdp` on a
+  high-density screen its pixels are smaller than CSS pixels.
 
 ```bash
 owa run "..." --model openai:gpt-6-luna --model-options '{"reasoning_effort":"none"}' \
@@ -195,12 +196,13 @@ other than `"none"`.
 
 `--grounding-model-options` (or `OWA_GROUNDING_MODEL_OPTIONS`) is a JSON object like `--model-options`. As with the
 judge, the grounding model is resolved from its `provider:model` shorthand alone and reads that provider's key
-variable; `--base-url`, `--api`, `--model-module` and `OWA_API_KEY` apply only to the main model. `--grounding-model
-""` turns off a grounding model set in the environment, and options without a grounding model are an error. Without
-`--caps vision` the grounding model is neither resolved nor used, so a comparison can switch the capability alone. In
-`owa mcp`, `browser_locate` is a tool like the others, and `browser_task` gives the delegated agent the same tools.
-Library callers pass the model to `selectTools(["core", "vision"], { groundingModel, groundingScale })` and give the
-tools to `runAgent` or `createMcpServer`.
+variable; `--base-url`, `--api`, `--model-module` and `OWA_API_KEY` apply only to the main model.
+`--grounding-model ""` turns off a grounding model set in the environment, and options without a grounding model are
+an error. Without `--caps vision` the grounding model is neither resolved nor used, so a comparison can switch the
+capability alone. In `owa mcp`, `browser_locate` is a tool like the others, and `browser_task` gives the delegated
+agent the same tools. Library callers give the model and the scale to `selectTools`, as in
+`selectTools(["core", "vision"], { groundingModel, groundingScale: 1000 })`, and pass the tools to `runAgent` or
+`createMcpServer`.
 
 ## Tools
 
