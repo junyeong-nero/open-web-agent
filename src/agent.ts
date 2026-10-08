@@ -3,7 +3,7 @@ import { interruptible } from "./cancel"
 import type { BrowserSession } from "./browser"
 import { judgeRequest, parseVerdict, UNSUPPORTED_AT } from "./judge"
 import type { Message, ModelAdapter, ToolCall, Usage } from "./model/types"
-import { type BrowserTool, callTool, resultContent, selectTools, type ToolContext, type ToolResult, toolSpec, usableTools } from "./tools"
+import { type BrowserTool, callTool, resultContent, selectTools, type ToolResult, toolSpec } from "./tools"
 
 export const SYSTEM_PROMPT = `You are a web agent that completes the user's task by operating a real browser through tools.
 
@@ -49,7 +49,7 @@ export interface AgentResult {
   judgeUsage?: Usage & { inputTokens: number; outputTokens: number }
   /** Why the last judge request gave no verdict. The answer and outcome stay as they were. */
   judgeError?: string
-  /** The grounding model's calls, which `usage` leaves out, summed the same way; present when the run made one. */
+  /** browser_locate's grounding model calls, summed the same way and kept apart because their tokens have another price; set once the grounding model replied. */
   groundingUsage?: Usage & { inputTokens: number; outputTokens: number }
 }
 
@@ -74,10 +74,6 @@ export interface AgentOptions {
   judgeModel?: ModelAdapter
   signal?: AbortSignal
   onEvent?: (event: AgentEvent) => void
-  /** Answers browser_locate (the vision capability), which is not offered without it. */
-  groundingModel?: ModelAdapter
-  /** See `ToolContext.groundingScale`. */
-  groundingScale?: number
 }
 
 type Entry = Message
@@ -101,15 +97,14 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     }
   }
   observe()
-  const context: ToolContext = { groundingModel: options.groundingModel, groundingScale: options.groundingScale, signal }
-  const tools = usableTools(options.tools ?? selectTools(), context)
+  const tools = options.tools ?? selectTools()
   const specs = tools.map(toolSpec)
   const maxSteps = options.maxSteps ?? 30
   const maxFailures = options.maxConsecutiveFailures ?? 3
   const system = options.systemPrompt ?? SYSTEM_PROMPT
   const callUsage: Array<Usage | undefined> = []
   const judgeUsage: Array<Usage | undefined> = []
-  const groundingCalls: Array<Usage | undefined> = []
+  const groundingUsage: Array<Usage | undefined> = []
   const emit = options.onEvent ?? (() => {})
 
   const entries: Entry[] = []
@@ -128,8 +123,8 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     const result: AgentResult = {
       status, stopReason, ...final, observedUrls: [...observedUrls], durationMs: Math.round(performance.now() - startedAt), steps: step, usage: sumUsage(callUsage),
       ...(judgeUsage.length ? { judgeUsage: sumUsage(judgeUsage) } : {}), ...(judgeError ? { judgeError } : {}), ...(error ? { error } : {}),
+      ...(groundingUsage.length ? { groundingUsage: sumUsage(groundingUsage) } : {}),
     }
-    if (groundingCalls.length) result.groundingUsage = sumUsage(groundingCalls)
     emit({ type: "done", result })
     return result
   }
@@ -231,10 +226,11 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       let canCompare = true
       for (const call of response.toolCalls) {
         signal.throwIfAborted()
-        const result = await interruptible(() => callTool(tools, options.browser, call.name, call.arguments, context), signal, pending => options.browser.cancelPending(pending))
+        const result = await interruptible(() => callTool(tools, options.browser, call.name, call.arguments, signal), signal, pending => options.browser.cancelPending(pending))
         observe()
+        // browser_locate's grounding request is recorded like a model call, before its tool event, and priced apart.
         if (result.modelCall) {
-          groundingCalls.push(result.modelCall.usage)
+          groundingUsage.push(result.modelCall.usage)
           emit({ type: "model", step, toolCalls: [], ...result.modelCall })
         }
         if (result.isError) failed += 1

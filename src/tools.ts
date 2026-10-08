@@ -1,7 +1,8 @@
 import { z } from "zod"
 import { errors, type Download, type Locator, type Page, type Response } from "playwright"
 import type { BrowserSession } from "./browser"
-import type { ContentPart, ModelAdapter, ToolSpec, Usage } from "./model/types"
+import { interruptible } from "./cancel"
+import type { ContentPart, ModelAdapter, ModelResponse, ToolSpec, Usage } from "./model/types"
 
 export interface ToolResult {
   /** What happened, always kept in the transcript. */
@@ -13,11 +14,11 @@ export interface ToolResult {
   image?: { mimeType: string; data: string }
   isError?: boolean
   structuredContent?: Record<string, unknown>
-  /** A model request the tool made; the agent records it like its own model calls. */
+  /** A model request the tool made, which the agent records apart from its own model calls. */
   modelCall?: ModelCall
 }
 
-/** browser_locate's request to the grounding model, as the agent records model calls. */
+/** browser_locate's request to the grounding model, with what the agent records for a model call. */
 export interface ModelCall {
   role: "grounding"
   text?: string
@@ -28,13 +29,18 @@ export interface ModelCall {
 
 export type Capability = "core" | "unsafe" | "vision"
 
-/** What a tool call may use besides the browser, set by the front door (the agent or the MCP server). */
-export interface ToolContext {
-  /** Answers browser_locate, which is not offered without it. */
+/** Settings given once to `selectTools`; only browser_locate, in the vision capability, uses them. */
+export interface ToolOptions {
+  /** Answers browser_locate from a screenshot. Without it, browser_locate is not offered. */
   groundingModel?: ModelAdapter
   /** The grounding model answers on a 0–n scale on both axes (e.g. 1000) instead of in screenshot pixels. */
   groundingScale?: number
-  /** Cancels a model request a tool makes. */
+  /** How long browser_locate waits for the grounding model before it fails (default 30000). */
+  groundingTimeoutMs?: number
+}
+
+/** What a tool's run gets besides the session and its arguments: its options, and the caller's signal for a model request. */
+export interface ToolContext extends ToolOptions {
   signal?: AbortSignal
 }
 
@@ -291,26 +297,44 @@ function groundingPrompt({ width, height }: { width: number; height: number }, s
 }
 
 const NUMBER = String.raw`-?\d+(?:\.\d+)?`
+/** A bracketed list of exactly `count` numbers, captured without the brackets. */
+const numberList = (count: number) => String.raw`\[\s*(${NUMBER}(?:\s*,\s*${NUMBER}){${count - 1}})\s*\]`
+/** The center of a box given as two corners, or the point itself. */
+const center = (values: number[]) => values.length === 4 ? [(values[0]! + values[2]!) / 2, (values[1]! + values[3]!) / 2] : values
 
 /**
  * The point a grounding model's reply names, in whole screenshot pixels, or undefined when it names none inside the
- * screenshot. Read in order: `x` and `y` keys (JSON or `x=…`), the first group of two numbers in parentheses, brackets
- * or a tag such as `(x, y)` or `<point>x y</point>`, or of four as a box whose center is taken, then a bare `x, y`.
- * Values on a 0–`scale` range are scaled to the screenshot, and so are fractions between 0 and 1.
+ * screenshot. The first format the reply holds is read:
+ * 1. Gemini's `"box_2d": [ymin, xmin, ymax, xmax]` or `"point": [y, x]`, which are on a 0–1000 scale whatever was asked.
+ * 2. `x` and `y` keys: `{"x": 300, "y": 240}`, `x=300`, or Molmo's `<point x="23.4" y="30">`.
+ * 3. The first group of two numbers in parentheses, brackets or a tag, such as `(300, 240)`, `[300, 240]` or
+ *    `<point>300 240</point>`, or of four, a box `[x1, y1, x2, y2]` such as Qwen's `bbox_2d`.
+ * 4. A bare `300, 240`.
+ * A box gives its center. Apart from Gemini's, values are screenshot pixels, or run 0–`scale` on both axes when `scale`
+ * is set; values that are all between 0 and 1, with at least one fraction, are fractions of the screenshot.
  */
 export function groundingPoint(reply: string, size: { width: number; height: number }, scale?: number): { x: number; y: number } | undefined {
-  const keyed = ["x", "y"].map((key) => new RegExp(String.raw`\b${key}\b["']?\s*[:=]\s*["']?(${NUMBER})`, "i").exec(reply)?.[1])
-  const grouped = [...reply.matchAll(new RegExp(String.raw`[(\[>]\s*(${NUMBER}(?:(?:\s*,\s*|\s+)${NUMBER}){1,3})\s*[)\]<]`, "g"))]
-    .map((match) => match[1]!.split(/\s*,\s*|\s+/))
-    .find((numbers) => numbers.length === 2 || numbers.length === 4)
-  const bare = new RegExp(String.raw`(${NUMBER})\s*,\s*(${NUMBER})`).exec(reply)?.slice(1)
-  const values = (keyed.every((value) => value !== undefined) ? keyed : grouped ?? bare)?.map(Number)
-  if (!values) return undefined
-  const [x, y] = values.length === 4 ? [(values[0]! + values[2]!) / 2, (values[1]! + values[3]!) / 2] : values
-  const fractions = values.every((value) => Math.abs(value) <= 1) && values.some((value) => !Number.isInteger(value))
-  const range = fractions ? 1 : scale
-  const point = { x: Math.round(range ? (x! * size.width) / range : x!), y: Math.round(range ? (y! * size.height) / range : y!) }
-  if (point.x < 0 || point.y < 0 || point.x > size.width || point.y > size.height) return undefined
+  const toNumbers = (group: string) => group.split(/\s*,\s*|\s+/).map(Number)
+  let read: { x: number; y: number; range?: number }
+  const gemini = new RegExp(String.raw`\b(?:box_2d\b["']?\s*:\s*${numberList(4)}|point\b["']?\s*:\s*${numberList(2)})`).exec(reply)
+  if (gemini) {
+    const [y, x] = center(toNumbers(gemini[1] ?? gemini[2]!))
+    read = { x: x!, y: y!, range: 1000 }
+  } else {
+    const keyed = ["x", "y"].map((key) => new RegExp(String.raw`\b${key}\b["']?\s*[:=]\s*["']?(${NUMBER})`, "i").exec(reply)?.[1])
+    const grouped = [...reply.matchAll(new RegExp(String.raw`[(\[>]\s*(${NUMBER}(?:(?:\s*,\s*|\s+)${NUMBER}){1,3})\s*[)\]<]`, "g"))]
+      .map((match) => toNumbers(match[1]!))
+      .find((numbers) => numbers.length === 2 || numbers.length === 4)
+    const bare = new RegExp(String.raw`(${NUMBER})\s*,\s*(${NUMBER})`).exec(reply)?.slice(1).map(Number)
+    const values = keyed.every((value) => value !== undefined) ? keyed.map(Number) : grouped ?? bare
+    if (!values) return undefined
+    const [x, y] = center(values)
+    const fractions = values.every((value) => Math.abs(value) <= 1) && values.some((value) => !Number.isInteger(value))
+    read = { x: x!, y: y!, range: fractions ? 1 : scale }
+  }
+  const { x, y, range } = read
+  const point = { x: Math.round(range ? (x * size.width) / range : x), y: Math.round(range ? (y * size.height) / range : y) }
+  if (!(point.x >= 0 && point.y >= 0 && point.x <= size.width && point.y <= size.height)) return undefined
   // A point on the right or bottom edge, such as 1000 on a 0–1000 scale, becomes the last pixel.
   return { x: Math.min(point.x, size.width - 1), y: Math.min(point.y, size.height - 1) }
 }
@@ -522,19 +546,28 @@ export const TOOLS: BrowserTool[] = [
     schema: z.object({ description: z.string().min(1).describe("The element to find, e.g. the Book button on the seat map") }),
     readOnly: true,
     capability: "vision",
-    run: async (session, { description }, { groundingModel, groundingScale, signal }) => {
+    run: async (session, { description }, { groundingModel, groundingScale, groundingTimeoutMs = 30_000, signal }) => {
       if (!groundingModel) return { text: "browser_locate needs a grounding model (--grounding-model).", isError: true }
       // With the CSS scale one screenshot pixel is one CSS pixel at any device scale factor, as the mouse expects.
       const png = await (await session.page()).screenshot({ type: "png", scale: "css" })
       // A PNG stores its width and height at bytes 16 and 20 of its header.
       const size = { width: png.readUInt32BE(16), height: png.readUInt32BE(20) }
+      // A grounding model that fails or hangs fails only this call, so the agent can go on with its other tools.
+      const timeout = AbortSignal.timeout(groundingTimeoutMs)
+      const stop = signal ? AbortSignal.any([signal, timeout]) : timeout
       const started = performance.now()
-      const response = await groundingModel.complete({
-        system: groundingPrompt(size, groundingScale),
-        messages: [{ role: "user", content: [{ type: "image", mimeType: "image/png", data: png.toString("base64") }, { type: "text", text: `Element: ${description}` }] }],
-        tools: [],
-        signal,
-      })
+      let response: ModelResponse
+      try {
+        response = await interruptible(() => groundingModel.complete({
+          system: groundingPrompt(size, groundingScale),
+          messages: [{ role: "user", content: [{ type: "image", mimeType: "image/png", data: png.toString("base64") }, { type: "text", text: `Element: ${description}` }] }],
+          tools: [],
+          signal: stop,
+        }), stop)
+      } catch (error) {
+        const reason = timeout.aborted ? `no reply within ${groundingTimeoutMs / 1000} s` : failureReason(error)
+        return { text: `The grounding model request failed, so nothing was located: ${reason}`, isError: true }
+      }
       const modelCall: ModelCall = { role: "grounding", text: response.text, model: response.model, durationMs: Math.round(performance.now() - started), usage: response.usage }
       const point = groundingPoint(response.text ?? "", size, groundingScale)
       if (!point) {
@@ -555,13 +588,14 @@ export const TOOLS: BrowserTool[] = [
   }),
 ]
 
-export function selectTools(capabilities: Capability[] = ["core"]): BrowserTool[] {
-  return TOOLS.filter((candidate) => capabilities.includes(candidate.capability))
-}
-
-/** The tools a front door offers: browser_locate only with a grounding model to answer it. */
-export function usableTools(tools: BrowserTool[], { groundingModel }: ToolContext): BrowserTool[] {
-  return groundingModel ? tools : tools.filter((candidate) => candidate.name !== "browser_locate")
+/**
+ * The tools of these capabilities, set up with `options`. Without a grounding model browser_locate could only fail, so it
+ * is left out, as browser_task is without an agent model. Pass the same list to the MCP server and the agent.
+ */
+export function selectTools(capabilities: Capability[] = ["core"], options: ToolOptions = {}): BrowserTool[] {
+  return TOOLS
+    .filter((candidate) => capabilities.includes(candidate.capability) && (options.groundingModel || candidate.name !== "browser_locate"))
+    .map((candidate): BrowserTool => ({ ...candidate, run: (session, args, context) => candidate.run(session, args, { ...context, ...options }) }))
 }
 
 export function toolSpec(definition: BrowserTool): ToolSpec {
@@ -579,13 +613,16 @@ function omitNullOptionals(schema: z.ZodObject, args: unknown): unknown {
   return input
 }
 
-/** Validate arguments, run the tool, and turn any failure into an error result the model can react to. */
+/**
+ * Validate arguments, run the tool, and turn any failure into an error result the model can react to. `signal` stops a
+ * model request the tool makes; browser operations are stopped by the caller, with `BrowserSession.cancelPending`.
+ */
 export async function callTool(
   tools: BrowserTool[],
   session: BrowserSession,
   name: string,
   args: unknown,
-  context: ToolContext = {},
+  signal?: AbortSignal,
 ): Promise<ToolResult> {
   const definition = tools.find((candidate) => candidate.name === name)
   if (!definition) return { text: `Unknown tool "${name}"`, isError: true }
@@ -595,7 +632,7 @@ export async function callTool(
     return { text: `Invalid arguments for ${name}: ${z.prettifyError(parsed.error)}`, isError: true }
   }
   try {
-    return await definition.run(session, parsed.data, context)
+    return await definition.run(session, parsed.data, { signal })
   } catch (error) {
     return { text: `${name} failed: ${failureReason(error)}\nTake a new browser_snapshot if the page may have changed.`, isError: true }
   }
