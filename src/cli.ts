@@ -31,7 +31,17 @@ Browser:
   --cdp <url>                  attach to a running Chrome, e.g. http://127.0.0.1:9222
   --user-data-dir <dir>        persistent profile
   --executable-path <path>     browser binary
-  --caps <list>                tool groups: core (default), unsafe (adds browser_evaluate)
+  --caps <list>                tool groups: core (default), unsafe (adds browser_evaluate),
+                               vision (adds browser_click_at, and browser_locate with --grounding-model)
+
+Vision (with --caps vision; flag > env):
+  --grounding-model <provider:model>
+                               OWA_GROUNDING_MODEL  answers browser_locate from a screenshot,
+                               e.g. openrouter:bytedance/ui-tars-1.5-7b
+  --grounding-model-options <json>
+                               OWA_GROUNDING_MODEL_OPTIONS  its extra API request fields (JSON object)
+  --grounding-scale <n>        OWA_GROUNDING_SCALE  the model answers on a 0–n scale (e.g. 1000)
+                               instead of in screenshot pixels
 
 Agent:
   --max-steps <n>              default 30
@@ -57,6 +67,9 @@ export async function main(argv: string[]): Promise<number> {
       "model-options": { type: "string" },
       "judge-model": { type: "string" },
       "judge-model-options": { type: "string" },
+      "grounding-model": { type: "string" },
+      "grounding-model-options": { type: "string" },
+      "grounding-scale": { type: "string" },
       headless: { type: "boolean" },
       browser: { type: "string" },
       locale: { type: "string" },
@@ -95,6 +108,10 @@ export async function main(argv: string[]): Promise<number> {
     module: values["model-module"] ?? env.module,
   }
   const judgeConfig = roleModelConfig("judge", { model: values["judge-model"], options: values["judge-model-options"] })
+  const groundingConfig = roleModelConfig("grounding", { model: values["grounding-model"], options: values["grounding-model-options"] })
+  const scale = values["grounding-scale"] ?? process.env.OWA_GROUNDING_SCALE
+  const groundingScale = scale === undefined || scale === "" ? undefined : Number(scale)
+  if (groundingScale !== undefined && !(Number.isFinite(groundingScale) && groundingScale > 0)) throw new Error("--grounding-scale / OWA_GROUNDING_SCALE must be a positive number")
   const browserName = values.browser ?? "chromium"
   if (!["chromium", "firefox", "webkit"].includes(browserName)) throw new Error(`Unknown browser "${browserName}"`)
   const session = new BrowserSession({
@@ -105,7 +122,10 @@ export async function main(argv: string[]): Promise<number> {
     userDataDir: values["user-data-dir"],
     executablePath: values["executable-path"],
   })
-  const tools = selectTools(parseCaps(values.caps))
+  const caps = parseCaps(values.caps)
+  // Only browser_locate uses the grounding model, so without the vision capability it is not resolved.
+  const groundingModel = caps.includes("vision") && groundingConfig ? await resolveModel(groundingConfig) : undefined
+  const tools = selectTools(caps, { groundingModel, groundingScale })
 
   if (command === "mcp") {
     const agentModel = values.agent ? await resolveModel(modelConfig) : undefined
@@ -160,16 +180,18 @@ function logEvent(event: AgentEvent): void {
   const log = (line: string) => process.stderr.write(`${line}\n`)
   if (event.type === "model" && event.text && event.toolCalls.length > 0) log(`  · ${oneLine(event.text)}`)
   if (event.type === "model" && event.role === "judge") log(`  judge: ${oneLine(event.text ?? "")}`)
+  if (event.type === "model" && event.role === "grounding") log(`  grounding: ${oneLine(event.text ?? "")}`)
   if (event.type === "tool") {
     const args = JSON.stringify(event.call.arguments)
     log(`${event.result.isError ? "✗" : "→"} [${event.step}] ${event.call.name} ${oneLine(args)}`)
     if (event.result.isError) log(`    ${oneLine(event.result.text)}`)
   }
   if (event.type === "done") {
-    const { status, steps, usage, judgeUsage, judgeError } = event.result
+    const { status, steps, usage, judgeUsage, judgeError, groundingUsage } = event.result
     if (judgeError) log(`  judge failed: ${oneLine(judgeError)}`)
     const judge = judgeUsage ? `; judge in ${judgeUsage.inputTokens}, out ${judgeUsage.outputTokens}` : ""
-    log(`■ ${status} in ${steps} steps (tokens in ${usage.inputTokens}, out ${usage.outputTokens}${judge})`)
+    const grounding = groundingUsage ? `; grounding in ${groundingUsage.inputTokens}, out ${groundingUsage.outputTokens}` : ""
+    log(`■ ${status} in ${steps} steps (tokens in ${usage.inputTokens}, out ${usage.outputTokens}${judge}${grounding})`)
   }
 }
 
@@ -180,7 +202,7 @@ function oneLine(text: string, max = 160): string {
 
 function parseCaps(value: string | undefined): Capability[] {
   const caps = (value ?? "core").split(",").map((cap) => cap.trim()).filter(Boolean)
-  for (const cap of caps) if (cap !== "core" && cap !== "unsafe") throw new Error(`Unknown capability "${cap}"`)
+  for (const cap of caps) if (!["core", "unsafe", "vision"].includes(cap)) throw new Error(`Unknown capability "${cap}"`)
   return caps.includes("core") ? (caps as Capability[]) : ["core", ...(caps as Capability[])]
 }
 

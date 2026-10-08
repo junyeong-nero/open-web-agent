@@ -81,8 +81,9 @@ export function createMcpServer(options: McpServerOptions) {
       return { text: `browser_task failed: ${error instanceof Error ? error.message : String(error)}`, isError: true }
     }
     const judgeTokens = result.judgeUsage ? `, judge tokens: ${result.judgeUsage.inputTokens} in / ${result.judgeUsage.outputTokens} out` : ""
+    const groundingTokens = result.groundingUsage ? `, grounding tokens: ${result.groundingUsage.inputTokens} in / ${result.groundingUsage.outputTokens} out` : ""
     return {
-      text: `${result.answer || result.error || "No answer returned"}\n\n[status: ${result.status}, steps: ${result.steps}]\n[stop: ${result.stopReason}, outcome: ${result.outcome.status} (${result.outcome.verification}), duration: ${result.durationMs}ms, tokens: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out${judgeTokens}]${result.outcome.unfinished.length ? `\nUnfinished: ${result.outcome.unfinished.join("; ")}` : ""}${result.observedUrls.length ? `\nObserved URLs (not verified citations): ${result.observedUrls.join(", ")}` : ""}`,
+      text: `${result.answer || result.error || "No answer returned"}\n\n[status: ${result.status}, steps: ${result.steps}]\n[stop: ${result.stopReason}, outcome: ${result.outcome.status} (${result.outcome.verification}), duration: ${result.durationMs}ms, tokens: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out${judgeTokens}${groundingTokens}]${result.outcome.unfinished.length ? `\nUnfinished: ${result.outcome.unfinished.join("; ")}` : ""}${result.observedUrls.length ? `\nObserved URLs (not verified citations): ${result.observedUrls.join(", ")}` : ""}`,
       structuredContent: { ...result },
       isError: taskIncomplete(result),
     }
@@ -96,7 +97,7 @@ export function createMcpServer(options: McpServerOptions) {
       if (signal?.aborted) return { text: "Request cancelled before execution", isError: true }
       if (!signal) return callTool(options.tools, options.session, name, args)
       try {
-        return await interruptible(() => callTool(options.tools, options.session, name, args), signal, pending => options.session.cancelPending(pending))
+        return await interruptible(() => callTool(options.tools, options.session, name, args, signal), signal, pending => options.session.cancelPending(pending))
       } catch (error) {
         if (signal.aborted) return { text: "Request cancelled", isError: true }
         throw error
