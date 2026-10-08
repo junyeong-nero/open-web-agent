@@ -3,6 +3,7 @@ import { interruptible } from "./cancel"
 import type { BrowserSession } from "./browser"
 import { judgeRequest, parseVerdict, UNSUPPORTED_AT } from "./judge"
 import type { Message, ModelAdapter, ToolCall, Usage } from "./model/types"
+import { needsScreenshotCheck, parseScreenshotVerdict, SCREENSHOT_CHECK_TIMEOUT_MS, screenshotNote, screenshotRequest } from "./screenshot-check"
 import { type BrowserTool, callTool, resultContent, selectTools, type ToolResult, toolSpec } from "./tools"
 
 export const SYSTEM_PROMPT = `You are a web agent that completes the user's task by operating a real browser through tools.
@@ -20,8 +21,11 @@ export const SYSTEM_PROMPT = `You are a web agent that completes the user's task
 
 export type AgentEvent =
   | { type: "step"; step: number }
-  /** `role` is set on the judge model's calls; agent model calls leave it out. */
-  | { type: "model"; step: number; text?: string; toolCalls: ToolCall[]; model?: string; durationMs: number; usage?: Usage; role?: "judge" }
+  /**
+   * `role` is set on a secondary model's calls: `judge` checked a final answer, `vision` a screenshot. Agent model calls
+   * leave it out. A screenshot check that gave no verdict has `error`, and its `durationMs` includes the screenshot.
+   */
+  | { type: "model"; step: number; text?: string; toolCalls: ToolCall[]; model?: string; durationMs: number; usage?: Usage; role?: "judge" | "vision"; error?: string }
   | { type: "tool"; step: number; call: ToolCall; result: ToolResult }
   | { type: "done"; result: AgentResult }
 
@@ -49,6 +53,8 @@ export interface AgentResult {
   judgeUsage?: Usage & { inputTokens: number; outputTokens: number }
   /** Why the last judge request gave no verdict. The answer and outcome stay as they were. */
   judgeError?: string
+  /** The vision model's screenshot checks, summed the same way and kept apart because its tokens have another price; set once the vision model replied. */
+  visionUsage?: Usage & { inputTokens: number; outputTokens: number }
 }
 
 export interface AgentOptions {
@@ -70,6 +76,12 @@ export interface AgentOptions {
    * partial when no step is left. A failed judge request changes nothing; the result's `judgeError` says why it failed.
    */
   judgeModel?: ModelAdapter
+  /**
+   * After a step in which something on top of the page caught an action, or an action left a snapshot of fewer than
+   * five lines, shows this model a viewport screenshot in one tool-less request of at most a few seconds. A covering
+   * overlay, a loading page or a block page that it finds becomes one line in the transcript. A failed check is skipped.
+   */
+  visionModel?: ModelAdapter
   signal?: AbortSignal
   onEvent?: (event: AgentEvent) => void
 }
@@ -102,6 +114,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   const system = options.systemPrompt ?? SYSTEM_PROMPT
   const callUsage: Array<Usage | undefined> = []
   const judgeUsage: Array<Usage | undefined> = []
+  const visionUsage: Array<Usage | undefined> = []
   const emit = options.onEvent ?? (() => {})
 
   const entries: Entry[] = []
@@ -120,6 +133,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     const result: AgentResult = {
       status, stopReason, ...final, observedUrls: [...observedUrls], durationMs: Math.round(performance.now() - startedAt), steps: step, usage: sumUsage(callUsage),
       ...(judgeUsage.length ? { judgeUsage: sumUsage(judgeUsage) } : {}), ...(judgeError ? { judgeError } : {}), ...(error ? { error } : {}),
+      ...(visionUsage.length ? { visionUsage: sumUsage(visionUsage) } : {}),
     }
     emit({ type: "done", result })
     return result
@@ -167,6 +181,36 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     } catch (error) {
       judgeError = error instanceof Error ? error.message : String(error)
       return undefined
+    }
+  }
+  /** Show the vision model the current page and add what it finds to the transcript. A failed or slow check only writes its event. */
+  const checkScreenshot = async (visionModel: ModelAdapter) => {
+    // Without a page there is nothing to show, and page() would open one.
+    if (options.browser.currentUrl === undefined) return
+    signal.throwIfAborted()
+    const startedAt = performance.now()
+    const expiry = new AbortController()
+    const timer = setTimeout(() => expiry.abort(new Error(`Screenshot check took longer than ${SCREENSHOT_CHECK_TIMEOUT_MS}ms`)), SCREENSHOT_CHECK_TIMEOUT_MS)
+    const checkSignal = AbortSignal.any([signal, expiry.signal])
+    try {
+      const page = await options.browser.page()
+      // Playwright's own timeout ends a slow screenshot. Only the run's end closes the browser, as during a tool call.
+      const jpeg = await interruptible(() => page.screenshot({ type: "jpeg", scale: "css", timeout: SCREENSHOT_CHECK_TIMEOUT_MS }), signal, pending => options.browser.cancelPending(pending))
+      const response = await interruptible(() => visionModel.complete({ ...screenshotRequest(jpeg), signal: checkSignal }), checkSignal)
+      visionUsage.push(response.usage)
+      const verdict = parseScreenshotVerdict(response.text)
+      emit({
+        type: "model", role: "vision", step, text: response.text, toolCalls: response.toolCalls, model: response.model, durationMs: Math.round(performance.now() - startedAt), usage: response.usage,
+        ...(verdict ? {} : { error: `${visionModel.name} replied without a verdict` }),
+      })
+      const note = verdict && screenshotNote(verdict)
+      if (note) entries.push({ role: "user", content: [{ type: "text", text: note }] })
+    } catch (error) {
+      emit({ type: "model", role: "vision", step, toolCalls: [], durationMs: Math.round(performance.now() - startedAt), error: error instanceof Error ? error.message : String(error) })
+      // The run's own deadline or cancellation still ends the run.
+      if (signal.aborted) throw error
+    } finally {
+      clearTimeout(timer)
     }
   }
 
@@ -220,10 +264,12 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       let revisited = ""
       const state = createHash("sha256")
       let canCompare = true
+      let checkPage = false
       for (const call of response.toolCalls) {
         signal.throwIfAborted()
         const result = await interruptible(() => callTool(tools, options.browser, call.name, call.arguments), signal, pending => options.browser.cancelPending(pending))
         observe()
+        if (options.visionModel && needsScreenshotCheck(tools.find((tool) => tool.name === call.name), result)) checkPage = true
         if (result.isError) failed += 1
         if (result.isError || ["browser_wait_for", "browser_scroll"].includes(call.name) || (!result.snapshot && !result.pageText)) canCompare = false
         state.update(JSON.stringify([call.name, call.arguments, result.snapshot, result.pageText ? result.text : undefined]))
@@ -232,6 +278,8 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
         emit({ type: "tool", step, call, result })
         entries.push({ role: "tool", toolCallId: call.id, name: call.name, result })
       }
+      // Once per step, after its tool results, so that the screenshot shows the page that the next request sees.
+      if (checkPage && options.visionModel) await checkScreenshot(options.visionModel)
 
       const fingerprint = canCompare ? state.digest("hex") : ""
       repeatedSteps = fingerprint && fingerprint === previousState ? repeatedSteps + 1 : 1

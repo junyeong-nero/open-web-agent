@@ -24,6 +24,8 @@ export interface McpServerOptions {
   agentModel?: ModelAdapter
   /** Checks a `browser_task` answer that claims success; see `AgentOptions.judgeModel`. */
   agentJudgeModel?: ModelAdapter
+  /** Checks the page from a screenshot during `browser_task`; see `AgentOptions.visionModel`. The tool list stays the same. */
+  agentVisionModel?: ModelAdapter
   agentMaxSteps?: number
   agentTimeoutMs?: number
 }
@@ -75,14 +77,16 @@ export function createMcpServer(options: McpServerOptions) {
         maxSteps: parsed.data.maxSteps ?? options.agentMaxSteps,
         timeoutMs: parsed.data.timeoutMs ?? options.agentTimeoutMs,
         judgeModel: options.agentJudgeModel,
+        visionModel: options.agentVisionModel,
         signal,
       })
     } catch (error) {
       return { text: `browser_task failed: ${error instanceof Error ? error.message : String(error)}`, isError: true }
     }
     const judgeTokens = result.judgeUsage ? `, judge tokens: ${result.judgeUsage.inputTokens} in / ${result.judgeUsage.outputTokens} out` : ""
+    const visionTokens = result.visionUsage ? `, vision tokens: ${result.visionUsage.inputTokens} in / ${result.visionUsage.outputTokens} out` : ""
     return {
-      text: `${result.answer || result.error || "No answer returned"}\n\n[status: ${result.status}, steps: ${result.steps}]\n[stop: ${result.stopReason}, outcome: ${result.outcome.status} (${result.outcome.verification}), duration: ${result.durationMs}ms, tokens: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out${judgeTokens}]${result.outcome.unfinished.length ? `\nUnfinished: ${result.outcome.unfinished.join("; ")}` : ""}${result.observedUrls.length ? `\nObserved URLs (not verified citations): ${result.observedUrls.join(", ")}` : ""}`,
+      text: `${result.answer || result.error || "No answer returned"}\n\n[status: ${result.status}, steps: ${result.steps}]\n[stop: ${result.stopReason}, outcome: ${result.outcome.status} (${result.outcome.verification}), duration: ${result.durationMs}ms, tokens: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out${judgeTokens}${visionTokens}]${result.outcome.unfinished.length ? `\nUnfinished: ${result.outcome.unfinished.join("; ")}` : ""}${result.observedUrls.length ? `\nObserved URLs (not verified citations): ${result.observedUrls.join(", ")}` : ""}`,
       structuredContent: { ...result },
       isError: taskIncomplete(result),
     }
