@@ -47,6 +47,7 @@ Any other MCP client can use the equivalent JSON config:
 | `openrouter` | openai | `OPENROUTER_API_KEY` |
 | `gemini` | openai (Gemini's OpenAI endpoint) | `GEMINI_API_KEY` |
 | `ollama` | openai (`localhost:11434`) | — |
+| `typesafe` | TypeSafe System One (`/v1/systemone`), [judge model](#checking-answers-with-a-judge-model) only | `TYPESAFE_API_KEY` |
 
 To reach any other OpenAI- or Anthropic-compatible endpoint (vLLM, LM Studio, a gateway, …), pass the URL and the format:
 
@@ -90,6 +91,60 @@ export default (config): ModelAdapter => ({
 owa run "..." --model-module ./my-model.ts
 ```
 
+### Checking answers with a judge model
+
+`--judge-model <provider:model>` (or `OWA_JUDGE_MODEL`) adds an optional second model that checks a final answer
+that claims success against the page it rests on. It is off by default, and without it nothing changes.
+
+When a final answer's outcome is `succeeded`, the agent sends the judge one request without tools. It holds the task,
+the answer without its outcome line, and the page content still in the agent's context: the newest `browser_get_text`
+text and the newest snapshot, without refs. The two share 16,000 characters. A longer part is cut to the lines that
+share uncommon words or numbers with the task and the answer, plus the lines next to them, or to its start when no
+line matches; `…` marks the lines left out. The judge replies with its probability that the evidence supports the
+answer, as `{"reason":"<one sentence>","supported":0.05}`; a boolean or a bare number such as `0.82` also works.
+The prompt tells the judge that a fact the newest page does not mention does not count against the answer, because
+it may come from an earlier page, and that an answer with no page content at all is unsupported.
+
+At `supported` 0.2 or below, the judge counts as sure that the answer is unsupported. The live check below kept this
+threshold: the wrong answers its judge caught scored 0.05 or less.
+
+- If a step is left, the agent gets the finding ("A check against the page evidence found the answer unsupported.
+  Reason: …") and continues to verify and correct its answer. This happens once per run. The corrected answer is
+  judged again. A run that stops before a corrected answer, with no newer answer to report, reports the rejected
+  one as `partial`.
+- Otherwise, the outcome becomes `partial`, and the finding is added to `unfinished`.
+
+A judged answer has `outcome.verification: "judged"` and the verdict in `outcome.judge` ([Delegated task
+results](#delegated-task-results)). Only final answers are judged. The best-effort answers of runs that stop at the
+step limit, for `no_progress` or for `tool_failures` are not, since those runs already report that they did not
+finish. If the judge request fails, is cancelled, outlasts the task deadline, or returns no verdict, the answer and
+outcome stay as they were, and the result's `judgeError` says why.
+
+Any `provider:model` can judge. Unlike the agent's step requests, the judge's request offers no tools, so it can use
+reasoning options that OpenAI's chat completions API rejects together with tools, such as a gpt-6 model's
+`reasoning_effort` other than `"none"`. A judge that reasons pays off. In a live check on the 16 WebVoyager tasks with
+reference answers, two runs each with `openai:gpt-6-luna` (`reasoning_effort: "none"`) as the agent, answers wrongly
+reported as succeeded went from 5 without a judge to 3 with `openai:gpt-6-sol` at `reasoning_effort: "medium"`, for
+about $0.007 more per run. With gpt-6-luna at `"low"` as the judge, they only went to 4. No correct answer ended up
+rejected.
+
+`typesafe:jev-latest` uses a small client for TypeSafe's System One API (`POST /v1/systemone`). The judge prompt
+becomes one yes/no (Noul) question about the request text, and Jev's probability of yes is the verdict, without a
+reason. It works only as a judge, since System One models do not call tools.
+
+```bash
+owa run "..." --model openai:gpt-6-luna --model-options '{"reasoning_effort":"none"}' \
+  --judge-model openai:gpt-6-sol --judge-model-options '{"reasoning_effort":"medium"}'
+```
+
+`--judge-model-options` (or `OWA_JUDGE_MODEL_OPTIONS`) is a JSON object like `--model-options`. The judge model is
+resolved from its `provider:model` shorthand alone and reads that provider's key variable (`GEMINI_API_KEY`,
+`TYPESAFE_API_KEY`, …). `--base-url`, `--api`, `--model-module` and `OWA_API_KEY` apply only to the main model, so a
+key never reaches another provider. `--judge-model ""` turns off a judge model set in the environment, and options
+without a judge model are an error. The judge also checks `browser_task` answers in `owa mcp --agent`. Library
+callers pass `judgeModel` to `runAgent`; a custom `ModelAdapter` gets the same tool-less request and can reply with
+the JSON or a bare probability.
+
 ## Tools
 
 | tool | what it does |
@@ -104,6 +159,18 @@ owa run "..." --model-module ./my-model.ts
 | `browser_evaluate` | run JavaScript in the page (**opt-in**: `--caps unsafe`) |
 
 The agent keeps only the newest snapshot and screenshot in its context. It stops when it runs out of steps, after repeated failed steps, or when it stops making progress. In each of these cases it makes one last call to get a best-effort answer.
+
+Before an action or navigation returns its snapshot, it waits for the page to settle: the page's own
+documents, scripts, styles and XHR/fetch requests started since the action have returned, a WebSocket of
+its own that it wrote to has answered and gone quiet for a second, a new document has reached its load
+event (or one second past DOMContentLoaded), and two checks 0.15 seconds apart see the same URL and the
+same snapshot the model will get. A fetch counts as returned once its response arrives, since pages do not
+always read the body. Requests to other sites (analytics, ads, maps, chat widgets), event streams, beacons,
+`blob:` URLs and requests that were already open do not count, and neither does a timer that changes the
+page later. An empty tree has not rendered yet. A static page waits about 0.15 seconds. The wait adds at
+most 3 seconds (`BrowserOptions.settleTimeoutMs`; 0 turns it off), counted from the page's first answer to
+a check, and an empty page may wait as long as an action. A page still changing then is returned with
+`The page may still be changing.`
 
 Navigation results report HTTP error statuses, for example `The server responded with HTTP 403.`, and keep the error page's snapshot. A navigation that turns into a file download fails with the file's content type and name instead of Playwright's `Download is starting`. That covers a PDF, or a bot wall that serves `application/blank`. Other failed actions keep Playwright's reason, such as the element that intercepted a click. Optional arguments sent as `null` count as omitted, and `browser_press_key` accepts key names in any case (`END`, `CTRL+A`).
 
@@ -137,6 +204,10 @@ that names it.
 --caps core,unsafe
 --max-steps <n>              default 30
 --timeout-ms <n>             total agent deadline, default 300000
+--judge-model <provider:model>
+                             OWA_JUDGE_MODEL, opt-in model that checks an answer claiming success
+--judge-model-options <json>
+                             OWA_JUDGE_MODEL_OPTIONS, its extra API request fields (JSON object)
 --trace run.jsonl            append agent events as JSONL
 --json                       (run) print the full result as JSON
 ```
@@ -174,7 +245,8 @@ bun run test          # launches headless Chromium against a local fixture serve
 
 `owa run --json` and MCP `browser_task.structuredContent` return the same compact result:
 `answer`, `status`, `stopReason`, `outcome`, `observedUrls`, `durationMs`, `steps`, and `usage`
-(and `error` for a failed model request). MCP still returns readable text beginning with the answer.
+(and `error` for a failed model request, and `judgeUsage` and `judgeError` with a judge model). MCP still returns
+readable text beginning with the answer.
 
 `status: completed` only means the model produced a final answer. `stopReason` distinguishes
 `final_answer`, `step_limit`, `no_progress`, `tool_failures`, `model_error`, `timeout`, and `cancelled`. The model is asked to write the
@@ -186,8 +258,11 @@ Like runs that reach the step limit, runs that stop for `no_progress` or `tool_f
 more tool-less request for the best answer and outcome so far; they still report `status: failed`.
 Pure JSON replies with `answer`,
 `outcome`, and `unfinished` remain supported; plain text or malformed metadata produces
-`unknown`. Every outcome is explicitly `unverified`.
-There is no independent success judge. `observedUrls` contains the last 20 distinct HTTP(S)
+`unknown`. The outcome is the model's own assessment, so `outcome.verification` is `unverified` unless a
+[judge model](#checking-answers-with-a-judge-model) checked the answer. Then it is `judged`, and `outcome.judge`
+holds the judge model's adapter name (`model`), its probability that the page evidence supports the answer
+(`supported`), and its `reason` when it gave one. A judged answer can still be wrong, since the judge sees only the
+newest page content. `observedUrls` contains the last 20 distinct HTTP(S)
 URLs the browser actually visited during the task, not verified citations supporting the answer.
 
 Partial/blocked outcomes and execution limits/failures produce MCP `isError: true` and a nonzero
@@ -195,7 +270,9 @@ CLI exit code. An unknown outcome is not treated as an execution error, but is n
 
 For an explicit real-model evaluation (separate from unit tests), run `bun run eval --live --model
 openai:gpt-6-luna --model-options '{"reasoning_effort":"none"}'`. See [evaluation instructions](docs/evaluation.md)
-for cases, JSON reports and the direct-operation versus delegation comparison procedure.
+for cases, JSON reports and the direct-operation versus delegation comparison procedure. To compare
+models on real websites, `bun run bench` runs a task file with several model configurations and
+summarizes them side by side ([real-site benchmark](docs/evaluation.md#real-site-benchmark)).
 
 ### Usage and cost
 
@@ -220,6 +297,15 @@ reported one, because a sum that skipped calls would understate the bill.
 call's wall-clock time) and `model`, the model the response named. `model` can differ from the
 configured one: OpenAI may name a dated snapshot, and a router such as `openrouter:typesafe/jev-router`
 names the model it chose. A failed call writes no `model` event.
+
+With `--judge-model`, the result's `judgeUsage` sums the judge's calls by the same rules, and `usage` leaves them
+out, because the judge model has its own price. TypeSafe reports input and output tokens, bills only input tokens,
+and reports no `cost`. In the trace, the judge's calls are `model` events with `role: "judge"`, at the step of the
+answer they judged, and their `model` is the model the response named, such as `jev-1.13.0`. A reply without a
+verdict still writes its `model` event, but a judge request that fails writes none; either way the result's
+`judgeError` keeps the reason, and `owa run` prints it to stderr. The
+`browser_task` text shows the verification next to the outcome, for example `outcome: partial (judged)`, and the
+judge's tokens after the agent's.
 
 ### Task limits and cancellation
 

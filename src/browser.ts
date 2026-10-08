@@ -1,6 +1,6 @@
 import { existsSync, readdirSync } from "node:fs"
 import { join } from "node:path"
-import { chromium, firefox, webkit, type Browser, type BrowserContext, type Locator, type Page } from "playwright"
+import { chromium, firefox, webkit, type Browser, type BrowserContext, type Locator, type Page, type WebSocket } from "playwright"
 
 export interface BrowserOptions {
   headless?: boolean
@@ -17,6 +17,8 @@ export interface BrowserOptions {
   maxSnapshotChars?: number
   /** Per-action timeout; failing fast lets the model re-plan. */
   actionTimeoutMs?: number
+  /** After an action or navigation, wait up to this long for the page to stop changing before the snapshot (default 3000; 0 turns it off). */
+  settleTimeoutMs?: number
 }
 
 const REF_PATTERN = /^(f\d+)?e\d+$/
@@ -30,6 +32,7 @@ export class BrowserSession {
   private interrupted = false
   private tabIds = new Map<Page, string>()
   private nextTabId = 1
+  private sockets = new WeakMap<Page, Set<WebSocket>>()
   /** Tab, URL and untruncated tree of the last snapshot, for re-identifying a ref whose element was replaced. */
   lastSnapshot?: { page: Page; url: string; tree: string }
 
@@ -56,13 +59,23 @@ export class BrowserSession {
     return this.opening
   }
 
-  async snapshot(): Promise<string> {
+  /** `last` is a tree of the current page that was just taken; it is used instead of taking another. */
+  async snapshot(last?: { page: Page; tree: string }): Promise<string> {
     const page = await this.page()
-    const tree = await page.ariaSnapshot({ mode: "ai" })
+    const tree = last?.page === page ? last.tree : await page.ariaSnapshot({ mode: "ai" })
     this.lastSnapshot = { page, url: page.url(), tree }
+    return `Page URL: ${page.url()}\nPage title: ${await page.title()}\nPage tab: ${this.track(page)}\nSnapshot:\n${this.shown(tree)}`
+  }
+
+  /** The part of a snapshot tree that a snapshot shows. */
+  shown(tree: string): string {
     const max = this.options.maxSnapshotChars ?? 40_000
-    const body = tree.length > max ? truncate(tree, max) : tree
-    return `Page URL: ${page.url()}\nPage title: ${await page.title()}\nPage tab: ${this.track(page)}\nSnapshot:\n${body}`
+    return tree.length > max ? truncate(tree, max) : tree
+  }
+
+  /** The page's open WebSockets, including those it opened before the current action. */
+  webSockets(page: Page): Iterable<WebSocket> {
+    return this.sockets.get(page) ?? []
   }
 
   async tabs(): Promise<Array<{ id: string; title: string; url: string; current: boolean }>> {
@@ -142,6 +155,12 @@ export class BrowserSession {
     const id = `t${this.nextTabId++}`
     this.tabIds.set(page, id)
     page.setDefaultTimeout(this.options.actionTimeoutMs ?? 10_000)
+    const sockets = new Set<WebSocket>()
+    this.sockets.set(page, sockets)
+    page.on("websocket", (socket) => {
+      sockets.add(socket)
+      socket.on("close", () => sockets.delete(socket))
+    })
     page.on("close", () => {
       this.tabIds.delete(page)
       if (this.current !== page) return

@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { errors, type Download, type Locator, type Page, type Response } from "playwright"
+import { errors, type Download, type Frame, type Locator, type Page, type Request, type Response, type WebSocket } from "playwright"
 import type { BrowserSession } from "./browser"
 import type { ContentPart, ToolSpec } from "./model/types"
 
@@ -43,15 +43,282 @@ const element = z
   .optional()
   .describe("Short human-readable description of the element, shown to humans approving the action")
 
-/** Run a page action, wait for any navigation it caused, and return the fresh snapshot. */
+/** Main-frame requests that can still change a snapshot. Streams (EventSource), beacons, images and fonts never hold it. */
+const SETTLE_REQUESTS = new Set(["document", "stylesheet", "script", "xhr", "fetch"])
+/** The page has settled when two checks this far apart see the same URL and tree, and nothing is in flight. */
+const SETTLE_CHECK_MS = 150
+/**
+ * A page's scripts often start its data requests only after DOMContentLoaded, so a new document settles only after its
+ * load event, or this long after DOMContentLoaded when slow images or third-party scripts hold up the load event.
+ */
+const SETTLE_LOAD_MS = 1_000
+/** A WebSocket reply can come in parts, so a socket holds the wait until it has received nothing for this long. */
+const SETTLE_SOCKET_QUIET_MS = 1_000
+/**
+ * A check made while the action may still start a navigation gives up after this long. Playwright retries a snapshot
+ * that ran into a navigation one second later, so a check that was given up never takes its snapshot after the final one.
+ */
+const SETTLE_CHECK_TIMEOUT_MS = 900
+
+/** A note when the page was still changing, or the tree of the settled page, which is the latest snapshot taken. */
+interface Settled {
+  note: string
+  last?: { page: Page; tree: string }
+}
+
+interface Settling {
+  /** Start comparing snapshots while the action still waits for its own navigation. */
+  observe(): void
+  /** Wait at most settleTimeoutMs more, not counting the page's first answer to a check; never rejects. */
+  settle(): Promise<Settled>
+  stop(): void
+}
+
+/** The site of a URL, roughly its registrable domain: example.com for www.example.com, example.co.uk for a.example.co.uk. */
+function siteOf(url: string): string {
+  try {
+    const labels = new URL(url).hostname.split(".")
+    const countrySecondLevel = labels.length > 2 && labels.at(-1)!.length === 2 && /^(?:ac|co|com|edu|go|gob|gov|ne|net|or|org)$/.test(labels.at(-2)!)
+    return labels.slice(countrySecondLevel ? -3 : -2).join(".")
+  } catch {
+    return url
+  }
+}
+
+/**
+ * Watch a page from just before an action until it settles: the page's own documents, scripts, styles and data
+ * requests started since then have returned, a WebSocket of its own that it wrote to since then has answered, a new
+ * document has reached DOMContentLoaded, and two checks SETTLE_CHECK_MS apart, with nothing else happening in between,
+ * see the same URL and the same snapshot as the model will get it. An empty tree has not rendered yet. Requests to other
+ * sites, such as analytics, ads, maps and chat widgets, never hold the wait. Only network events and ariaSnapshot, which
+ * runs in Playwright's utility world, are used, never page-world evaluate, so pages that override `window.eval` settle
+ * too. Undefined when settling is off or the page cannot be watched.
+ */
+function watchSettling(session: BrowserSession, page: Page): Settling | undefined {
+  const cap = session.options.settleTimeoutMs ?? 3_000
+  if (!(cap > 0)) return undefined
+  let activity = performance.now()
+  const touch = () => { activity = performance.now() }
+  const ownSite = (url: string) => siteOf(url) === siteOf(page.url())
+  // The page's own requests started since the action began, each marked when it is a navigation. Requests that started
+  // before, such as an open long poll, are never tracked.
+  const pending = new Map<Request, boolean>()
+  // The page's own WebSockets that opened or that it wrote to since the action began, with when each opened, last sent
+  // and last received a frame. One the page wrote to holds the wait while a reply is due and until it has received
+  // nothing for SETTLE_SOCKET_QUIET_MS, since replies can come in parts. One that only opened holds it until its first
+  // frame, at most that long, so sockets that stay silent or only push, such as tickers, never hold it for long.
+  const engaged = new Map<WebSocket, { opened: number; sent: number; received: number }>()
+  const answering = () => [...engaged.values()].some(({ opened, sent, received }) => {
+    const now = performance.now()
+    if (sent > -Infinity) return sent > received || now - received < SETTLE_SOCKET_QUIET_MS
+    return received < opened && now - opened < SETTLE_SOCKET_QUIET_MS
+  })
+  const busy = () => pending.size > 0 || answering()
+  const navigating = () => [...pending.values()].includes(true)
+  // Ends a check that a new document is about to replace; it would otherwise wait for Playwright's retry.
+  let interrupt = () => {}
+  const onRequest = (request: Request) => {
+    try {
+      // blob: and data: requests never report that they finished.
+      if (!SETTLE_REQUESTS.has(request.resourceType()) || request.frame() !== page.mainFrame() || !/^https?:/.test(request.url())) return
+      const navigation = request.isNavigationRequest()
+      if (!navigation && !ownSite(request.url())) return
+      pending.set(request, navigation)
+      if (navigation) interrupt()
+    } catch { /* A service worker request has no frame. */ }
+  }
+  const onFinished = (request: Request) => { if (pending.delete(request)) touch() }
+  // A page may never read a fetch body, and then its request never finishes, so a fetch counts once its response arrives.
+  const onResponse = (response: Response) => { if (response.request().resourceType() === "fetch") onFinished(response.request()) }
+  const onNavigated = (frame: Frame) => { if (frame === page.mainFrame()) touch() }
+  // When a new document reached DOMContentLoaded during the wait and has not reached load yet.
+  let loading: number | undefined
+  const onContentLoaded = () => { touch(); loading = performance.now() }
+  const onLoad = () => { touch(); loading = undefined }
+  const loaded = () => loading === undefined || performance.now() - loading >= SETTLE_LOAD_MS
+  const sockets: Array<{ socket: WebSocket; sent(): void; received(): void; closed(): void }> = []
+  const watchSocket = (socket: WebSocket, opened: boolean) => {
+    const own = ownSite(socket.url())
+    if (own && opened) engaged.set(socket, { opened: performance.now(), sent: -Infinity, received: -Infinity })
+    const watched = {
+      socket,
+      sent: () => {
+        if (!own) return
+        const times = engaged.get(socket) ?? { opened: -Infinity, sent: -Infinity, received: -Infinity }
+        times.sent = performance.now()
+        engaged.set(socket, times)
+      },
+      received: () => {
+        const times = engaged.get(socket)
+        if (!times) return
+        times.received = performance.now()
+        // Only the replies to what the page sent are activity; a ticker's pushes are not.
+        if (times.sent > -Infinity) touch()
+      },
+      closed: () => { if (engaged.delete(socket)) touch() },
+    }
+    socket.on("framesent", watched.sent)
+    socket.on("framereceived", watched.received)
+    socket.on("close", watched.closed)
+    sockets.push(watched)
+  }
+  const onSocket = (socket: WebSocket) => watchSocket(socket, true)
+  let stopped = false
+  let wake = () => {}
+  const stop = () => {
+    stopped = true
+    wake()
+    interrupt()
+    try {
+      page.off("request", onRequest)
+      page.off("response", onResponse)
+      page.off("requestfinished", onFinished)
+      page.off("requestfailed", onFinished)
+      page.off("framenavigated", onNavigated)
+      page.off("domcontentloaded", onContentLoaded)
+      page.off("load", onLoad)
+      page.off("websocket", onSocket)
+      for (const { socket, sent, received, closed } of sockets) {
+        socket.off("framesent", sent)
+        socket.off("framereceived", received)
+        socket.off("close", closed)
+      }
+    } catch { /* Nothing was attached to a page that cannot be watched. */ }
+  }
+  try {
+    page.on("request", onRequest)
+    page.on("response", onResponse)
+    page.on("requestfinished", onFinished)
+    page.on("requestfailed", onFinished)
+    page.on("framenavigated", onNavigated)
+    page.on("domcontentloaded", onContentLoaded)
+    page.on("load", onLoad)
+    page.on("websocket", onSocket)
+    for (const socket of session.webSockets(page)) watchSocket(socket, false)
+  } catch {
+    stop()
+    return undefined
+  }
+
+  let deadline = Infinity
+  // Until the page answers its first check, which a renderer that is still starting up can hold up for seconds, the
+  // check may take as long as an action, and that time does not count toward the cap.
+  let firstAnswerBy = Infinity
+  let loop: Promise<Settled> | undefined
+  const run = async (): Promise<Settled> => {
+    let previous: string | undefined
+    // How long the last check took; the next one is skipped when it could not finish before the deadline.
+    let took = 0
+    // While requests are in flight, the next check waits as long as the last one took, so that checks take at most half
+    // of a loading page's renderer. After a check that saw a change or failed, it waits that long too, but at most
+    // 2 * SETTLE_CHECK_MS, since a check that waited behind the page's own scripts took longer than it cost.
+    let rest = false
+    let answered: Page | undefined
+    // An empty page is no use to the model, so while the latest check found nothing on it, as on a bot check that
+    // computes for seconds before it reloads into the real page, the wait may take as long as an action.
+    let empty = false
+    const limit = () => empty ? Math.max(deadline, firstAnswerBy) : deadline
+    while (!stopped) {
+      if (performance.now() + took >= limit()) return { note: "\nThe page may still be changing." }
+      // When this round's check started, or the round itself when the page was too busy for one.
+      let checked = performance.now()
+      let current: Page | undefined
+      try {
+        // A new tab opened by the action is the page the snapshot shows.
+        current = await session.page()
+        if (answered !== current) answered = undefined
+        const deciding = deadline < Infinity
+        if (deciding) await current.waitForLoadState("domcontentloaded", { timeout: Math.max(1, limit() - performance.now()) })
+        // Checks go on while requests are in flight, so that one check can settle the page once they have returned, but
+        // not while a new document is on its way.
+        if (current !== page || !navigating()) {
+          checked = performance.now()
+          // While the action may still navigate, a check gives up early and a new document ends it; afterwards it
+          // follows the page through a reload.
+          const until = deciding ? (answered ? limit() : Math.max(limit(), firstAnswerBy)) : checked + SETTLE_CHECK_TIMEOUT_MS
+          const check = current.ariaSnapshot({ mode: "ai", timeout: Math.max(1, until - checked) })
+          check.catch(() => {})
+          let replaced = false
+          let tree: string
+          try {
+            tree = deciding ? await check : await Promise.race([check, new Promise<string>((resolve) => { interrupt = () => { replaced = true; resolve("") } })])
+          } finally {
+            interrupt = () => {}
+          }
+          if (!replaced) {
+            const elapsed = performance.now() - checked
+            if (answered) took = elapsed
+            else {
+              answered = current
+              if (deciding) deadline += elapsed
+            }
+            const url = current.url()
+            const state = `${url}\n${session.shown(tree)}`
+            const same = state === previous
+            rest = previous !== undefined && !same
+            if (rest) touch()
+            previous = state
+            // An empty tree has not rendered yet, unless the tab is blank on purpose.
+            empty = !tree && url !== "about:blank"
+            if (deadline < Infinity && same && !empty && !busy() && loaded() && performance.now() - activity >= SETTLE_CHECK_MS) {
+              return { note: "", last: { page: current, tree } }
+            }
+          }
+        }
+      } catch {
+        // A closed page or a cancelled task ends the wait. Any other failure, such as a timeout while the renderer is
+        // busy, says nothing about the tree, so the next check decides.
+        if (!current || current.isClosed()) return { note: "" }
+        rest = true
+      }
+      if (stopped) break
+      const now = performance.now()
+      // Check again SETTLE_CHECK_MS after the last change and the last check.
+      const delay = Math.max(Math.max(activity, checked) + SETTLE_CHECK_MS - now, busy() ? took : rest ? Math.min(took, 2 * SETTLE_CHECK_MS) : 0)
+      await new Promise<void>((resolve) => {
+        wake = resolve
+        setTimeout(resolve, Math.max(0, Math.min(delay, limit() - now)))
+      })
+    }
+    return { note: "" }
+  }
+  return {
+    observe() {
+      touch()
+      loop ??= run()
+    },
+    async settle() {
+      if (stopped) return { note: "" }
+      const now = performance.now()
+      deadline = now + cap
+      firstAnswerBy = now + Math.max(cap, session.options.actionTimeoutMs ?? 10_000)
+      wake()
+      if (!loop) {
+        touch()
+        loop = run()
+      }
+      try { return await loop } finally { stop() }
+    },
+    stop,
+  }
+}
+
+/** Run a page action, wait for any navigation it caused and for the page to settle, and return the fresh snapshot. */
 async function act(session: BrowserSession, summary: string, action: (page: Page) => Promise<unknown>): Promise<ToolResult> {
   const page = await session.page()
+  const settling = watchSettling(session, page)
   const navigated = page
     .waitForEvent("framenavigated", { predicate: (frame) => frame === page.mainFrame(), timeout: 750 })
     .then(() => true, () => false)
-  await action(page)
+  try {
+    await action(page)
+  } catch (error) {
+    settling?.stop()
+    throw error
+  }
+  settling?.observe()
   if (await navigated) await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {})
-  return snapshotAfterAction(session, summary)
+  return snapshotAfterAction(session, summary, settling)
 }
 
 /** A committed document is usable even when its response body is still loading. */
@@ -67,11 +334,13 @@ async function navigate(session: BrowserSession, summary: string, action: (page:
   const onDownload = (download: Download) => { sent.download = download }
   page.on("response", onResponse)
   page.on("download", onDownload)
+  const settling = watchSettling(session, page)
   let response: Response | null
   try {
     // Connection failures and timeouts before commit must remain action failures.
     response = await action(page)
   } catch (error) {
+    settling?.stop()
     // goto rejects with "Download is starting" and a history navigation with net::ERR_ABORTED, before the download event fires.
     const starting = String(error).includes("Download is starting")
     if (!sent.download && (starting || String(error).includes("net::ERR_ABORTED"))) {
@@ -90,11 +359,13 @@ async function navigate(session: BrowserSession, summary: string, action: (page:
         timeout: timeout === 0 ? 0 : Math.max(1, timeout - (performance.now() - started)),
       })
     } catch (error) {
+      // The action timeout is spent, so a page that is still loading is returned without settling.
+      settling?.stop()
       if (!(error instanceof errors.TimeoutError)) throw error
       summary += "\nThe page may still be loading."
     }
   }
-  return snapshotAfterAction(session, summary)
+  return snapshotAfterAction(session, summary, settling)
 }
 
 /** Explain a download so the agent stops reopening a URL whose file the browser cannot show. */
@@ -133,9 +404,11 @@ function failureReason(error: unknown): string {
 }
 
 /** A failed observation must not turn an already completed action into a retryable failure. */
-async function snapshotAfterAction(session: BrowserSession, summary: string): Promise<ToolResult> {
+async function snapshotAfterAction(session: BrowserSession, summary: string, settling?: Settling): Promise<ToolResult> {
+  const { note, last } = (await settling?.settle()) ?? { note: "" }
+  summary += note
   try {
-    return snapshotResult(summary, await session.snapshot())
+    return snapshotResult(summary, await session.snapshot(last))
   } catch (error) {
     return {
       text: `${summary}\nThe browser action completed, but its follow-up snapshot failed: ${failureReason(error)}\nDo not repeat the action just to recover the snapshot. Call browser_snapshot to inspect the current page before taking another action.`,

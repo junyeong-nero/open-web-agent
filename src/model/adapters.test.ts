@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { anthropicMessages } from "./anthropic"
 import { openaiChat } from "./openai"
+import { typesafeSystemOne } from "./typesafe"
 import { type FetchLike, ModelHttpError, type ModelRequest } from "./types"
 
 function recordingFetch(response: unknown, status = 200) {
@@ -50,6 +51,38 @@ describe("openaiChat", () => {
   it("surfaces HTTP errors", async () => {
     const { fetchImpl } = recordingFetch({ error: "nope" }, 401)
     expect(openaiChat({ model: "m", fetch: fetchImpl }).complete(request)).rejects.toBeInstanceOf(ModelHttpError)
+  })
+})
+
+describe("typesafeSystemOne", () => {
+  const question: ModelRequest = {
+    system: "Is the answer supported?",
+    tools: [],
+    messages: [{ role: "user", content: [{ type: "text", text: "Task: t" }, { type: "image", mimeType: "image/png", data: "AAA" }, { type: "text", text: "Answer: a" }] }],
+  }
+
+  it("asks one yes/no question about the text of the messages and returns its probability", async () => {
+    const { calls, fetchImpl } = recordingFetch({ model: "jev-1.13.0", answers: { answer: { type: "noul", noul: 0.82 } }, usage: { input_tokens: 296, output_tokens: 20 } })
+    const response = await typesafeSystemOne({ model: "jev-latest", apiKey: "k", extraBody: { tag: "x" }, fetch: fetchImpl }).complete(question)
+    expect(calls).toEqual([{
+      url: "https://api.typesafe.ai/v1/systemone",
+      headers: { "content-type": "application/json", authorization: "Bearer k" },
+      body: { model: "jev-latest", state: "Task: t\n\nAnswer: a", questions: { answer: { type: "noul", instructions: "Is the answer supported?" } }, tag: "x" },
+    }])
+    expect(response).toEqual({ text: "0.82", toolCalls: [], model: "jev-1.13.0", usage: { inputTokens: 296, outputTokens: 20 } })
+  })
+
+  it("refuses requests with tools, fails without a yes/no answer, and redacts the key from HTTP errors", async () => {
+    const answered = recordingFetch({ model: "jev-1.13.0", answers: { answer: { type: "noul", noul: 0.5 } } })
+    await expect(typesafeSystemOne({ model: "jev-latest", fetch: answered.fetchImpl }).complete(request)).rejects.toThrow("only answers yes/no questions")
+    expect(answered.calls).toHaveLength(0)
+    await expect(typesafeSystemOne({ model: "jev-latest", fetch: recordingFetch({ answers: {} }).fetchImpl }).complete(question)).rejects.toThrow("returned no yes/no answer")
+
+    const { fetchImpl } = recordingFetch({ detail: "Invalid API key test-secret-token" }, 401)
+    const error = await typesafeSystemOne({ model: "jev-latest", apiKey: "test-secret-token", fetch: fetchImpl }).complete(question).catch((error: unknown) => error)
+    expect(error).toBeInstanceOf(ModelHttpError)
+    expect(String(error)).toContain("typesafe-systemone:jev-latest request failed with HTTP 401")
+    expect(String(error)).not.toContain("test-secret-token")
   })
 })
 
@@ -164,7 +197,12 @@ describe("usage and serving model", () => {
 describe("model request diagnostics", () => {
   it("suggests explicit reasoning options for the reported compatibility error", async () => {
     const { fetchImpl } = recordingFetch({ error: { message: "Function tools with reasoning_effort are not supported. Set reasoning_effort to 'none'." } }, 400)
-    await expect(openaiChat({ model: "m", fetch: fetchImpl }).complete(request)).rejects.toThrow('--model-options \'{"reasoning_effort":"none"}\'')
+    await expect(openaiChat({ model: "m", fetch: fetchImpl }).complete(request)).rejects.toThrow(
+      `Try --model-options '{"reasoning_effort":"none"}' (or OWA_MODEL_OPTIONS) if supported by this endpoint. No model options are changed automatically.`,
+    )
+    // A secondary model's hint names the setting that configured it.
+    const judge = openaiChat({ model: "m", fetch: fetchImpl, optionsSetting: { flag: "--judge-model-options", env: "OWA_JUDGE_MODEL_OPTIONS" } })
+    await expect(judge.complete(request)).rejects.toThrow(`Try --judge-model-options '{"reasoning_effort":"none"}' (or OWA_JUDGE_MODEL_OPTIONS) if supported`)
   })
 
   it("redacts API keys echoed by an endpoint from the error and its body", async () => {

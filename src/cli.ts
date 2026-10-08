@@ -3,7 +3,7 @@ import { parseArgs } from "node:util"
 import { type AgentEvent, runAgent, taskIncomplete } from "./agent"
 import { BrowserSession } from "./browser"
 import { createMcpServer, serveStdio } from "./mcp"
-import { type ModelConfig, modelConfigFromEnv, parseApi, resolveModel } from "./model/resolve"
+import { type ModelConfig, modelConfigFromEnv, parseApi, resolveModel, roleModelConfig } from "./model/resolve"
 import { jsonlTrace } from "./trace"
 import { type Capability, selectTools } from "./tools"
 import { VERSION } from "./version"
@@ -36,6 +36,11 @@ Browser:
 Agent:
   --max-steps <n>              default 30
   --timeout-ms <n>             total agent deadline, default 300000
+  --judge-model <provider:model>
+                               OWA_JUDGE_MODEL  opt-in model that checks an answer claiming success,
+                               e.g. gemini:gemini-3.1-flash-lite or typesafe:jev-latest (TYPESAFE_API_KEY)
+  --judge-model-options <json>
+                               OWA_JUDGE_MODEL_OPTIONS  its extra API request fields (JSON object)
   --trace <file.jsonl>         append agent events as JSONL
   --json                       (run) print the result as JSON
 `
@@ -50,6 +55,8 @@ export async function main(argv: string[]): Promise<number> {
       "base-url": { type: "string" },
       "model-module": { type: "string" },
       "model-options": { type: "string" },
+      "judge-model": { type: "string" },
+      "judge-model-options": { type: "string" },
       headless: { type: "boolean" },
       browser: { type: "string" },
       locale: { type: "string" },
@@ -87,6 +94,7 @@ export async function main(argv: string[]): Promise<number> {
     baseUrl: values["base-url"] ?? env.baseUrl,
     module: values["model-module"] ?? env.module,
   }
+  const judgeConfig = roleModelConfig("judge", { model: values["judge-model"], options: values["judge-model-options"] })
   const browserName = values.browser ?? "chromium"
   if (!["chromium", "firefox", "webkit"].includes(browserName)) throw new Error(`Unknown browser "${browserName}"`)
   const session = new BrowserSession({
@@ -101,7 +109,8 @@ export async function main(argv: string[]): Promise<number> {
 
   if (command === "mcp") {
     const agentModel = values.agent ? await resolveModel(modelConfig) : undefined
-    const server = createMcpServer({ session, tools, agentModel, agentMaxSteps: maxSteps, agentTimeoutMs: timeoutMs })
+    const agentJudgeModel = values.agent && judgeConfig ? await resolveModel(judgeConfig) : undefined
+    const server = createMcpServer({ session, tools, agentModel, agentJudgeModel, agentMaxSteps: maxSteps, agentTimeoutMs: timeoutMs })
     const stop = () => void session.close().finally(() => process.exit(0))
     process.once("SIGINT", stop)
     process.once("SIGTERM", stop)
@@ -117,6 +126,7 @@ export async function main(argv: string[]): Promise<number> {
     const task = rest.join(" ").trim()
     if (!task) throw new Error('Usage: owa run "<task>"')
     const model = await resolveModel(modelConfig)
+    const judgeModel = judgeConfig && await resolveModel(judgeConfig)
     const controller = new AbortController()
     process.once("SIGINT", () => controller.abort(new Error("Interrupted")))
     const trace = values.trace ? jsonlTrace(values.trace) : undefined
@@ -129,6 +139,7 @@ export async function main(argv: string[]): Promise<number> {
         tools,
         maxSteps,
         timeoutMs,
+        judgeModel,
         signal: controller.signal,
         onEvent: (event) => {
           trace?.(event)
@@ -148,14 +159,17 @@ export async function main(argv: string[]): Promise<number> {
 function logEvent(event: AgentEvent): void {
   const log = (line: string) => process.stderr.write(`${line}\n`)
   if (event.type === "model" && event.text && event.toolCalls.length > 0) log(`  · ${oneLine(event.text)}`)
+  if (event.type === "model" && event.role === "judge") log(`  judge: ${oneLine(event.text ?? "")}`)
   if (event.type === "tool") {
     const args = JSON.stringify(event.call.arguments)
     log(`${event.result.isError ? "✗" : "→"} [${event.step}] ${event.call.name} ${oneLine(args)}`)
     if (event.result.isError) log(`    ${oneLine(event.result.text)}`)
   }
   if (event.type === "done") {
-    const { status, steps, usage } = event.result
-    log(`■ ${status} in ${steps} steps (tokens in ${usage.inputTokens}, out ${usage.outputTokens})`)
+    const { status, steps, usage, judgeUsage, judgeError } = event.result
+    if (judgeError) log(`  judge failed: ${oneLine(judgeError)}`)
+    const judge = judgeUsage ? `; judge in ${judgeUsage.inputTokens}, out ${judgeUsage.outputTokens}` : ""
+    log(`■ ${status} in ${steps} steps (tokens in ${usage.inputTokens}, out ${usage.outputTokens}${judge})`)
   }
 }
 
