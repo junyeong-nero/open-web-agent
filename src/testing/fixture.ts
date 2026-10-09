@@ -128,6 +128,7 @@ const PAGES: Record<string, string> = {
 }
 
 export function startFixtureServer(): { url: string; stop(): void } {
+  const rateLimitRequests = new Map<string, number>()
   const timers = new Set<ReturnType<typeof setTimeout>>()
   const later = (ms: number, response: () => Response) => new Promise<Response>((resolve) => {
     const timer = setTimeout(() => {
@@ -166,6 +167,16 @@ export function startFixtureServer(): { url: string; stop(): void } {
       if (url.pathname === "/socket" || url.pathname === "/ticker") {
         return server.upgrade(request, { data: { ticker: url.pathname === "/ticker" } }) ? undefined : new Response("upgrade failed", { status: 400 })
       }
+      if (url.pathname === "/rate-limit") {
+        const count = (rateLimitRequests.get(url.search) ?? 0) + 1
+        rateLimitRequests.set(url.search, count)
+        if (count === 1 || url.searchParams.has("always")) return new Response("<!doctype html><title>Rate limited</title><h1>Too many requests</h1>", {
+          status: 429, headers: { "content-type": "text/html", "retry-after": "1", "cache-control": "no-store" },
+        })
+        if (!url.searchParams.has("then")) return new Response(`<!doctype html><title>Recovered</title><h1>Request ${count}</h1>`, { headers: { "content-type": "text/html", "cache-control": "no-store" } })
+        url.pathname = url.searchParams.get("then")!
+      }
+      if (url.pathname === "/blank-file") return new Response("blocked", { headers: { "content-type": "application/blank", "content-disposition": 'attachment; filename="response"' } })
       if (url.pathname === "/locale") return Response.json({ acceptLanguage: request.headers.get("accept-language") })
       if (url.pathname === "/slow-body") {
         let timer: ReturnType<typeof setTimeout>

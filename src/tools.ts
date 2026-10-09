@@ -321,8 +321,16 @@ async function act(session: BrowserSession, summary: string, action: (page: Page
   return snapshotAfterAction(session, summary, settling)
 }
 
+/** Retry-After in seconds, bounded so a rate limit cannot stall the task. */
+export function retryAfterSeconds(header?: string | null, now = Date.now()): number {
+  const value = header?.trim() ?? ""
+  const seconds = /^\d+$/.test(value) ? Number(value)
+    : /[a-z]/i.test(value) ? (Date.parse(value) - now) / 1_000 : NaN
+  return Number.isNaN(seconds) ? 2 : Math.max(0, Math.min(10, seconds))
+}
+
 /** A committed document is usable even when its response body is still loading. */
-async function navigate(session: BrowserSession, summary: string, action: (page: Page) => Promise<Response | null>): Promise<ToolResult> {
+async function navigate(session: BrowserSession, summary: string, action: (page: Page) => Promise<Response | null>, waited?: number): Promise<ToolResult> {
   const page = await session.page()
   const timeout = session.options.actionTimeoutMs ?? 10_000
   const started = performance.now()
@@ -347,13 +355,21 @@ async function navigate(session: BrowserSession, summary: string, action: (page:
       await page.waitForEvent("download", { timeout: 2_000 }).catch(() => {})
     }
     if (!sent.download && !starting) throw error
-    throw new Error(downloadMessage(sent))
+    throw new Error((waited === undefined ? "" : `${summary}\n`) + downloadMessage(sent))
   } finally {
     page.off("response", onResponse)
     page.off("download", onDownload)
   }
   if (response) {
+    if (response.status() === 429 && waited === undefined) {
+      settling?.stop()
+      const seconds = retryAfterSeconds(response.headers()["retry-after"])
+      await new Promise((resolve) => setTimeout(resolve, seconds * 1_000))
+      summary += `\nThe first response was HTTP 429; the browser waited ${seconds} s and reloaded once.`
+      return navigate(session, summary, (page) => page.reload({ waitUntil: "commit" }), seconds)
+    }
     if (response.status() >= 400) summary += `\nThe server responded with HTTP ${response.status()}.`
+    if (response.status() === 429) summary += `\nThe site is rate-limiting this browser and may be blocking it; it still answered HTTP 429 after waiting ${waited} s and one reload.`
     try {
       await page.waitForLoadState("domcontentloaded", {
         timeout: timeout === 0 ? 0 : Math.max(1, timeout - (performance.now() - started)),
@@ -369,11 +385,16 @@ async function navigate(session: BrowserSession, summary: string, action: (page:
 }
 
 /** Explain a download so the agent stops reopening a URL whose file the browser cannot show. */
-function downloadMessage({ response, download }: { response?: Response; download?: Download }): string {
+export function downloadMessage({ response, download }: { response?: Pick<Response, "headers">; download?: Pick<Download, "suggestedFilename"> }): string {
   const type = response?.headers()["content-type"]?.split(";")[0]?.trim().toLowerCase()
   const name = download?.suggestedFilename()
   const details = [type && `content-type \`${type}\``, name && `filename \`${name}\``].filter(Boolean).join(", ")
   const pdf = type === "application/pdf" || /\.pdf$/i.test(name ?? "")
+  const document = pdf
+    || /^(?:image|audio|video)\//.test(type ?? "")
+    || /^(?:text\/(?:csv|plain|xml)|application\/(?:json|xml|[\w.+-]+\+(?:json|xml)|msword|vnd\.ms-(?:excel|powerpoint|word)(?:\.[\w.-]+)?|vnd\.openxmlformats-officedocument\.[\w.-]+|vnd\.oasis\.opendocument\.[\w.-]+|rtf|zip|gzip|x-gzip|x-tar|x-bzip2?|x-xz|x-7z-compressed|x-rar-compressed|vnd\.rar))$/.test(type ?? "")
+    || /\.(?:pdf|docx?|dotx?|docm|dotm|xlsx?|xlsm|xlsb|xltx?|xltm|pptx?|pptm|potx?|potm|ppsx?|ppsm|od[tpsfgbmc]|ot[tpsg]|rtf|csv|txt|text|json|xml|zip|gz|gzip|tgz|tar|bz2?|xz|7z|rar|png|jpe?g|gif|webp|svg|bmp|tiff?|ico|avif|heic|mp3|wav|ogg|oga|flac|aac|m4a|opus|aiff?|wma|mp4|m4v|webm|mov|avi|mpe?g|ogv|mkv|wmv)$/i.test(name ?? "")
+  if (!document) return `The site answered with a non-document file${details ? ` (${details})` : ""} instead of a page; other URLs on the same site will likely do the same. This counts as a block under the rules; use another site.`
   return `The server sent a file${details ? ` (${details})` : ""} instead of a web page; the browser cannot display it. Opening the same URL again gives the same result.`
     + (pdf ? " For a PDF, look for an HTML version of the same document, such as its abstract or landing page." : "")
 }
