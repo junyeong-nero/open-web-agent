@@ -20,6 +20,17 @@ const LATE_LIST = `<script>
   </script>`
 
 const PAGES: Record<string, string> = {
+  "/empty-dialogs": `<!doctype html><title>Empty dialogs</title><body>
+    <h1>Page content</h1>
+    <div role="dialog" aria-modal="false" style="position: absolute; left: -9999px"></div>
+    <script>
+      const variant = new URLSearchParams(location.search).get("variant")
+      if (variant === "mixed") document.write('<div role="dialog" aria-label="Useful dialog"><h2>Dialog content</h2><button>Continue</button></div>')
+      if (variant === "wrappers") document.write('<div role="dialog" aria-label="Empty wrappers">   <div role="generic"><div role="generic">   </div></div></div>')
+      window.eval = () => { throw new Error("eval is disabled") }
+    </script>
+    ${"<p>Long page content to exceed the snapshot budget.</p>".repeat(1000)}
+  </body>`,
   "/slow-render": `<!doctype html><title>Slow renderer</title><script>
     // Simulate a renderer blocked during its first text render, independently of network speed.
     const started = performance.now();

@@ -200,7 +200,7 @@ export class BrowserSession {
 
 /**
  * Cut a snapshot tree to `max` characters. Pages render modals in a portal at the end of the body, where the cut
- * would drop them, so dialog and alertdialog subtrees go first and the rest of the tree fills what is left.
+ * would drop them, so dialog and alertdialog subtrees with content go first and the rest fills what is left.
  * Lines only move within the one snapshot, so every ref shown still resolves.
  */
 function truncate(tree: string, max: number): string {
@@ -209,7 +209,7 @@ function truncate(tree: string, max: number): string {
   const dialogs: string[] = []
   const rest: string[] = []
   for (let start = 0; start < lines.length; start++) {
-    // ariaSnapshot leaves out hidden elements, so every dialog in it is open. A YAML-quoted key starts with a quote.
+    // A YAML-quoted key starts with a quote.
     const indent = /^( *)- '?(?:alert)?dialog\b/.exec(lines[start])?.[1].length
     if (indent === undefined) {
       rest.push(lines[start])
@@ -217,8 +217,10 @@ function truncate(tree: string, max: number): string {
     }
     // The subtree is the dialog line and the more deeply indented lines after it; it moves to the top level.
     let end = start + 1
-    while (end < lines.length && lines[end].search(/\S/) > indent) end++
-    dialogs.push(lines.slice(start, end).map((line) => line.slice(indent)).join("\n"))
+    while (end < lines.length && (!lines[end].trim() || lines[end].search(/\S/) > indent)) end++
+    const subtree = lines.slice(start, end)
+    if (emptyDialog(subtree)) rest.push(...subtree)
+    else dialogs.push(subtree.map((line) => line.slice(indent)).join("\n"))
     start = end - 1
   }
   if (!dialogs.length) return `${tree.slice(0, max)}${notice}`
@@ -231,6 +233,13 @@ function truncate(tree: string, max: number): string {
   return `Open dialog (shown first; the page behind it may not accept clicks):\n${shown}`
     + (behind && `\nRest of the page:\n${behind}`)
     + (shown.length < open.length || behind.length < others.length ? notice : "")
+}
+
+function emptyDialog(lines: string[]): boolean {
+  // The dialog's name is only a label; values and named descendants are content.
+  const emptyRoot = /^ *- '?(?:alert)?dialog(?: "(?:\\.|[^"\\])*")?(?: \[[^\]]*\])*'?:?\s*$/
+  const emptyStructure = /^ *- '?(?:generic|group|none|presentation|paragraph|list|listitem|region|main|navigation|banner|contentinfo|article|complementary)(?: \[[^\]]*\])*'?:?\s*$/
+  return emptyRoot.test(lines[0]) && lines.slice(1).every((line) => !line.trim() || emptyStructure.test(line))
 }
 
 /** Playwright pins an exact browser build; fall back to any cached Chromium when that build is missing. */
