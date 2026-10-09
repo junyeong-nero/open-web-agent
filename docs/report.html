@@ -1,0 +1,946 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>OWA 실사이트 벤치마크 2026-10-09</title>
+<meta name="description" content="Open Web Agent 0878dbe를 WebVoyager·Online-Mind2Web 100개 작업에 돌리고 trace를 하나씩 검증한 결과와 약점 분석">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: a run log read top to bottom. One 68ch reading column for prose; figures take the full 1040px column; the appendix is a filterable table of every run. */
+:root {
+  --bg: #f3f4f5;
+  --surface: #ffffff;
+  --ink: #15181b;
+  --ink-2: #454c53;
+  --muted: #6a7279;
+  --rule: #dde1e4;
+  --grid: #eceef0;
+  --accent: #2a78d6;
+  --accent-ink: #1f5fae;
+  --accent-wash: #e6f0fb;
+  --code-bg: #eef0f2;
+  --v-correct: #0ca30c;
+  --v-partly: #fab219;
+  --v-wrong: #d03b3b;
+  --v-unfinished: #ec835a;
+  --v-env: #b7bcc1;
+  --env-bar: #a9afb5;
+  --font-sans: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1113; --surface: #161a1d; --ink: #eef1f3; --ink-2: #bcc3c9; --muted: #8c949b;
+    --rule: #2b3136; --grid: #22272b; --accent: #3987e5; --accent-ink: #8ab8f0; --accent-wash: #152538;
+    --code-bg: #1f2428; --v-env: #4f565c; --env-bar: #5a6167; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1113; --surface: #161a1d; --ink: #eef1f3; --ink-2: #bcc3c9; --muted: #8c949b;
+  --rule: #2b3136; --grid: #22272b; --accent: #3987e5; --accent-ink: #8ab8f0; --accent-wash: #152538;
+  --code-bg: #1f2428; --v-env: #4f565c; --env-bar: #5a6167; color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: var(--font-sans); font-size: 15px; line-height: 1.7;
+  font-feature-settings: "kern"; word-break: keep-all; overflow-wrap: anywhere;
+}
+.wrap { max-width: 1040px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 72px; }
+.prose, .measure { max-width: 68ch; }
+h1, h2, h3 { text-wrap: balance; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+h1 { font-size: clamp(30px, 5vw, 42px); line-height: 1.2; font-weight: 700; }
+h2 { font-size: 23px; line-height: 1.35; }
+h3 { font-size: 17px; line-height: 1.45; }
+p { margin: 0; }
+a { color: var(--accent-ink); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+pre { margin: 0; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; background: var(--code-bg); padding: 14px 16px; border-radius: 6px; overflow-x: auto; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.muted { color: var(--muted); }
+.small { font-size: 13px; line-height: 1.6; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* Header */
+.masthead { display: grid; gap: 16px; padding-bottom: 28px; border-bottom: 1px solid var(--rule); }
+.lede { font-size: 17px; line-height: 1.75; color: var(--ink-2); max-width: 64ch; }
+.runmeta { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--muted); }
+.runmeta span b { color: var(--ink-2); font-weight: 500; }
+.toc { display: flex; flex-wrap: wrap; gap: 4px 16px; padding-block: 14px; border-bottom: 1px solid var(--rule); font-size: 13.5px; }
+.toc a { color: var(--ink-2); text-decoration: none; }
+.toc a:hover { color: var(--accent-ink); text-decoration: underline; }
+
+section { padding-top: 52px; display: grid; gap: 18px; }
+section > .prose { display: grid; gap: 12px; }
+
+/* KPI row */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0; border-top: 2px solid var(--ink); }
+.kpi { padding: 14px 18px 16px 0; display: grid; gap: 2px; align-content: start; }
+.kpi + .kpi { padding-left: 18px; border-left: 1px solid var(--rule); }
+.kpi .label { font-size: 13px; color: var(--muted); }
+.kpi .value { font-size: 38px; font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; }
+.kpi .value small { font-size: 18px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
+.kpi .sub { font-size: 13px; color: var(--ink-2); }
+@media (max-width: 520px) { .kpi + .kpi { padding-left: 0; border-left: 0; border-top: 1px solid var(--rule); } }
+
+.findings { margin: 0; padding-left: 1.2em; display: grid; gap: 10px; max-width: 72ch; }
+.findings li::marker { color: var(--muted); }
+
+/* Figures */
+figure { margin: 0; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 20px; display: grid; gap: 14px; min-width: 0; }
+figcaption { font-size: 13px; color: var(--muted); line-height: 1.6; }
+.figtitle { font-size: 14px; font-weight: 600; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 11px; height: 11px; border-radius: 2px; display: inline-block; flex: none; }
+.glyph { font-family: var(--font-mono); font-size: 12px; }
+
+/* Composition bars */
+.comp { display: grid; gap: 10px; }
+.comp-row { display: grid; grid-template-columns: minmax(130px, 190px) 1fr minmax(170px, auto); gap: 12px; align-items: center; }
+.comp-row .name { font-size: 13.5px; line-height: 1.35; }
+.comp-row .name.sub { padding-left: 14px; color: var(--ink-2); }
+.comp-row .name .n { color: var(--muted); font-size: 12px; margin-left: 4px; }
+.bar { display: flex; gap: 2px; height: 18px; min-width: 0; }
+.bar .seg { height: 100%; border-radius: 0; min-width: 3px; cursor: default; transition: filter .15s; }
+.bar .seg:first-child { border-radius: 3px 0 0 3px; }
+.bar .seg:last-child { border-radius: 0 3px 3px 0; }
+.bar .seg:only-child { border-radius: 3px; }
+.bar .seg:hover, .bar .seg:focus-visible { filter: brightness(1.12) saturate(1.1); }
+.counts { font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.counts b { font-weight: 500; color: var(--ink); }
+@media (max-width: 640px) {
+  .comp-row { grid-template-columns: 1fr; gap: 4px; }
+  .comp-row .counts { white-space: normal; }
+}
+
+/* Site grid */
+.sitegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 22px; }
+.site { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--grid); }
+.site .sname { font-size: 13.5px; }
+.cells { display: flex; gap: 4px; }
+.cell { width: 26px; height: 26px; border-radius: 4px; display: grid; place-items: center; font-family: var(--font-mono); font-size: 13px; font-weight: 500; color: #16191c; border: 0; padding: 0; cursor: default; }
+.cell.v-env { color: var(--ink-2); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 4px; border-radius: 999px; font-size: 12.5px; background: var(--bg); border: 1px solid var(--rule); color: var(--ink); cursor: default; }
+.chip .dot { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-mono); font-size: 11px; color: #16191c; }
+.chip .dot.v-env { color: var(--ink-2); }
+.level { display: grid; gap: 8px; }
+.level-head { font-size: 13px; color: var(--muted); }
+
+.v-correct { background: var(--v-correct); }
+.v-partly { background: var(--v-partly); }
+.v-wrong { background: var(--v-wrong); }
+.v-unfinished { background: var(--v-unfinished); }
+.v-env { background: var(--v-env); }
+
+/* Cause bars */
+.causes { display: grid; gap: 22px; }
+.cause-group { display: grid; gap: 8px; }
+.cause-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 13.5px; font-weight: 600; border-bottom: 1px solid var(--rule); padding-bottom: 4px; }
+.cause-head span { font-weight: 400; color: var(--muted); font-size: 12.5px; }
+.cause-row { display: grid; grid-template-columns: minmax(150px, 230px) 1fr; gap: 12px; align-items: center; }
+.cause-row .clabel { font-size: 13.5px; line-height: 1.4; }
+.cause-row .clabel small { display: block; color: var(--muted); font-size: 12px; }
+.cbar { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cbar .fill { height: 14px; border-radius: 0 3px 3px 0; min-width: 3px; }
+.cbar .fill.agent { background: var(--accent); }
+.cbar .fill.env { background: var(--env-bar); }
+.cbar .val { flex: none; white-space: nowrap; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+@media (max-width: 560px) { .cause-row { grid-template-columns: 1fr; gap: 2px; } }
+
+/* Weakness blocks */
+.weaknesses { display: grid; gap: 0; }
+.weak { display: grid; grid-template-columns: 56px 1fr; gap: 6px 18px; padding: 22px 0; border-top: 1px solid var(--rule); }
+.weak:last-child { border-bottom: 1px solid var(--rule); }
+.weak .rank { font-family: var(--font-mono); font-size: 12px; color: var(--muted); padding-top: 3px; }
+.weak .rank b { display: block; font-size: 22px; font-weight: 500; color: var(--ink); font-family: var(--font-sans); line-height: 1.2; }
+.weak .body { display: grid; gap: 10px; min-width: 0; max-width: 76ch; }
+.weak ul { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; }
+.weak .why { color: var(--ink-2); }
+.tag { display: inline-block; font-family: var(--font-mono); font-size: 11.5px; padding: 1px 7px; border-radius: 3px; background: var(--code-bg); color: var(--ink-2); margin-right: 4px; }
+@media (max-width: 560px) { .weak { grid-template-columns: 1fr; } }
+
+/* Matrix */
+.matrix-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; }
+.matrix { font-size: 13.5px; min-width: 560px; }
+.matrix th, .matrix td { padding: 8px 10px; text-align: center; border-bottom: 1px solid var(--grid); }
+.matrix th { font-weight: 500; color: var(--muted); font-size: 12.5px; }
+.matrix th.rowh { text-align: left; color: var(--ink); font-size: 13.5px; }
+.matrix td { font-variant-numeric: tabular-nums; font-weight: 500; }
+.matrix td.zero { color: var(--muted); font-weight: 400; }
+.matrix td.flag { outline: 2px solid var(--v-wrong); outline-offset: -3px; border-radius: 4px; }
+.matrix td.under { outline: 2px dashed var(--accent); outline-offset: -3px; border-radius: 4px; }
+
+/* SVG charts */
+svg text { font-family: var(--font-sans); }
+.chart-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.multiples { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px 24px; }
+.mult { display: grid; gap: 4px; min-width: 0; }
+.mult .t { font-size: 13px; font-weight: 600; }
+.mult .s { font-size: 12px; color: var(--muted); }
+
+/* Generic data tables */
+.tbl-wrap { overflow-x: auto; }
+.tbl { font-size: 13px; }
+.tbl th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12.5px; padding: 8px 10px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+.tbl td { padding: 8px 10px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+.tbl td.r, .tbl th.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tbl tr.latest td { background: var(--accent-wash); }
+.prio { white-space: nowrap; display: inline-block; font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; padding: 1px 7px; border-radius: 3px; }
+.prio.p1 { background: var(--accent); color: #ffffff; }
+.prio.p2 { background: var(--accent-wash); color: var(--accent-ink); }
+.prio.p3 { background: var(--code-bg); color: var(--ink-2); }
+
+#changes td:nth-child(-n+2) { white-space: nowrap; }
+details summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
+details[open] summary { margin-bottom: 10px; }
+
+/* Appendix */
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fbtn { font: inherit; font-size: 13px; padding: 4px 11px; border-radius: 999px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink-2); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.fbtn[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.fbtn .sw { width: 9px; height: 9px; }
+.search { font: inherit; font-size: 13px; padding: 5px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); color: var(--ink); min-width: 0; width: 220px; max-width: 100%; }
+.runs { font-size: 13px; min-width: 860px; }
+.runs td .id { font-family: var(--font-mono); font-size: 12px; }
+.runs td .task { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 2px; max-width: 46ch; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.runs details .full { font-weight: 500; color: var(--ink); margin-bottom: 6px; }
+.runs td.note { max-width: 52ch; color: var(--ink-2); }
+.vpill { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.vpill .sw { width: 9px; height: 9px; border-radius: 50%; }
+.runs details { margin-top: 6px; }
+.runs details div { white-space: pre-wrap; font-size: 12.5px; color: var(--ink-2); background: var(--bg); border-radius: 4px; padding: 8px 10px; max-height: 260px; overflow: auto; }
+.shown { font-size: 12.5px; color: var(--muted); }
+
+/* Tooltip */
+#tip { position: fixed; z-index: 10; pointer-events: none; max-width: 340px; background: var(--ink); color: var(--bg); border-radius: 5px; padding: 8px 10px; font-size: 12.5px; line-height: 1.55; box-shadow: 0 4px 18px rgba(0,0,0,.18); opacity: 0; transform: translateY(2px); transition: opacity .12s, transform .12s; }
+#tip.on { opacity: 1; transform: none; }
+#tip .t1 { font-weight: 600; }
+#tip .t2 { opacity: .78; }
+footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--rule); font-size: 12.5px; color: var(--muted); display: grid; gap: 4px; }
+@media (prefers-reduced-motion: reduce) { #tip, .bar .seg { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <div class="eyebrow">Open Web Agent · 실사이트 벤치마크 보고서</div>
+  <h1>100개 작업 중 48개 정답</h1>
+  <p class="lede">2026년 10월 9일, main <code>0878dbe</code>로 WebVoyager 60개와 Online-Mind2Web 40개 작업을 한 번씩 실행했다. 에이전트가 스스로 ‘성공’이라고 보고한 것은 46건이다. trace를 하나씩 확인한 결과, 정답은 48건이었다. 답을 내지 못했거나 틀린 52건 가운데 27건은 사이트 차단이나 지역 차이 같은 환경 때문이었다. 나머지 25건은 에이전트가 판단하거나 조작하는 과정의 문제였다.</p>
+  <div class="runmeta">
+    <span><b>커밋</b> 0878dbe</span>
+    <span><b>모델</b> openai:gpt-6-luna · reasoning_effort none</span>
+    <span><b>한도</b> 30 steps · 300 s</span>
+    <span><b>브라우저</b> headless Chromium · 5개 병렬</span>
+    <span><b>위치</b> 한국 IP</span>
+    <span><b>실행</b> 2026-10-09 22:46–23:03 KST</span>
+    <span><b>추정 비용</b> $1.00</span>
+  </div>
+</header>
+
+<nav class="toc" aria-label="목차">
+  <a href="#summary">요약</a><a href="#outcomes">결과 분포</a><a href="#sites">사이트별</a><a href="#causes">실패 원인</a><a href="#weaknesses">약점</a><a href="#calibration">자가 평가</a><a href="#effort">스텝과 토큰</a><a href="#trend">이전 실행과 비교</a><a href="#environment">환경 요인</a><a href="#recommendations">개선 제안</a><a href="#method">방법과 한계</a><a href="#appendix">부록</a>
+</nav>
+
+<section id="summary" aria-labelledby="h-summary">
+  <h2 id="h-summary">요약</h2>
+  <div class="kpis">
+    <div class="kpi"><span class="label">검증된 정답</span><span class="value">48<small>/100</small></span><span class="sub">자가보고 성공 46 · 엄격 기준 38</span></div>
+    <div class="kpi"><span class="label">접근 가능한 작업의 정답률</span><span class="value">66%</span><span class="sub">환경 때문에 막힌 27건을 빼면 48/73</span></div>
+    <div class="kpi"><span class="label">‘성공’ 보고가 맞은 비율</span><span class="value">93%</span><span class="sub">succeeded 46건 중 43건이 정답</span></div>
+    <div class="kpi"><span class="label">기준 실행(22df4f2) 대비</span><span class="value">−23%<small> 스텝</small></span><span class="sub">툴 오류 119→37 · step_limit 25→9</span></div>
+  </div>
+  <ul class="findings">
+    <li><b>도달할 수 있는 작업은 대체로 맞힌다.</b> 정답 48건은 중앙값 6스텝, 26초에 끝났다. 정답이 고정된 golden 16개 중 13개를 맞혔다. 같은 기준으로 다시 채점한 이전 네 번의 실행은 10~12개였다.</li>
+    <li><b>실패의 절반 이상은 환경 탓이다.</b> 20개 사이트(23개 작업)가 시작 페이지부터 403·402·400 응답, 봇 확인 페이지, 빈 다운로드로 막혔다. Google은 21개 실행에서 <code>/sorry</code>로 막혔다. 한국 IP 때문에 16개 실행에서 원화 가격이나 한국어 페이지가 나왔다.</li>
+    <li><b>에이전트 쪽 실패는 몇 가지 패턴으로 모인다.</b> 두 페이지를 계속 오가는 루프, 사이트 검색 대신 URL을 추측하는 습관이 대표적이다. 그래프·막대처럼 화면에만 있는 정보를 읽지 못하고, 날짜 선택기 같은 위젯에서 막히고, 오늘 날짜를 몰라 추론이 틀렸다.</li>
+    <li><b>‘성공’ 보고는 믿을 만하지만 ‘부분’ 보고는 실제보다 낮다.</b> succeeded로 보고한 46건 중 43건이 맞았다. partial로 보고한 39건 중 5건은 사실 정답이었다.</li>
+    <li><b>효율은 크게 좋아졌지만 실패에 드는 비용은 여전히 크다.</b> 기준 실행보다 스텝은 23%, 입력 토큰은 22%, 툴 오류는 69% 줄었다. 그래도 입력 토큰의 65%는 정답이 아닌 실행에 쓰였다.</li>
+  </ul>
+</section>
+
+<section id="outcomes" aria-labelledby="h-outcomes">
+  <div class="prose">
+    <h2 id="h-outcomes">결과 분포</h2>
+    <p>검증 결과는 다섯 범주로 나눴다. <b>정답</b>은 작업 조건을 모두 만족하고 그 근거가 trace에 있는 답이다. <b>부분 정답</b>은 조건을 일부만 채운 답이고, <b>오답</b>은 틀린 사실을 답으로 낸 경우다. 답이 없으면 원인에 따라 <b>미완료</b>(에이전트 문제)와 <b>환경 차단</b>(사이트 차단, 지역 차이, 사이트 오류, 사라진 기능)으로 나눴다.</p>
+  </div>
+  <figure>
+    <div class="figtitle">출처와 난이도별 검증 결과 (각 막대는 100%)</div>
+    <div class="legend" id="verdict-legend"></div>
+    <div class="comp" id="composition"></div>
+    <figcaption>Online-Mind2Web의 easy 작업 정답률이 가장 낮다. 작업이 어려워서가 아니라 사이트가 막혀서다. easy 12개 중 6개는 사이트가 접근을 막았고, 3개는 탐색 전략에서 실패했다(URL 추측 2건, 빈 검색 결과 1건). 막히지 않은 작업만 보면 WebVoyager 34/49, Online-Mind2Web 14/24가 정답이다.</figcaption>
+  </figure>
+</section>
+
+<section id="sites" aria-labelledby="h-sites">
+  <div class="prose">
+    <h2 id="h-sites">사이트별 결과</h2>
+    <p>WebVoyager는 사이트마다 작업 4개, Online-Mind2Web은 작업마다 사이트가 하나다. 칸에 마우스를 올리면 작업과 검증 메모가 보인다.</p>
+  </div>
+  <figure>
+    <div class="figtitle">WebVoyager 15개 사이트 × 4개 작업</div>
+    <div class="legend" id="site-legend"></div>
+    <div class="sitegrid" id="wv-grid"></div>
+  </figure>
+  <figure>
+    <div class="figtitle">Online-Mind2Web 40개 작업 (난이도별)</div>
+    <div id="om-chips" style="display:grid;gap:16px"></div>
+    <figcaption>⊘ 표시가 붙은 회색 칩은 시작 사이트가 막힌 작업이다. 시작 사이트가 막혔는데도 다른 공식 출처로 정답을 낸 작업이 있다. nba.com 대신 ESPN, drugs.com 대신 DailyMed, adoptapet.com 대신 PetPlace를 썼다. 이 셋은 정답으로 세되 ‘대체 출처’로 표시했다.</figcaption>
+  </figure>
+</section>
+
+<section id="causes" aria-labelledby="h-causes">
+  <div class="prose">
+    <h2 id="h-causes">실패 원인</h2>
+    <p>정답이 아닌 52건마다 가장 직접적인 원인 하나를 골랐다. 환경 원인은 27건, 에이전트 원인은 25건이다. 막대에 마우스를 올리면 해당 작업 목록이 보인다.</p>
+  </div>
+  <figure>
+    <div class="causes" id="cause-chart"></div>
+    <figcaption>파란 막대는 에이전트가 고칠 수 있는 원인, 회색 막대는 환경 원인이다. ‘부분 정답’ 14건도 원인별로 포함했다. 그중 5건(Hugging Face 429, cars.com·Trader Joe’s·UPS 차단, Coursera의 사라진 필터)은 환경 원인이다.</figcaption>
+  </figure>
+</section>
+
+<section id="weaknesses" aria-labelledby="h-weak">
+  <div class="prose">
+    <h2 id="h-weak">약점 분석</h2>
+    <p>에이전트 원인 25건과 부분 정답, 그리고 정답이지만 스텝을 낭비한 실행을 함께 보면 약점이 일곱 가지로 모인다. 영향이 큰 순서로 정리했다. 각 항목의 작업 ID는 부록 표에서 찾을 수 있다.</p>
+  </div>
+  <div class="weaknesses">
+
+    <article class="weak">
+      <div class="rank">약점<b>1</b></div>
+      <div class="body">
+        <h3>두 페이지를 오가며 비교하다 스텝을 다 쓴다</h3>
+        <p>같은 두 URL이나 두 요소를 번갈아 여는 왕복이 이번 실행에서 가장 많은 스텝을 잡아먹었다. 왕복 끝에 <code>no_progress</code>로 멈춘 실행이 3건(<code>ESPN--21</code>, <code>BBC News--11</code>, <code>Apple--11</code>), 스텝 한도에 걸린 실행이 4건, 비교를 포기한 실행이 1건이다.</p>
+        <ul>
+          <li><code>wv-ESPN--21</code> recap과 boxscore를 9번 번갈아 열고 recap 본문은 읽지 않았다. 결국 <code>no_progress</code>로 멈췄다.</li>
+          <li><code>om2w-7072d0943697</code> 아멕스 카드 두 장의 텍스트를 <code>browser_get_text</code>로 8번 번갈아 읽었다. 최신 텍스트 하나만 컨텍스트에 남아서 앞에서 읽은 카드를 다시 읽어야 했다.</li>
+          <li><code>wv-BBC News--11</code> 순위표와 일정 페이지를 18번 오갔다. <code>om2w-dd44c665cec1</code>(SpotHero)는 주차장 두 곳의 상세를, <code>om2w-47e314cc452c</code>(recreation.gov)는 허가 페이지 두 개를 번갈아 열었다.</li>
+          <li><code>om2w-ef289e34a2f5</code>는 Specs·Fuel Economy 탭을 5번 오갔다. <code>wv-Coursera--17</code>은 필터 대화상자 열기·펼치기·닫기를 6번 되풀이했다. 정답을 낸 <code>om2w-b962927dfe03</code>도 답을 찾은 뒤 18스텝을 앨범 두 개 사이에서 썼다.</li>
+        </ul>
+        <p class="why">원인: 컨텍스트에는 최신 스냅샷과 최신 텍스트 하나만 남는다. 둘을 비교하려면 앞의 내용을 메모해야 한다. 프롬프트도 메모를 남기라고 하지만, 모델은 메모 대신 페이지를 다시 연다. <code>no_progress</code> 감지는 같은 페이지의 네 번째 반복에서야 멈추고, 상태가 조금씩 바뀌는 대화상자 순환은 아예 잡지 못한다.</p>
+        <p class="small muted"><span class="tag">#155 열림</span> 새 URL과 페이지 안 상태를 도는 루프 감지</p>
+      </div>
+    </article>
+
+    <article class="weak">
+      <div class="rank">약점<b>2</b></div>
+      <div class="body">
+        <h3>사이트의 검색과 목록 대신 URL을 추측한다</h3>
+        <p>모델은 URL이나 쿼리 파라미터를 지어내는 데서 시작하는 경우가 많다. 사이트가 그 파라미터를 무시하거나, 200 응답으로 빈 화면을 보여 주면 잘못된 길을 오래 간다.</p>
+        <ul>
+          <li><code>wv-ArXiv--26</code> arXiv가 지원하지 않는 카테고리·날짜 파라미터로 9번 이동했다. 정작 astro-ph.EP 목록 페이지는 열지 않았다.</li>
+          <li><code>om2w-662ae0f2d3ac</code> Wanderlog 경로 URL을 4번 추측했다. 모두 내용 없는 화면(<i>soft 404</i>)이었고, 사이트의 목적지 검색은 쓰지 않았다.</li>
+          <li><code>om2w-e7f6cca9a887</code> <code>tumblr.com/taylor-swift</code>를 추측했다가 404가 나자 7스텝 만에 포기했다. 실제 블로그 주소는 <code>taylorswift</code>다.</li>
+          <li><code>wv-Amazon--17</code>은 <code>currency</code>·<code>delivery-country</code> 파라미터를 7번 지어냈다. <code>wv-Coursera--3</code>은 동작하지 않는 <code>sortBy=NEWEST</code>로 바꾼 뒤 정렬되지 않은 결과를 답했다.</li>
+          <li><code>om2w-c801d1c951f5</code> Google이 막히자 2023 VR Game of the Year를 확인하지 않고 The Light Brigade로 추측했다. 실제 수상작은 Labyrinthine이다. Steam 안의 수상작 페이지는 쓰지 않았다.</li>
+        </ul>
+        <p class="why">원인: 시스템 프롬프트의 “URL을 알면 직접 이동하라”는 문장이 추측을 부추긴다. #150으로 4xx 뒤 추측은 줄었다. 하지만 200 응답에 내용이 빈 페이지는 오류로 인식되지 않는다.</p>
+      </div>
+    </article>
+
+    <article class="weak">
+      <div class="rank">약점<b>3</b></div>
+      <div class="body">
+        <h3>화면에만 있는 정보와 잘린 스냅샷을 읽지 못한다</h3>
+        <p>가격 그래프나 특성 막대처럼 값이 접근성 트리에 없는 정보는 스크린샷 없이는 읽을 수 없다. 그런데 스크린샷은 100건 중 2건에서만 찍었고, 두 건 모두 이미 정답을 낸 작업이었다.</p>
+        <ul>
+          <li><code>wv-Google Flights--8</code> 두 달 가격 그래프를 분석해야 했는데 축 범위(₩0–300,000)만 읽고 스텝 한도에 걸렸다.</li>
+          <li><code>om2w-eb2db4b769c1</code> AKC의 ‘짖음 정도’는 막대로만 표시된다. 그래서 ‘보통’인지 확인하지 못했다.</li>
+          <li><code>wv-ESPN--27</code> ‘See all’을 누른 뒤에도 바뀌기 전의 상위 결과 5개만 읽고, ‘Golden’이 들어간 팀이 5개라고 답했다. 전체 팀 검색에는 25개 항목(14개 팀)이 있다.</li>
+          <li><code>wv-Amazon--12</code> 리뷰가 40,000자 스냅샷 자르기 뒤에 있었다. <code>browser_get_text</code>를 한 번도 쓰지 않고 화면 밖 skip 링크만 세 번 눌렀다.</li>
+        </ul>
+        <p class="why">맥락: 스냅샷 987개 중 423개(43%)가 잘렸다. 이전 실행(29~37%)보다 높다. #172가 페이지 로딩이 끝날 때까지 기다리면서 스냅샷이 더 커진 영향으로 보인다.</p>
+      </div>
+    </article>
+
+    <article class="weak">
+      <div class="rank">약점<b>4</b></div>
+      <div class="body">
+        <h3>날짜 선택기와 복합 입력 위젯</h3>
+        <p>Booking 작업 4개 중 3개가 달력과 인원 선택에서 실패했다. 한국어 Booking 페이지에서 달력을 클릭하다 12/31, 12/2처럼 엉뚱한 날짜를 고르거나, 인원·객실 수를 바꾸지 못한 채 30스텝 한도에 걸렸다.</p>
+        <ul>
+          <li><code>wv-Booking--1</code> 3박이어야 할 일정이 1/1–6(5박)이 됐다. 정렬 버튼을 누른 뒤에는 ‘페이지를 찾을 수 없음’이 떴다.</li>
+          <li><code>wv-Booking--2</code>·<code>wv-Booking--3</code> 날짜를 넣는 데 스텝 대부분을 썼다. 인원·객실 설정은 끝내 반영되지 않았다.</li>
+          <li><code>om2w-50d91eabde54</code> BabyCenter 계산기에 측정일을 입력했지만 반영되지 않았다. 아기 나이가 10개월로 계산됐다.</li>
+        </ul>
+        <p class="why">에이전트는 같은 달력을 계속 클릭할 뿐, 입력창에 날짜를 직접 치거나 현재 URL에 보이는 날짜 파라미터를 고치는 우회는 시도하지 않았다. 반대로 같은 조건의 Airbnb(<code>om2w-e43cbc8a0bf9</code>)와 SpotHero 날짜 설정은 성공했다.</p>
+      </div>
+    </article>
+
+    <article class="weak">
+      <div class="rank">약점<b>5</b></div>
+      <div class="body">
+        <h3>추론 오류: 오늘 날짜를 모르고, 찾은 근거를 버린다</h3>
+        <ul>
+          <li><code>wv-Google Search--38</code> 2026년 10월 9일에 실행했는데 이미 지난 2026년 8월 12일 일식을 ‘다음 일식’으로 답했다. 직접 읽은 NASA 표에는 다음 일식이 2029년 1월 14일로 나와 있었다. 시스템 프롬프트 어디에도 오늘 날짜가 없다.</li>
+          <li><code>wv-Wolfram Alpha--45</code> 5스텝에서 Wolfram|Alpha의 대사량 표(2,741 kJ, 지방 0.085 kg)를 봤지만 버렸다. 그 뒤 직접 물리 계산을 해서 golden과 다른 답을 냈다. 작업 문장을 그대로 입력해 보지도 않았다.</li>
+          <li><code>wv-Apple--11</code> iPad 모델을 비교하지 않고 iPad(A16)를 ‘최신 모델’이라고 답했다. <code>wv-BBC News--17</code>은 기사 하나를 ‘전쟁 섹션’으로 셌다(작업 자체도 모호하다).</li>
+        </ul>
+        <p class="why">네 건 중 Wolfram과 iPad 건은 partial로, 일식과 BBC 건은 succeeded로 보고했다. 날짜 문제는 프롬프트 한 줄로 고칠 수 있다. ‘지난주’, ‘지난 3일’, ‘다음 주 월요일’처럼 상대 날짜가 들어간 작업이 9건이다.</p>
+      </div>
+    </article>
+
+    <article class="weak">
+      <div class="rank">약점<b>6</b></div>
+      <div class="body">
+        <h3>페이지 상태를 잘못 읽는다: 빈 대화상자, 렌더링 전 결과, 거대한 페이지</h3>
+        <ul>
+          <li><code>om2w-9ed3827266b3</code> Chase 계산기 페이지에 내용 없는 dialog가 두 개 있었다. 스냅샷이 이를 ‘먼저 표시’하면서 “뒤 페이지는 클릭을 받지 않을 수 있다”고 알렸다. 모델은 Escape만 다섯 번 누르다 <code>no_progress</code>로 끝났다. 아마존 실행 4건의 스냅샷 맨 위에도 빈 nav-flyout dialog가 있었다.</li>
+          <li><code>om2w-461ab9b0c7b2</code> NYSE 사이트 검색 결과 영역(<code>main</code>)이 두 번 모두 빈 채로 스냅샷이 찍혔다. ‘페이지가 아직 바뀌는 중’이라는 표시도 없었다. 모델은 결과가 없다고 판단하고 URL 추측과 푸터 링크 클릭으로 넘어갔다.</li>
+          <li><code>om2w-27fa3ac20745</code> Stanford 시간표처럼 거대한 페이지에서 <code>ariaSnapshot</code>과 <code>innerText</code>가 10초 안에 끝나지 않았다. 이 타임아웃이 세 번 이어져 <code>tool_failures</code>로 종료됐다.</li>
+        </ul>
+        <p class="small muted"><span class="tag">#156 열림</span> 빈 대화상자를 dialog-first 스냅샷에서 빼기</p>
+      </div>
+    </article>
+
+    <article class="weak">
+      <div class="rank">약점<b>7</b></div>
+      <div class="body">
+        <h3>일시적 오류를 영구 차단으로 다룬다</h3>
+        <ul>
+          <li>Hugging Face 작업 3건이 HTTP 429를 받았다. 프롬프트는 401·402·403·429를 받으면 그 사이트를 다시 시도하지 말라고 한다. 그래서 <code>wv-Huggingface--4</code>는 6스텝 만에 포기했다. 이번을 포함한 다섯 번의 실행 중 429가 나온 것은 두 번뿐이었다. 429는 잠시 기다리면 풀리는 속도 제한이다.</li>
+          <li><code>wv-Google Flights--6</code> 검색 직후 ‘No results returned’가 보이자 13스텝을 남긴 채 바로 답했다. 반대로 UPS는 모든 URL이 <code>application/blank</code> 다운로드로 돌아오는 확실한 차단이었다. 그런데도 6번이나 다시 시도했다(<code>om2w-92160852a6bb</code>).</li>
+        </ul>
+        <p class="why">차단 규칙이 HTTP 상태 코드에만 맞춰져 있다. 그래서 일시적인 429는 너무 일찍 포기하고, 상태 코드 없이 다운로드로 오는 차단은 계속 다시 시도한다.</p>
+      </div>
+    </article>
+
+  </div>
+  <p class="small muted measure">이 밖에 사소한 문제: 한국어 Booking 페이지를 본 뒤 영어 작업에 한국어로 답했다(<code>wv-Booking--43</code>). 스텝 한도에서 낸 최선 답변에 outcome 줄이 빠진 경우가 1건 남았다(<code>om2w-dd44c665cec1</code>, #167 이후). 아멕스 비교 체크박스는 label이 클릭을 가로챘지만, 요소가 화면 밖에 있고 불안정해서 #152의 label 우회가 동작하지 않았다.</p>
+</section>
+
+<section id="calibration" aria-labelledby="h-cal">
+  <div class="prose">
+    <h2 id="h-cal">자가 평가는 믿을 만한가</h2>
+    <p>에이전트는 답 끝에 <code>succeeded</code>·<code>partial</code>·<code>blocked</code> 중 하나로 스스로 평가한다. 행은 이 자가 평가이고, 열은 검증 결과다.</p>
+  </div>
+  <figure>
+    <div class="matrix-wrap"><table class="matrix" id="matrix"></table></div>
+    <figcaption>빨간 테두리는 succeeded로 보고했지만 틀린 3건이다(<code>wv-BBC News--17</code>, <code>wv-Google Search--38</code>, <code>wv-ESPN--27</code>). 파란 점선은 partial로 보고했지만 정답인 5건이다. 원화 가격만 보였거나(<code>wv-Amazon--34</code>), 시작 사이트가 막혀 다른 출처를 썼거나(Cambridge, Hugging Face, drugs.com), 사이트의 비교 도구를 열지 못해서(Amex) 낮게 보고했다. 틀린 답 4건은 partial로 낮춰 보고해서 사용자에게 의심할 신호를 줬다. 옵트인 판정 모델(#173)은 이번 실행에서 쓰지 않았다. 잘못된 succeeded가 3건이라 판정 모델로 얻을 수 있는 몫은 크지 않다.</figcaption>
+  </figure>
+</section>
+
+<section id="effort" aria-labelledby="h-effort">
+  <div class="prose">
+    <h2 id="h-effort">스텝과 토큰은 어디에 쓰이나</h2>
+    <p>정답 실행은 대부분 짧다. 실패한 실행은 스텝 한도 근처까지 간다. 점 하나가 실행 하나이고, 세로 막대는 중앙값이다.</p>
+  </div>
+  <figure>
+    <div class="figtitle">검증 결과별 실행 스텝 수 (최대 30)</div>
+    <div id="strip"></div>
+    <figcaption>정답 48건이 쓴 입력 토큰은 전체 12.1M 중 4.2M(35%)이다. 부분 정답 3.1M, 미완료 2.1M, 오답 1.2M, 환경 차단 1.5M으로, 나머지 65%는 정답이 아닌 실행에 쓰였다. 정답 하나당 비용은 약 $0.021, 전체는 $1.00이다(입력 $0.10/M, 캐시 입력 $0.01/M, 출력 $0.50/M 기준).</figcaption>
+  </figure>
+</section>
+
+<section id="trend" aria-labelledby="h-trend">
+  <div class="prose">
+    <h2 id="h-trend">이전 실행과 비교</h2>
+    <p>같은 100개 작업을 같은 모델과 설정으로 다섯 번 돌렸다. 이번 실행의 숫자는 파란색이다. 4885c4a와 621ae1d는 코드가 같다. 두 실행에서 자가보고 성공이 47건과 52건으로 갈렸으니, 이 정도 차이는 한 번 실행할 때 생기는 잡음이다.</p>
+  </div>
+  <figure>
+    <div class="multiples" id="multiples"></div>
+    <details>
+      <summary>표로 보기</summary>
+      <div class="tbl-wrap"><table class="tbl" id="trend-table"></table></div>
+    </details>
+    <figcaption>golden 정답 수는 이 보고서를 쓰며 다섯 번의 실행을 같은 규칙으로 다시 채점한 값이다(시간에 따라 바뀌는 사실은 현재 사이트 기준). 자가보고 성공 수는 46~52 사이에서 움직이며 뚜렷한 추세가 없다. 반면 스텝, 툴 오류, step_limit 종료는 꾸준히 줄었다. 검색 결과 페이지를 연 횟수도 91회에서 46회로 줄었는데, 막힌 사이트를 우회 검색하는 루프를 끊는 #169와 맞아떨어진다.</figcaption>
+  </figure>
+  <div class="tbl-wrap">
+    <table class="tbl" id="changes">
+      <thead><tr><th>실행</th><th>날짜</th><th>그 사이에 들어간 변경</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">22df4f2</td><td>10-04</td><td>기준 실행</td></tr>
+        <tr><td class="mono">a502c7f</td><td>10-05</td><td>#140–#146: <code>get_text</code> offset, 실패 이유 보존, 중단 시 최선 답변, 재방문 감지, null 인자, HTTP 상태 표시, stale ref 즉시 실패</td></tr>
+        <tr><td class="mono">4885c4a</td><td>10-05</td><td>#150 4xx 뒤 재시도·URL 추측 중단, #151 잘린 스냅샷에 열린 대화상자 유지</td></tr>
+        <tr><td class="mono">621ae1d</td><td>10-06</td><td>문서만 변경(코드는 4885c4a와 같음)</td></tr>
+        <tr class="latest"><td class="mono">0878dbe</td><td>10-09</td><td>#152 label 우회 클릭, #167 스텝 한도 outcome 요청, #168 캐시 토큰 기록, #169 차단 후 검색 루프 중단, #172 페이지가 안정된 뒤 스냅샷. #173 판정 모델은 옵트인이라 이번 실행에서는 쓰지 않음</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="environment" aria-labelledby="h-env">
+  <div class="prose">
+    <h2 id="h-env">환경 요인</h2>
+    <p>이번 실행은 한국 IP의 headless Chromium에서 돌았다. 결과의 상당 부분은 에이전트가 아니라 이 환경이 정했다.</p>
+  </div>
+  <figure>
+    <div class="figtitle">시작 사이트부터 막힌 작업 23건</div>
+    <div class="chips" id="blocked-chips"></div>
+    <figcaption>칩 색은 그 작업의 검증 결과다. 3건은 다른 출처로 정답을 냈고, 3건은 부분 정답이다. Akamai·Cloudflare 계열 403이 가장 많았다. Allrecipes는 402, phys.org는 400, UPS는 모든 URL을 <code>application/blank</code> 다운로드로 돌려줬다. Healthgrades는 “이 지역에서 이용할 수 없음”이라고 했고, Uniqlo는 <code>/kr/ko/</code>로 이동시킨 뒤 막았다.</figcaption>
+  </figure>
+  <div class="prose">
+    <ul class="findings">
+      <li><b>Google 검색 차단.</b> 21개 실행이 <code>google.com/sorry</code>를 만났다. 그중 4건은 Bing·위키백과나 다른 사이트로 넘어가 정답을 냈다. 시작 사이트가 막힌 뒤 다른 출처로 정답을 낸 실행은 모두 7건이다.</li>
+      <li><b>지역 차이.</b> 16개 실행에서 원화 가격(Amazon, Google Flights, Airbnb)이나 한국어 페이지(Booking <code>index.ko.html</code>, Google 지도, Bing)가 나왔고, Healthgrades와 Uniqlo는 지역을 이유로 막았다. Amazon에서는 한국으로 배송되지 않는 상품의 가격이 숨겨져 최저가 비교가 불가능했다(<code>wv-Amazon--8</code>). 벤치마크 arm에 <code>--locale</code>(#122)을 지정하지 않았다.</li>
+      <li><b>속도 제한.</b> Hugging Face 429는 3건, Brave 검색 429는 1건이다. 5개를 병렬로 같은 IP에서 돌리면 같은 사이트 작업이 동시에 몰린다. WebVoyager 작업이 사이트별로 4개씩 연달아 있기 때문이다.</li>
+      <li><b>바뀐 웹.</b> 정답 48건 중 11건은 2023년 데이터셋의 참고 답과 값이 다르다. 사이트 내용이 바뀌었기 때문이다(애니메이션 흥행 순위, HomePod 색상, 보상 판매가 등). 참고 답과 글자 그대로 비교하면 정답 수가 크게 줄어든다. Coursera의 ‘Credit Eligible’ 필터는 아예 사라졌다.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="recommendations" aria-labelledby="h-rec">
+  <div class="prose">
+    <h2 id="h-rec">개선 제안</h2>
+    <p>근거가 된 실행 수와 고치는 비용을 함께 보고 우선순위를 매겼다. 프롬프트나 에이전트 동작을 바꾸는 항목은 CLAUDE.md에 따라 실제 모델로 A/B 실행해 효과를 확인한 뒤 남긴다.</p>
+  </div>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>순위</th><th>제안</th><th>근거</th><th>범위</th></tr></thead>
+      <tbody>
+        <tr><td><span class="prio p1">P1</span></td><td>시스템 프롬프트에 오늘 날짜와 시간대를 넣는다.</td><td><code>Search--38</code> 지난 일식. 상대 날짜가 들어간 작업 9건</td><td><code>src/agent.ts</code> 한 줄</td></tr>
+        <tr><td><span class="prio p1">P1</span></td><td>A↔B 왕복을 감지하면 비교 메모를 쓰라고 알리거나, 텍스트 본문을 둘까지 유지한다.</td><td>왕복으로 실패한 실행 8건, 정답 실행의 낭비 스텝</td><td>#155</td></tr>
+        <tr><td><span class="prio p1">P1</span></td><td>내용 없는 dialog를 dialog-first 목록에서 뺀다.</td><td>Chase Escape 루프, Amazon 4건의 빈 nav-flyout</td><td>#156</td></tr>
+        <tr><td><span class="prio p2">P2</span></td><td>값이 접근성 트리에 없을 때(차트, 막대, canvas) 스크린샷을 보라고 안내한다.</td><td><code>Flights--8</code>, AKC. 스크린샷 사용 2/100</td><td>프롬프트·도구 설명</td></tr>
+        <tr><td><span class="prio p2">P2</span></td><td>200 응답이지만 본문이 거의 빈 페이지를 ‘찾을 수 없음’으로 알리고, URL 추측보다 사이트 검색을 권한다.</td><td>Wanderlog 4회, arXiv 9회, Tumblr, Amazon 7회</td><td>#150 확장</td></tr>
+        <tr><td><span class="prio p2">P2</span></td><td>429는 일시적 제한으로 보고, 한 번 기다린 뒤 다시 시도한다. 다운로드로 오는 차단은 403처럼 다룬다.</td><td>Hugging Face 3건, UPS 6회 재시도</td><td>프롬프트 차단 규칙</td></tr>
+        <tr><td><span class="prio p2">P2</span></td><td>같은 위젯을 여러 번 클릭해도 값이 안 바뀌면, 입력창에 직접 치거나 URL의 날짜 파라미터를 고쳐 보라고 알린다.</td><td>Booking 3/4, BabyCenter</td><td>일반 힌트, 사이트별 규칙은 넣지 않음</td></tr>
+        <tr><td><span class="prio p3">P3</span></td><td>답은 페이지가 아니라 작업의 언어로 쓴다.</td><td><code>Booking--43</code> 한국어 답</td><td>프롬프트 한 줄</td></tr>
+        <tr><td><span class="prio p3">P3</span></td><td>스냅샷이 타임아웃되는 거대한 페이지에서는 <code>get_text</code>나 일부만 담은 스냅샷으로 대신한다.</td><td>Stanford <code>tool_failures</code></td><td><code>src/browser.ts</code></td></tr>
+        <tr><td><span class="prio p3">P3</span></td><td>스텝 한도에서 낸 최선 답변에도 outcome 줄이 꼭 들어가게 한다.</td><td>SpotHero <code>unknown</code></td><td>#167 후속</td></tr>
+        <tr><td><span class="prio p3">P3</span></td><td>벤치마크에 <code>--locale en-US</code> arm을 추가하고, 가능하면 미국 IP에서도 한 번 돌려 환경 요인을 분리한다. 같은 사이트 작업이 동시에 몰리지 않게 실행 순서를 섞는다.</td><td>원화·한국어 페이지 16건, 지역 차단 2건, 시작 사이트 차단 23건, 429</td><td>벤치마크 설정만 변경</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="method" aria-labelledby="h-method">
+  <div class="prose">
+    <h2 id="h-method">방법과 한계</h2>
+    <ul class="findings">
+      <li><b>실행.</b> <code>.worktrees/bench-0878dbe</code>에 main을 고정했다. 실행 전에 <code>bun run typecheck</code>와 <code>bun run test</code>(273/273, 220.6초)를 통과시켰다. <code>bun run bench</code>로 100개 작업을 한 번씩 돌렸다. 모델 ID는 OpenAI <code>/v1/models</code>에서 최신 Luna가 여전히 <code>gpt-6-luna</code>인지 확인했다.</li>
+      <li><b>검증.</b> 100개 trace를 하나씩 읽었다. 답이 작업 조건을 모두 만족하는지, 답의 숫자와 이름이 스냅샷·텍스트 관찰에 실제로 있는지 확인했다. golden 작업은 참고 답과 비교했다. 시간에 따라 바뀌는 사실은 2023년 참고 답이 아니라 실행 당시 사이트가 보여 준 값을 기준으로 삼았다. 2023 Steam Awards 수상작 하나만 웹 검색으로 따로 확인했다.</li>
+      <li><b>너그러운 판정과 엄격한 판정.</b> 시작 사이트가 막혀 다른 공식 출처로 맞힌 6건, 조건은 채웠지만 답이 최소한인 4건도 정답으로 셌다. 둘 다 빼는 엄격한 기준으로는 정답이 38건이다.</li>
+      <li><b>정정(2026-10-10).</b> 처음 보고서에서는 <code>wv-ESPN--27</code>을 정답(‘Golden’ 팀 5개)으로 셌다. 판정 모델 A/B를 돌리면서, ESPN 전체 팀 검색에는 25개 항목(14개 팀)이 있고 5개는 상위 결과만 본 숫자임을 확인했다. 그래서 오답으로 바로잡았다(정답 49→48, golden 14→13).</li>
+      <li><b>원인 분류.</b> 정답이 아닌 실행마다 가장 직접적인 원인 하나만 골랐다. 루프나 지역 차이처럼 여러 요인이 겹친 경우가 많아서, 원인별 건수는 대략적인 크기로 읽어야 한다.</li>
+      <li><b>한계.</b> 작업마다 한 번만 실행했다. 같은 코드에서도 자가보고 성공 수가 ±5쯤 흔들린다. 검증은 한 사람이 했다. 모호한 작업(<code>BBC News--17</code>)과 너그럽게 판정한 4건에는 주관이 들어간다. 한국 IP라는 조건 때문에 미국에서 돌린 결과와 직접 비교할 수 없다.</li>
+    </ul>
+  </div>
+  <pre>cd .worktrees/bench-0878dbe
+bun run bench --tasks ~/workspace/owa-bench/2026-10-09/tasks.json \
+  --arms ~/workspace/owa-bench/2026-10-09/arms.json \
+  --out ~/workspace/owa-bench/2026-10-09/out --runs 1 --parallel 5</pre>
+  <p class="small muted measure">작업 목록, 실행별 trace, 검증 기록(<code>verdicts.jsonl</code>), 분석 스크립트는 저장소 밖 <code>~/workspace/owa-bench/2026-10-09/</code>에 있다. WebVoyager와 Online-Mind2Web 작업은 라이선스 확인 전이라 저장소에 넣지 않는다.</p>
+</section>
+
+<section id="appendix" aria-labelledby="h-app">
+  <div class="prose">
+    <h2 id="h-app">부록: 작업별 결과</h2>
+    <p>100개 실행 전체다. 범주로 거르거나 사이트·ID·메모로 검색할 수 있다. ‘작업과 답변’을 펼치면 작업 전문과 에이전트가 낸 최종 답을 볼 수 있다.</p>
+  </div>
+  <div class="filters" role="group" aria-label="검증 결과로 거르기">
+    <div id="filter-buttons" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+    <label class="sr" for="run-search" style="position:absolute;left:-9999px">검색</label>
+    <input id="run-search" class="search" type="search" placeholder="사이트, ID, 메모 검색" autocomplete="off">
+    <span class="shown" id="shown"></span>
+  </div>
+  <div class="tbl-wrap">
+    <table class="tbl runs" id="runs">
+      <thead><tr><th>작업</th><th>검증</th><th>자가보고</th><th>종료</th><th class="r">스텝</th><th class="r">시간</th><th class="r">입력 토큰</th><th>원인</th><th>검증 메모</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <span>Open Web Agent 실사이트 벤치마크 · 2026-10-09 실행 · main 0878dbe · gpt-6-luna (reasoning_effort none)</span>
+  <span>자가보고 결과는 <code>out/summary.md</code>와 같다. 검증 결과와 원인 분류는 이 보고서를 쓰며 trace를 직접 읽어 정했다.</span>
+</footer>
+
+</div>
+<div id="tip" role="tooltip" aria-hidden="true"></div>
+
+<script type="application/json" id="report-data">{"rows":[{"id":"wv-Allrecipes--11","source":"WebVoyager","site":"Allrecipes","group":"possible","task":"Discover a suitable chocolate cupcake recipe on Allrecipes that has a preparation time of under 1 hour and at least 100 user reviews. Start at https://www.allrecipes.com/.","claimed":"blocked","stop":"final_answer","steps":6,"sec":36.4,"tok":17439,"verdict":"none","cause":"env_block","note":"Allrecipes가 HTTP 402, Google은 /sorry. Bing·DuckDuckGo 결과에는 레시피 정보가 없어 6스텝에서 멈춤","answer":"Allrecipes blocked the request with HTTP 402, and the available search engines presented access challenges, so I couldn’t verify a recipe’s prep time and review count. I’m unable to recommend a suitable recipe based on the information I could access.","start_blocked":true,"block":"402"},{"id":"wv-Allrecipes--3","source":"WebVoyager","site":"Allrecipes","group":"golden","task":"Locate a recipe for vegan chocolate chip cookies with over 60 reviews and a rating of at least 4.5 stars on Allrecipes. Start at https://www.allrecipes.com/.","claimed":"partial","stop":"final_answer","steps":5,"sec":32.0,"tok":23028,"verdict":"none","cause":"env_block","note":"Allrecipes HTTP 402, Google /sorry. blocked 대신 partial로 보고","answer":"I couldn’t verify a matching recipe because Allrecipes returned HTTP 402, and the search results available here didn’t provide relevant recipe details. The recipe’s title, rating, and review count remain unconfirmed.","start_blocked":true,"block":"402"},{"id":"wv-Allrecipes--19","source":"WebVoyager","site":"Allrecipes","group":"possible","task":"Find a vegan lasagna recipe on Allrecipes that requires 10 ingredients or less and has feedback of more than 200 reviews. Provide a brief overview of the ingredient list and the total prep and cook time. Start at https://www.allrecipes.com/.","claimed":"blocked","stop":"final_answer","steps":5,"sec":42.2,"tok":20177,"verdict":"none","cause":"env_block","note":"Allrecipes HTTP 402, Google /sorry","answer":"I couldn’t verify a qualifying recipe because Allrecipes returned an HTTP 402 access error, and the search alternatives available here were blocked by bot checks. I can’t reliably confirm the recipe’s review count, ingredient count, or prep and cook times.","start_blocked":true,"block":"402"},{"id":"wv-Allrecipes--25","source":"WebVoyager","site":"Allrecipes","group":"possible","task":"Find a popular quinoa salad recipe on Allrecipes with more than 500 reviews and a rating above 4 stars. Create a shopping list of ingredients for this recipe and include the total cooking and preparation time. Start at https://www.allrecipes.com/.","claimed":"blocked","stop":"final_answer","steps":7,"sec":45.0,"tok":37613,"verdict":"none","cause":"env_block","note":"Allrecipes HTTP 402, Google /sorry. 검색 결과 페이지 4개를 본 뒤 멈춤","answer":"I couldn’t complete the shopping list reliably. Allrecipes returned HTTP 402 when opened, and the available search results did not surface a verifiable recipe page, so I can’t confirm a recipe’s review count, rating, ingredients, or preparation and cooking times.","start_blocked":true,"block":"402"},{"id":"wv-Amazon--17","source":"WebVoyager","site":"Amazon","group":"possible","task":"Show me the list of baby products that are on sale and under 10 dollars on Amazon. Provide at least 2 on sale products Start at https://www.amazon.com/.","claimed":"partial","stop":"final_answer","steps":28,"sec":121.9,"tok":550944,"verdict":"none","cause":"env_geo","note":"세일 필터 결과가 원화로 표시됨. 존재하지 않는 currency·delivery-country URL 파라미터를 7번 시도하고 USD 전환도 시도. 빈 nav-flyout 대화상자가 먼저 표시됨. 28스텝 뒤 세일 표시가 없는 $9.99 상품 하나만 제시","answer":"I couldn’t verify two **on-sale** products under $10 on Amazon. The results page showed some items below $10, but it displayed prices in Korean won and didn’t clearly confirm sale pricing. I could verify one under-$10 item on a product page:\n\n- [Baby Montessori Sensory Teething Toy (Blue)](https://www.amazon.com/Baby-Toys-Teethers-Infants/dp/B0CD42KQ3K?currency=USD) — **$9.99**. The page showed that price, but no clear sale or discount label.\n\nSo I can’t confidently provide the requested list of at least two sale products.","start_blocked":false,"block":""},{"id":"wv-Amazon--34","source":"WebVoyager","site":"Amazon","group":"possible","task":"Find a beginner's acrylic paint set on Amazon, with at least 24 colors, suitable for canvas painting, and priced under $40. Start at https://www.amazon.com/.","claimed":"partial","stop":"final_answer","steps":6,"sec":25.9,"tok":70159,"verdict":"correct","cause":"","note":"Artkey 24색 캔버스용 초보자 세트, KRW 25,488(약 $18). 원화 가격만 보여서 partial로 보고","answer":"**Artkey Acrylic Paint Set, 24 Colors** — a good match for beginner canvas painting.\n\n- **24 assorted colors**, in 2 fl oz bottles\n- The product description says it’s suitable for **canvas** and is intended for **beginners** as well as other artists\n- **Non-toxic**, water-based acrylic paint\n- Listed at **KRW 25,488** on the page. Amazon was displaying prices in Korean won for the current delivery location, so I couldn’t verify the U.S.-dollar price from this listing.\n\n[View the Artkey set on Amazon](https://www.amazon.com/Artkey-Acrylic-Paint-Set-Professional/dp/B09TWQD5ZL)","start_blocked":false,"block":""},{"id":"wv-Amazon--12","source":"WebVoyager","site":"Amazon","group":"possible","task":"Check reviews for a Ride On Car with 100+ reviews & 4+ stars rating on Amazon. Give me the top review about this Ride On Car. Start at https://www.amazon.com/.","claimed":"partial","stop":"final_answer","steps":15,"sec":84.1,"tok":188431,"verdict":"none","cause":"extraction","note":"Step2 Whisper Ride II를 찾음. 리뷰 전용 페이지는 로그인 필요. 상품 페이지 리뷰는 40k 스냅샷 자르기 뒤에 있었는데 get_text를 쓰지 않음. 화면 밖 skip 링크 클릭 3번 실패","answer":"I found the Step2 Whisper Ride II Kids Push Car, but Amazon redirected the review page to sign-in, so I couldn’t verify the review count, star rating, or identify its top review. I can’t reliably provide a qualifying review from the information available.","start_blocked":false,"block":""},{"id":"wv-Amazon--8","source":"WebVoyager","site":"Amazon","group":"possible","task":"Find the cheapest Samsung-made Android tablet with screen between 10-10.9 inches on Amazon. Only answer the cheapest one. Start at https://www.amazon.com/.","claimed":"partial","stop":"final_answer","steps":16,"sec":73.2,"tok":278664,"verdict":"none","cause":"env_geo","note":"가격순 정렬 결과에 크기가 섞임. 한국으로 배송되지 않는 상품은 가격이 숨겨져 10–10.9인치 최저가를 비교할 수 없었음. 미국 배송 ZIP으로 바꾸는 시도는 없음. 30스텝 중 16스텝에서 멈춤","answer":"I couldn’t reliably identify the cheapest eligible tablet: Amazon’s low-to-high results included out-of-range screen sizes and didn’t show prices for the 10.1-inch listings in the results. The lowest-priced eligible option therefore remains unconfirmed.","start_blocked":false,"block":""},{"id":"wv-Apple--32","source":"WebVoyager","site":"Apple","group":"possible","task":"Investigate the trade-in value for an iPhone 11 Pro Max on Apple's website. Start at https://www.apple.com/.","claimed":"succeeded","stop":"final_answer","steps":4,"sec":16.9,"tok":34856,"verdict":"correct","cause":"","note":"보상 판매 표의 'iPhone 11 Pro Max Up to $140' 행(정답의 $270은 2023년 값)","answer":"Apple lists the **iPhone 11 Pro Max** trade-in value as **up to $140**. The final value can vary based on the device’s condition, year, and configuration, and is confirmed after Apple receives and checks the device. Source: [Apple Trade In](https://www.apple.com/shop/trade-in).","start_blocked":false,"block":""},{"id":"wv-Apple--11","source":"WebVoyager","site":"Apple","group":"possible","task":"Get information about the latest iPad model released by Apple, including its release date, base storage capacity, and starting price available on Apple's official website. Start at https://www.apple.com/.","claimed":"partial","stop":"no_progress","steps":13,"sec":40.6,"tok":132030,"verdict":"wrong","cause":"reasoning","note":"모델을 비교하지 않고 iPad(A16)를 최신 모델로 지목(iPad Pro·Air가 더 최신). 출시일도 찾지 못함. /ipad-11/을 5번 열어 no_progress","answer":"Apple’s iPad page identifies the latest model I could confirm as the **11-inch iPad (A16)**. Apple lists **128GB** as its starting storage and a starting price of **$449** on its U.S. site. I couldn’t verify its release date from the pages successfully opened.\n\nSource: [Apple iPad (A16)](https://www.apple.com/ipad-11/) (official Apple site).","start_blocked":false,"block":""},{"id":"wv-Apple--27","source":"WebVoyager","site":"Apple","group":"possible","task":"On Apple's website, check if the HomePod mini in store is available in multiple colors and list them. Start at https://www.apple.com/.","claimed":"succeeded","stop":"final_answer","steps":5,"sec":20.5,"tok":44127,"verdict":"correct","cause":"","note":"homepod-mini 페이지에서 White·Blue·Orange·Yellow·Midnight 확인. Midnight가 Space Gray를 대체","answer":"Yes. Apple’s HomePod mini store page lists five available colors: Blue, Midnight, White, Yellow, and Orange.","start_blocked":false,"block":""},{"id":"wv-Apple--40","source":"WebVoyager","site":"Apple","group":"possible","task":"Find information on Apple website, and tell me the device weight of Apple Vision Pro and list 5 Built-in Apps it supports. Start at https://www.apple.com/.","claimed":"succeeded","stop":"final_answer","steps":6,"sec":26.2,"tok":55789,"verdict":"correct","cause":"","note":"사양 페이지의 26.4–28.2 oz(750–800 g)와 Built-in Apps 행의 앱 5개","answer":"Apple lists Apple Vision Pro’s device weight as **26.4–28.2 oz (750–800 g)**. That includes the Light Seal and counterbalanced Dual Knit Band; the separate battery weighs 353 g.\n\nFive built-in apps include **App Store, Files, Freeform, Keynote, and Mail**.\n\nSource: [Apple Vision Pro Technical Specifications](https://www.apple.com/apple-vision-pro/specs/)","start_blocked":false,"block":""},{"id":"wv-ArXiv--26","source":"WebVoyager","site":"ArXiv","group":"possible","task":"Search for papers related to 'climate change modeling' on ArXiv and find out how many have been published in the Earth and Planetary Astrophysics (astro-ph.EP) category in the last week. Start at https://arxiv.org/.","claimed":"partial","stop":"final_answer","steps":20,"sec":72.5,"tok":370223,"verdict":"none","cause":"strategy","note":"arXiv가 무시하는 카테고리·날짜 URL 파라미터를 지어내 9번 이동. 고급 검색 분류를 astro-ph로 바꿨다가 all로 되돌림. astro-ph.EP 목록 페이지는 쓰지 않음","answer":"I couldn’t reliably determine the count. ArXiv’s search results showed 2,751 matches for “climate change modeling,” but the category and date filters did not apply—the results still included unrelated categories and dates. So I can’t verify how many matching papers were published in **astro-ph.EP during the last week**.","start_blocked":false,"block":""},{"id":"wv-ArXiv--13","source":"WebVoyager","site":"ArXiv","group":"possible","task":"How many articles on ArXiv with 'SimCSE' in the title? Start at https://arxiv.org/.","claimed":"succeeded","stop":"final_answer","steps":4,"sec":14.8,"tok":31767,"verdict":"correct","cause":"","note":"제목 검색 'Showing 1–6 of 6 results'(정답의 4는 2023년 값)","answer":"ArXiv shows **6 articles** with “SimCSE” in the title. This is the title-field search result count.","start_blocked":false,"block":""},{"id":"wv-ArXiv--6","source":"WebVoyager","site":"ArXiv","group":"golden","task":"How many figures and tables are in the paper \"On the Sentence Embeddings from Pre-trained Language Models\"? Start at https://arxiv.org/.","claimed":"succeeded","stop":"final_answer","steps":12,"sec":31.0,"tok":153996,"verdict":"correct","cause":"","note":"그림 2개·표 8개로 golden과 일치. HTML 논문을 get_text offset으로 나눠 읽음","answer":"The paper contains **2 figures and 8 tables**. I counted Figures 1–2 and Tables 1–8, including the appendix.","start_blocked":false,"block":""},{"id":"wv-ArXiv--17","source":"WebVoyager","site":"ArXiv","group":"golden","task":"Find the paper 'GPT-4 Technical Report', when was v3 submitted? Start at https://arxiv.org/.","claimed":"succeeded","stop":"final_answer","steps":6,"sec":18.2,"tok":61924,"verdict":"correct","cause":"","note":"v3 Mon, 27 Mar 2023 17:46:54 UTC로 golden과 일치","answer":"The arXiv submission history for **“GPT-4 Technical Report”** shows that **v3 was submitted on Monday, 27 March 2023, at 17:46:54 UTC**.\n\nSource: [arXiv:2303.08774](https://arxiv.org/abs/2303.08774)","start_blocked":false,"block":""},{"id":"wv-BBC News--11","source":"WebVoyager","site":"BBC News","group":"possible","task":"Find out how many teams are in the Scottish Premiership of the Football Tournament and when did the Hibernian team's most recent match start? Start at https://www.bbc.com/news/.","claimed":"partial","stop":"no_progress","steps":20,"sec":51.5,"tok":200020,"verdict":"partly","cause":"loop","note":"12개 팀은 맞음. 순위표와 Hibernian 일정 페이지를 18번 오감(no_progress). 끝난 경기를 열어 킥오프 시각을 확인하지 않음","answer":"The Scottish Premiership has **12 teams**. BBC Sport’s table lists 12 clubs, with Hibernian in 10th place.\n\nI couldn’t verify when Hibernian’s most recent match started: the fixture information I accessed showed upcoming matches, not the latest completed match. The displayed times are UK time.","start_blocked":false,"block":""},{"id":"wv-BBC News--17","source":"WebVoyager","site":"BBC News","group":"possible","task":"How many War related sections are currently in BBC News. Start at https://www.bbc.com/news/.","claimed":"succeeded","stop":"final_answer","steps":18,"sec":51.1,"tok":230358,"verdict":"wrong","cause":"reasoning","note":"현재 내비게이션에는 전쟁 섹션이 없음. 키이우 기사 하나를 세어 '전쟁 관련 섹션 1개'라고 답함(작업 자체도 모호)","answer":"I count **one war-related section** on the BBC News homepage: the Europe story about Russian strikes forcing some people in Kyiv to consider leaving. The navigation also has regional sections such as Europe and the Middle East, but those are not specifically labeled as war sections.","start_blocked":false,"block":""},{"id":"wv-BBC News--26","source":"WebVoyager","site":"BBC News","group":"possible","task":"Locate the latest report on BBC News about the impact of recent natural disasters in Asia and summarize the key points and areas affected. Start at https://www.bbc.com/news/.","claimed":"succeeded","stop":"final_answer","steps":9,"sec":25.7,"tok":84155,"verdict":"correct","cause":"","note":"홈과 아시아 페이지의 인도네시아 이탄 화재·유독 연무 보도. 근거 있음","answer":"The latest BBC Asia report I found is the video report **“Why is it so hard to put out Indonesian fires shrouding the region in toxic smog?”**, marked **4 hours ago** when viewed.\n\n- **Impact:** Wildfires have been burning in parts of Indonesia for weeks. Their smoke is spreading across the country and creating toxic haze in neighbouring areas.\n- **Areas affected:** Indonesia, with smoke reaching **Malaysia, Singapore and the Philippines**.\n- **Key point:** The report focuses on why the fires are difficult to contain and how they are producing so much toxic haze.\n\nBBC also notes in a related report that fires in Indonesia have damaged orangutan habitat in Borneo.  \nSource: [BBC News report](https://www.bbc.com/news/videos/c862y63x657no)","start_blocked":false,"block":""},{"id":"wv-BBC News--16","source":"WebVoyager","site":"BBC News","group":"possible","task":"Identify the most recent development or update in Brexit negotiations as reported on BBC News and report the key points and any stated impacts on European economies. Start at https://www.bbc.com/news/.","claimed":"succeeded","stop":"step_limit","steps":30,"sec":102.3,"tok":322987,"verdict":"correct","cause":"","note":"30스텝 한도에서 낸 최선 답변. 2026-09-22 EU 'Made in Europe' 규정과 영국–EU 협상 기사로 요점과 영향이 페이지에 근거함. 자가보고는 succeeded","answer":"The most recent BBC report I found on UK–EU negotiations is **“New EU industry rules would damage UK, warns Burnham,” dated 22 September 2026** ([BBC News](https://www.bbc.com/news/articles/cv2dwylkl7weo)).\n\n**Key points**\n- Andy Burnham raised concerns with European Commission President Ursula von der Leyen about the EU’s proposed **Made in Europe** scheme, formally the Industrial Accelerator Act. The proposal would prioritize companies inside the EU for public contracts and subsidies as the bloc seeks to protect manufacturers from Chinese competition.\n- The rules are not final. The UK wants its businesses included, and the EU car industry has also argued for UK inclusion to avoid supply-chain disruption.\n- Burnham said he wanted to rebuild UK–EU ties and reach practical agreements that boost the British economy. The article says tensions over the proposal have reportedly further delayed the planned UK–EU summit.\n- On impacts, Burnham said both the UK and European countries face similar pressures, particularly in steel. He warned of “collateral damage” if the rules exclude the UK. The report describes a risk to intertwined supply chains and industry, rather than quantifying broader effects on European economies.","start_blocked":false,"block":""},{"id":"wv-Booking--3","source":"WebVoyager","site":"Booking","group":"possible","task":"Find a hotel with 4 star and above rating in Los Angeles for 3 days from Dec 18th. Start at https://www.booking.com/.","claimed":"partial","stop":"step_limit","steps":30,"sec":110.9,"tok":397400,"verdict":"none","cause":"widget","note":"한국어 Booking. nflt=class=4;class=5로 성급 필터는 적용했지만 12/18–21 날짜가 끝내 들어가지 않음. 스텝 한도","answer":"I couldn’t confirm a specific 4-star-or-higher hotel with availability for the requested three nights. The date selection/search didn’t complete reliably, and the results I saw didn’t show hotel star classifications for the suggested properties.\n\nThe initial results did include highly rated options in Los Angeles, such as Luskin Hotel (guest score 9.1; shown at US$305.10 per night) and The Garland (guest score 9.0; US$230.85 per night), but I can’t verify that either meets the 4-star requirement or is available Dec 18–21.","start_blocked":false,"block":""},{"id":"wv-Booking--2","source":"WebVoyager","site":"Booking","group":"possible","task":"Find a hotel in Ohio From December 20th to December 23th for 3 adults and 2 rooms. Start at https://www.booking.com/.","claimed":"partial","stop":"step_limit","steps":30,"sec":91.2,"tok":424261,"verdict":"none","cause":"widget","note":"한국어 Booking. 달력을 여러 번 눌러 12/20–23은 넣었지만 인원·객실은 성인 2명·객실 1개로 남음. 30스텝 한도까지 결과 없음","answer":"I found Ohio on Booking.com and selected December 20–23, 2026. However, the search did not complete with the requested occupancy: the page still showed 2 adults and 1 room, rather than 3 adults and 2 rooms. Drury Plaza Hotel Cleveland Downtown appeared among Ohio’s popular hotels (guest rating 9.0), but I couldn’t verify availability or price for your dates and party.","start_blocked":false,"block":""},{"id":"wv-Booking--43","source":"WebVoyager","site":"Booking","group":"possible","task":"Search for properties in Los Angeles, browse the results page to see what filters are available, list some of them. Start at https://www.booking.com/.","claimed":"succeeded","stop":"final_answer","steps":12,"sec":42.8,"tok":142053,"verdict":"correct","cause":"","note":"booking.com/index.ko.html로 이동됨. 날짜 없이 검색해 한국어 도시 페이지에 도착했고, 그 '필터링 기준'에서 성급과 후기 평점을 나열. 영어 작업에 한국어로 답함","answer":"로스앤젤레스 숙소 결과 페이지에서 확인한 필터는 다음과 같습니다.\n\n- **숙소 등급:** 1~5성급\n- **후기 평점:** 6점 이상(만족), 7점 이상(좋음), 8점 이상(매우 좋음), 9점 이상(최고)\n\n페이지에는 검색 결과 정렬 옵션도 보여서, 추천 순·낮은 요금 순·성급과 요금 순·후기 평점이 높은 순으로 볼 수 있습니다.","start_blocked":false,"block":""},{"id":"wv-Booking--1","source":"WebVoyager","site":"Booking","group":"possible","task":"Find the cheapest available hotel room for a three night stay from 1st Jan in Jakarta. The room is for 2 adults, just answer the cheapest hotel room and the price. Start at https://www.booking.com/.","claimed":"partial","stop":"final_answer","steps":24,"sec":71.0,"tok":303015,"verdict":"none","cause":"widget","note":"한국어 Booking. 달력에서 12/31, 12/2를 잘못 누른 뒤 1/1–6(5박)이 됨. 정렬 클릭 후 '페이지를 찾을 수 없음'. checkin·checkout URL 파라미터는 쓰지 않음","answer":"I couldn’t confirm a cheapest room. Booking.com returned a “page not found” error after the search, so I couldn’t verify availability or prices for the three-night stay starting January 1.","start_blocked":false,"block":""},{"id":"wv-Cambridge Dictionary--9","source":"WebVoyager","site":"Cambridge Dictionary","group":"possible","task":"Look up the British pronunciation of the word \"euphoria\" and find an example sentence using that word on the Cambridge Dictionary. Start at https://dictionary.cambridge.org/.","claimed":"succeeded","stop":"final_answer","steps":3,"sec":11.0,"tok":29080,"verdict":"correct","cause":"","note":"UK /juːˈfɔː.ri.ə/와 정답 예문","answer":"Cambridge Dictionary gives the British pronunciation of **euphoria** as **/juːˈfɔː.ri.ə/**.\n\nExample sentence: “They were in a state of euphoria for days after they won the prize.”\n\n[Cambridge Dictionary: euphoria](https://dictionary.cambridge.org/dictionary/english/euphoria)","start_blocked":false,"block":""},{"id":"wv-Cambridge Dictionary--26","source":"WebVoyager","site":"Cambridge Dictionary","group":"golden","task":"Search for the word \"nostalgia\" in the Cambridge Dictionary and report the translation of this word into Chinese. Start at https://dictionary.cambridge.org/.","claimed":"partial","stop":"final_answer","steps":6,"sec":37.9,"tok":35724,"verdict":"correct","cause":"","note":"영–중 사전 페이지가 HTTP 403. Cambridge를 인용한 Google 결과에서 对往事的怀念，怀旧，念旧를 읽음(golden 怀旧 포함). 첫 클릭은 개인정보 배너에 가로막힘. partial로 보고","answer":"Cambridge Dictionary gives the Simplified Chinese translation of **nostalgia** as **对往事的怀念，怀旧，念旧**. The Traditional Chinese translation is **對往事的懷念，懷舊，念舊**.\n\nThe Cambridge Dictionary page was blocked when I tried to open it, so I read its translation from the search result.","start_blocked":false,"block":""},{"id":"wv-Cambridge Dictionary--27","source":"WebVoyager","site":"Cambridge Dictionary","group":"possible","task":"Look up the meaning, pronunciation, and an example sentence of the word \"solitude\" using the Cambridge Dictionary. Start at https://dictionary.cambridge.org/.","claimed":"succeeded","stop":"final_answer","steps":3,"sec":9.5,"tok":19164,"verdict":"correct","cause":"","note":"뜻, 영·미 발음, 예문 모두 정답과 일치","answer":"**Solitude** *(noun)*\n\n- **Meaning:** The situation of being alone without other people.\n- **Pronunciation:** UK /ˈsɒl.ɪ.tʃuːd/ · US /ˈsɑː.lə.tuːd/\n- **Example:** “After months of solitude at sea it felt strange to be in company.”\n\n[Cambridge Dictionary: solitude](https://dictionary.cambridge.org/dictionary/english/solitude)","start_blocked":false,"block":""},{"id":"wv-Cambridge Dictionary--14","source":"WebVoyager","site":"Cambridge Dictionary","group":"possible","task":"Use the Cambridge Dictionary to find the pronunciation, definition, and one example sentence for the word \"concatenate\". Start at https://dictionary.cambridge.org/.","claimed":"succeeded","stop":"final_answer","steps":3,"sec":11.8,"tok":19225,"verdict":"correct","cause":"","note":"발음, 정의, 예문 모두 정답과 일치","answer":"**Concatenate** *(verb)*\n\n- **Pronunciation:** UK /kənˈkæt.ə.neɪt/; US /kənˈkæt̬.ə.neɪt/\n- **Definition:** To put things together as a connected series.\n- **Example:** “The filename is a series of concatenated words with no spaces.”\n\nSource: [Cambridge Dictionary — concatenate](https://dictionary.cambridge.org/dictionary/english/concatenate)","start_blocked":false,"block":""},{"id":"wv-Coursera--23","source":"WebVoyager","site":"Coursera","group":"possible","task":"Find a course on Coursera about 'Artificial Intelligence Ethics', which has a duration of less than 5 weeks and has been rated 4.5 stars or higher. Provide the course name and the instructor's name. Start at https://www.coursera.org/.","claimed":"succeeded","stop":"final_answer","steps":5,"sec":24.2,"tok":47533,"verdict":"correct","cause":"","note":"Global MOOC on the Ethics of AI, 강사 UNESCO - LG AI Research, 별점 4.8(345), '1 week at 10 hours a week'가 모두 페이지에 있음","answer":"A Coursera course that meets the criteria is **Global MOOC on the Ethics of AI**. Coursera lists the instructor as **UNESCO - LG AI Research**. It’s rated **4.8 stars** and is estimated at **1 week** at 10 hours per week.\n\n[View the course on Coursera](https://www.coursera.org/learn/global-mooc-on-the-ethics-of-ai)","start_blocked":false,"block":""},{"id":"wv-Coursera--3","source":"WebVoyager","site":"Coursera","group":"possible","task":"Identify a new course or Specialization on Coursera related to Python Data Science, sort the courses by newest, what the first course is and which institution offers it. Start at https://www.coursera.org/.","claimed":"partial","stop":"step_limit","steps":30,"sec":115.5,"tok":363779,"verdict":"wrong","cause":"strategy","note":"Newest 정렬(sortBy=NEW)은 적용됐지만 관련 없는 신규 강좌가 앞에 옴. 이후 잘못된 sortBy=NEWEST로 바꿔 관련도순 첫 결과(IBM Python for Data Science)를 답함. partial로 보고","answer":"The first result shown is **“Python for Data Science, AI & Development,” offered by IBM**.\n\nA limitation: although the Coursera search URL included a newest-sort parameter, the displayed results did not establish that the results were actually sorted by newest. So I can identify the first result I saw, but can’t confirm it is the newest matching course or Specialization.","start_blocked":false,"block":""},{"id":"wv-Coursera--14","source":"WebVoyager","site":"Coursera","group":"possible","task":"Find a course on Coursera related to Introductory Project Management that includes modules on Agile methodology. Start at https://www.coursera.org/.","claimed":"succeeded","stop":"final_answer","steps":5,"sec":20.2,"tok":46951,"verdict":"correct","cause":"","note":"IBM Introduction to Project Management. 설명에 Agile이 있고 기술 목록에 Agile Methodology가 있음. Agile 전용 모듈은 없음(관대 판정)","answer":"**Introduction to Project Management** on Coursera looks like a good match: it’s an IBM course described as a comprehensive introduction to project management and is listed at beginner level, with no prior experience required.\n\nThe course description says it covers modern project-management trends, including Agile, and Agile methodology is listed among the skills you’ll gain. It has five modules, including **“What is Project Management?”** and **“Working as a Project Manager.”**\n\n[View the course on Coursera](https://www.coursera.org/learn/introduction-to-project-management)","start_blocked":false,"block":""},{"id":"wv-Coursera--17","source":"WebVoyager","site":"Coursera","group":"possible","task":"How many results are there for a search on Coursera for Machine Learning, then filtered by Credit Eligible and 1-4 Years duration? Start at https://www.coursera.org/.","claimed":"partial","stop":"step_limit","steps":30,"sec":94.4,"tok":365089,"verdict":"partly","cause":"task_stale","note":"Coursera에 Credit Eligible 필터가 더는 없음. 1–4 Years만 적용한 25건을 보고했지만, Filter & Sort 대화상자를 열고·펼치고·닫기를 6번 되풀이하며 30스텝을 씀","answer":"I wasn’t able to apply the Credit Eligible filter. With the 1–4 Years duration filter selected, Coursera showed **25 results**; that count does not reflect both requested filters.","start_blocked":false,"block":""},{"id":"wv-ESPN--28","source":"WebVoyager","site":"ESPN","group":"golden","task":"How many MLB teams are there and list all the teams with 'City' in their name. Start at https://www.espn.com/.","claimed":"succeeded","stop":"final_answer","steps":6,"sec":32.5,"tok":60330,"verdict":"correct","cause":"","note":"30개 팀, 'City'는 Kansas City Royals뿐. golden과 일치(이전 실행은 시카고 팀을 잘못 넣음)","answer":"ESPN’s MLB teams page lists **30 teams**. The team name that contains “City” is the **Kansas City Royals**. None of the other listed team names contain “City.”","start_blocked":false,"block":""},{"id":"wv-ESPN--27","source":"WebVoyager","site":"ESPN","group":"golden","task":"Search on ESPN for how many teams have 'Golden' in their name and how many of them are in the NHL. Start at https://www.espn.com/.","claimed":"succeeded","stop":"final_answer","steps":15,"sec":66.4,"tok":165546,"verdict":"wrong","cause":"extraction","note":"‘See all’을 누른 뒤에도 바뀌기 전의 상위 결과 5개만 읽고 ‘Golden’ 팀이 5개라고 답함. 전체 팀 검색에는 25개 항목(14개 팀)이 있음. NHL 1개(Vegas Golden Knights)는 맞음. 2026-10-10 정정","answer":"ESPN’s team search for **“Golden”** shows **5 teams**: Golden State Valkyries, Golden State Warriors, Minnesota Golden Gophers, California Golden Bears, and Vegas Golden Knights. **1 of the 5 is in the NHL**: the Vegas Golden Knights.","start_blocked":false,"block":""},{"id":"wv-ESPN--20","source":"WebVoyager","site":"ESPN","group":"possible","task":"Look up the current leaders in rebounds and assists in the NBA Western Conference on ESPN. Start at https://www.espn.com/.","claimed":"succeeded","stop":"final_answer","steps":13,"sec":51.1,"tok":187065,"verdict":"correct","cause":"","note":"서부 콘퍼런스 기록표를 avgRebounds·avgAssists로 정렬하면 둘 다 Nikola Jokic이 1위(12.9 / 10.7, 2025–26)","answer":"ESPN’s **2025–26 Western Conference regular-season** leaders are:\n\n- **Rebounds per game:** Nikola Jokić (Denver Nuggets) — **12.9**\n- **Assists per game:** Nikola Jokić (Denver Nuggets) — **10.7**\n\n[ESPN NBA Western Conference player stats](https://www.espn.com/nba/stats/player/_/players/6/table/offensive/sort/avgAssists/dir/desc)  \nESPN notes that stats are updated nightly.","start_blocked":false,"block":""},{"id":"wv-ESPN--21","source":"WebVoyager","site":"ESPN","group":"possible","task":"Show the scores and main highlight of the Denver Nuggets game that occurred within the last 3 days on ESPN. Start at https://www.espn.com/.","claimed":"partial","stop":"no_progress","steps":19,"sec":69.0,"tok":200499,"verdict":"partly","cause":"loop","note":"너기츠 117–106 재즈(10/6)는 맞음. recap과 boxscore를 9번 번갈아 열고 recap 본문은 읽지 않아 no_progress. '하이라이트'는 박스스코어의 쿼터 점수","answer":"The Nuggets beat the Utah Jazz **117–106** on Oct. 6, 2026. Denver’s biggest scoring burst came in the second quarter, when it outscored Utah **41–28**.\n\nI couldn’t verify a specific game highlight: ESPN’s video page showed **“No Videos Available.”**","start_blocked":false,"block":""},{"id":"wv-GitHub--21","source":"WebVoyager","site":"GitHub","group":"possible","task":"Find the Security topic in GitHub Resources and answer the role of GitHub Advanced Security. Start at https://github.com/.","claimed":"succeeded","stop":"final_answer","steps":11,"sec":31.1,"tok":76872,"verdict":"correct","cause":"","note":"보안 아티클의 'all-up solution … identify and fix vulnerabilities' 문단 인용","answer":"GitHub Advanced Security helps developers **identify and fix vulnerabilities in their code**. GitHub describes it as an all-up solution that includes static code analysis, dependency scanning, and secret scanning.\n\nSource: [GitHub Resources — “What is application security and how does it work?”](https://github.com/resources/articles/what-is-application-security)","start_blocked":false,"block":""},{"id":"wv-GitHub--1","source":"WebVoyager","site":"GitHub","group":"possible","task":"Search for an open-source repository for machine learning in Python, specifically focused on decision trees, updated within the last 2 days. Start at https://github.com/.","claimed":"succeeded","stop":"final_answer","steps":3,"sec":9.8,"tok":21356,"verdict":"correct","cause":"","note":"language:Python 결정 트리 검색을 최근 업데이트순으로 정렬. 5시간 전 업데이트된 ID3 저장소로 조건은 모두 충족(관대 판정)","answer":"A matching public, Python-focused repository is **[sommayadeep/Machine-Learning-](https://github.com/sommayadeep/Machine-Learning-)**. Its description says it implements the ID3 decision-tree algorithm using a cricket dataset, including entropy and information gain. GitHub’s recently updated sort showed it was updated **5 hours ago** (Oct 9, 2026), within the last 2 days. It had **0 stars** in the search results.","start_blocked":false,"block":""},{"id":"wv-GitHub--22","source":"WebVoyager","site":"GitHub","group":"possible","task":"Find an open-source repository on GitHub focused on natural language processing in Ruby, updated within the last week. Start at https://github.com/.","claimed":"succeeded","stop":"final_answer","steps":6,"sec":19.2,"tok":48450,"verdict":"correct","cause":"","note":"rosette-api/ruby(Ruby NLP 클라이언트), 최신 커밋·릴리스 2026-10-06","answer":"A matching open-source repository is **[rosette-api/ruby](https://github.com/rosette-api/ruby)**. It’s a public Ruby client library for Babel Street’s text analytics platform; its README describes language analysis, entity and event extraction, sentiment analysis, and other text-processing features. GitHub lists natural-language-processing and NLP among its topics.\n\nThe repository’s latest commit and release shown on GitHub are **Oct 6, 2026**, within the last week (relative to Oct 9, 2026). The latest release is **1.39.0**.","start_blocked":false,"block":""},{"id":"wv-GitHub--12","source":"WebVoyager","site":"GitHub","group":"possible","task":"Retrieve the latest release from the 'electron/electron' repository on GitHub and note down the release version number and date. Start at https://github.com/.","claimed":"succeeded","stop":"final_answer","steps":8,"sec":22.7,"tok":80067,"verdict":"correct","cause":"","note":"릴리스 페이지에서 Latest 표시된 v44.7.0(2026-10-07). 더 새로운 v45.0.0-beta.1 프리릴리스도 언급","answer":"The latest **stable release** of `electron/electron` is **v44.7.0**, released **October 7, 2026**. GitHub marks it “Latest”; the newer `v45.0.0-beta.1` is a prerelease.","start_blocked":false,"block":""},{"id":"wv-Google Flights--4","source":"WebVoyager","site":"Google Flights","group":"possible","task":"Search for one-way flights from New York to London on Dec. 26th and filter the results to show only non-stop flights. Start at https://www.google.com/travel/flights/.","claimed":"succeeded","stop":"final_answer","steps":17,"sec":45.3,"tok":161357,"verdict":"correct","cause":"","note":"12/26 뉴욕→런던 편도, 'Nonstop only' 선택, 결과 22개. 가격은 원화","answer":"Google Flights is showing **one-way, nonstop flights from New York to London on December 26, 2026**. The **Nonstop only** filter is selected, and the page shows 22 results. The lowest price shown is **₩565,708**. Visible options include Virgin Atlantic, Delta, United, American, and British Airways.","start_blocked":false,"block":""},{"id":"wv-Google Flights--6","source":"WebVoyager","site":"Google Flights","group":"possible","task":"Search for a flight on December 19 and return on December 26 from Tel Aviv to Venice and Select First Class. Start at https://www.google.com/travel/flights/.","claimed":"partial","stop":"final_answer","steps":17,"sec":51.9,"tok":164704,"verdict":"none","cause":"env_error","note":"폼은 맞게 설정(왕복 12/19–26, 일등석). Google Flights가 'No results returned / Oops, something went wrong'을 보임. 13스텝이 남았는데 바로 답함(Flights--9에서는 재시도해도 실패)","answer":"The Google Flights search is set for a round trip from Tel Aviv-Yafo to Venice, December 19–26, 2026, in First class. Google Flights returned “No results returned” and “Oops, something went wrong,” so I couldn’t retrieve flight options.","start_blocked":false,"block":""},{"id":"wv-Google Flights--9","source":"WebVoyager","site":"Google Flights","group":"possible","task":"Find a one way economy flight from Pune to New York in Jan. 15th and show me how long it will take for flight transfer. Start at https://www.google.com/travel/flights/.","claimed":"partial","stop":"final_answer","steps":17,"sec":77.6,"tok":130248,"verdict":"none","cause":"env_error","note":"1/15(2027) 푸네→뉴욕 편도 이코노미 설정. 'Reload results'와 20초 대기 뒤에도 'No results returned'","answer":"I set the search to **one-way, economy**, from **Pune to New York**, departing **January 15, 2027** (the next January 15). Google Flights returned **“No results returned”** and an error, so I couldn’t verify any flight options or their transfer/layover times.","start_blocked":false,"block":""},{"id":"wv-Google Flights--8","source":"WebVoyager","site":"Google Flights","group":"possible","task":"Search a one-way filght from Dublin To Athens Greece for 1 Adult that leaves on December 30 and analyse the price graph for the next 2 months. Start at https://www.google.com/travel/flights/.","claimed":"partial","stop":"step_limit","steps":30,"sec":83.8,"tok":401597,"verdict":"partly","cause":"extraction","note":"12/30 검색은 완료(최저 KRW 117,220 Ryanair, '보통 수준'). 두 달 가격 그래프는 화면에만 있는데 스크린샷을 찍지 않음. 스텝 한도","answer":"I searched Google Flights for a one-way trip from Dublin to Athens for 1 adult, departing **December 30, 2026**. The lowest listed fare for that date was **₩117,220** on a nonstop Ryanair flight (about 4 hr 5 min). Google Flights described prices as **currently typical**.\n\nThe price graph showed January and February 2027, with a vertical scale from ₩0 to ₩300,000. The graph’s detailed daily price points weren’t available in the page text I could access, so I can’t reliably identify the cheapest or most expensive dates across those two months.","start_blocked":false,"block":""},{"id":"wv-Google Map--29","source":"WebVoyager","site":"Google Map","group":"possible","task":"Identify bus stops in Ypsilanti, MI, list three of them. Start at https://www.google.com/maps/.","claimed":"succeeded","stop":"final_answer","steps":3,"sec":18.5,"tok":9087,"verdict":"correct","cause":"","note":"지도 결과 목록의 정류장 3개(UI 일부 한국어)","answer":"Three bus stops in Ypsilanti, MI listed on Google Maps:\n\n- Ellsworth + Michigan\n- Michigan + Mansfield\n- Washtenaw + Berkeley","start_blocked":false,"block":""},{"id":"wv-Google Map--7","source":"WebVoyager","site":"Google Map","group":"golden","task":"Find bus stops in Alanson, MI Start at https://www.google.com/maps/.","claimed":"succeeded","stop":"final_answer","steps":6,"sec":17.9,"tok":22842,"verdict":"correct","cause":"","note":"Alanson(Alanson EZ-Mart) 정류장, golden과 일치","answer":"Google Maps shows one bus stop in Alanson, Michigan:\n\n- **Alanson (Alanson EZ-Mart)** — Stop ID **ALA**\n- **Location:** Alanson, MI 49706 (Plus Code **C6Q5+VM**)\n- **Routes:** Indian Trails **54, 55, 80, and 81**","start_blocked":false,"block":""},{"id":"wv-Google Map--14","source":"WebVoyager","site":"Google Map","group":"possible","task":"Find motorcycle parking near Radio City Music Hall. Start at https://www.google.com/maps/.","claimed":"partial","stop":"final_answer","steps":6,"sec":26.6,"tok":59841,"verdict":"partly","cause":"premature","note":"라디오시티 근처 일반 주차장 4곳을 나열하고 오토바이 가능 여부는 확인 못 했다고 함. 목록을 하나도 열지 않고 6스텝에서 멈춤","answer":"Google Maps shows several nearby garages, but it doesn’t confirm that any accept motorcycles. Closest-looking options include:\n\n- **NYC Parking at CBS Building** — 31 W 52nd St; listed as open 24 hours; 3.6★.\n- **Rockefeller Center Parking** — 53 W 48th St; 3.5★.\n- **Metropolis** — 140 W 51st St; listed as open 24 hours; 2.8★.\n- **LAZ at Edison ParkFast** — 50 W 44th St; listed as open 24 hours; 3.4★.\n\nThese are car-parking listings, not verified motorcycle parking. Call the garage or check its booking site before riding over to confirm motorcycles are accepted and ask about rates and space availability.","start_blocked":false,"block":""},{"id":"wv-Google Map--8","source":"WebVoyager","site":"Google Map","group":"golden","task":"Find a place to climb within 2 miles of zip code 90028. Start at https://www.google.com/maps/.","claimed":"succeeded","stop":"final_answer","steps":3,"sec":11.5,"tok":8021,"verdict":"correct","cause":"","note":"Hollywood Boulders, golden과 일치","answer":"**Hollywood Boulders** is an indoor climbing gym at **1107 N Bronson Ave, Los Angeles, CA 90038**. Google Maps lists it as a rock-climbing gym, rated **4.7 stars**, and currently open until **10:00 PM**. Phone: **(323) 747-1000**. Based on its location near Hollywood, it appears to be within 2 miles of ZIP code 90028.","start_blocked":false,"block":""},{"id":"wv-Google Search--25","source":"WebVoyager","site":"Google Search","group":"possible","task":"Get the latest news headline about the English Premier League football club Manchester United. Start at https://www.google.com/.","claimed":"succeeded","stop":"final_answer","steps":5,"sec":20.3,"tok":35665,"verdict":"correct","cause":"","note":"Google /sorry. BBC Sport 맨유 페이지의 'Carrick on Man City charges, trophies and team news'(14:25 BST)","answer":"The latest Manchester United headline on BBC Sport is **“Carrick on Man City charges, trophies and team news”**, published at 14:25 BST. Michael Carrick discussed the Manchester City ruling and United’s team news ahead of Saturday’s match against Tottenham.","start_blocked":false,"block":""},{"id":"wv-Google Search--21","source":"WebVoyager","site":"Google Search","group":"golden","task":"Show a list of the top 5 highest-grossing animated movies, sorted by box office earnings. Start at https://www.google.com/.","claimed":"succeeded","stop":"final_answer","steps":5,"sec":24.8,"tok":41021,"verdict":"correct","cause":"","note":"현재 위키백과 목록(Ne Zha 2, Zootopia 2, Inside Out 2, The Lion King, Frozen II). golden 목록은 2024–25년 개봉작 이전 값","answer":"Top 5 highest-grossing animated movies worldwide, sorted by box office earnings:\n\n| Rank | Movie | Worldwide box office |\n|---:|---|---:|\n| 1 | *Ne Zha 2* (2025) | $2,217,758,382 |\n| 2 | *Zootopia 2* (2025) | $1,870,309,291 |\n| 3 | *Inside Out 2* (2024) | $1,698,863,816 |\n| 4 | *The Lion King* (2019) | $1,662,020,819 |\n| 5 | *Frozen II* (2019) | $1,451,651,316 |\n\nSource: [Wikipedia’s list of highest-grossing animated films](https://en.wikipedia.org/wiki/List_of_highest-grossing_animated_films). Figures are worldwide theatrical grosses in USD.","start_blocked":false,"block":""},{"id":"wv-Google Search--31","source":"WebVoyager","site":"Google Search","group":"golden","task":"Discover which year Cristiano Ronaldo scored the most goals in a single season. Start at https://www.google.com/.","claimed":"succeeded","stop":"final_answer","steps":8,"sec":58.5,"tok":56699,"verdict":"correct","cause":"","note":"Google /sorry. Bing과 위키백과로 2014–15 시즌 61골(golden)","answer":"Cristiano Ronaldo’s peak scoring season was **2014–15**, when he scored **61 goals** for Real Madrid across all competitions. The season spans two calendar years; if you mean the year in which that season began, it was **2014**.","start_blocked":false,"block":""},{"id":"wv-Google Search--38","source":"WebVoyager","site":"Google Search","group":"possible","task":"Search for the next visible solar eclipse in North America and its expected date, and what about the one after that. Start at https://www.google.com/.","claimed":"succeeded","stop":"final_answer","steps":16,"sec":90.5,"tok":102151,"verdict":"wrong","cause":"reasoning","note":"실행일이 2026-10-09인데 이미 지난 2026-08-12 일식을 '다음 일식'으로 답함. 직접 읽은 NASA 표에는 다음이 2029-01-14. Google /sorry, timeanddate·eclipsewise 403","answer":"NASA’s eclipse catalog shows the next solar eclipse visible from North America is **August 12, 2026**—a **total** eclipse, with visibility across northern North America and the path of totality crossing the Arctic, Greenland, Iceland, and Spain.\n\nThe one after that visible from North America is a **partial** eclipse on **January 14, 2029**, visible across North and Central America. (There is also a partial eclipse on June 12, 2029, visible in Alaska and northern Canada.)\n\nSource: [NASA Solar Eclipses: 2021–2030](https://eclipse.gsfc.nasa.gov/SEdecade/SEdecade2021.html).","start_blocked":false,"block":""},{"id":"wv-Huggingface--25","source":"WebVoyager","site":"Huggingface","group":"golden","task":"In the Hugging Face documentation, find the tutorial on loading adapters with PEFT, tell me how to load in 8bit or 4bit. Start at https://huggingface.co/.","claimed":"partial","stop":"final_answer","steps":21,"sec":58.6,"tok":158016,"verdict":"correct","cause":"","note":"튜토리얼 페이지가 403/429. 답(from_pretrained에 load_in_8bit / load_in_4bit와 device_map='auto', 이어서 PeftModel)은 golden 내용과 같고 다른 PEFT 문서 예제에서 가져옴. partial로 보고","answer":"The tutorial’s key point is to **quantize the base model when you load it**, then load the adapter onto that model. Set `load_in_8bit=True` for 8-bit or `load_in_4bit=True` for 4-bit:\n\n```python\nfrom peft import PeftConfig, PeftModel\nfrom transformers import AutoModelForCausalLM\n\nadapter_id = \"your-org/your-adapter\"\nconfig = PeftConfig.from_pretrained(adapter_id)\n\n# Choose one:\nmodel = AutoModelForCausalLM.from_pretrained(\n    config.base_model_name_or_path,\n    load_in_4bit=True,  # change to load_in_8bit=True for 8-bit\n    device_map=\"auto\",\n)\n\nmodel = PeftModel.from_pretrained(model, adapter_id)\n```\n\nThe Hugging Face example I could access uses `load_in_4bit=True` on `AutoModelForCausalLM.from_pretrained(...)` before calling `PeftModel.from_pretrained(...)`. The loading-adapters tutorial page itself was unavailable during browsing, so the 8-bit counterpart above applies the same documented loading pattern. [PEFT documentation](https://huggingface.co/docs/peft/en/developer_guides/quantization)","start_blocked":false,"block":""},{"id":"wv-Huggingface--2","source":"WebVoyager","site":"Huggingface","group":"possible","task":"Discover three new and popular open-source NLP models for language translation released in the past month on Huggingface. Start at https://huggingface.co/.","claimed":"partial","stop":"final_answer","steps":21,"sec":54.1,"tok":253824,"verdict":"partly","cause":"env_block","note":"HTTP 429 전에 조건에 맞는 모델 1개(IndexTeam/Index-Translate-9B, 7일 전 업데이트)만 확인. 프롬프트가 429 후 같은 사이트 재시도를 금지","answer":"I could only verify one qualifying model before Hugging Face rate-limited access, so I can’t reliably identify three:\n\n- [IndexTeam/Index-Translate-9B](https://huggingface.co/IndexTeam/Index-Translate-9B) — tagged **Translation**, updated **7 days ago**, with about **1.06k downloads** shown in the results.\n\nThe translation-model results also showed a popular GGUF variant, but it is a community conversion of the same model, not a distinct new model. Hugging Face returned HTTP 429 while I was checking further candidates, so the three-model list remains incomplete.","start_blocked":false,"block":""},{"id":"wv-Huggingface--14","source":"WebVoyager","site":"Huggingface","group":"golden","task":"How much is the Pro account of Hugging face for a month and what are the features? Start at https://huggingface.co/.","claimed":"succeeded","stop":"final_answer","steps":5,"sec":29.6,"tok":71270,"verdict":"correct","cause":"","note":"huggingface.co/pro의 $9/월과 현재 PRO 기능 목록","answer":"**Hugging Face PRO costs $9 per month** (the page says you can cancel anytime).\n\nFeatures listed on Hugging Face’s PRO page:\n\n- **Spaces:** 8× the daily quota, including up to 40 minutes of RTX Pro 6000 Blackwell compute; host up to 10 ZeroGPU Spaces; SSH Dev Mode with hot reload.\n- **Inference:** $2 in monthly inference usage, with pay-as-you-go available after that.\n- **Storage:** 1 TB private storage and up to 10 TB public storage.\n- **Community:** Publish profile-visible Articles and short Posts.\n- **Other perks:** Private Dataset Viewer, early access to features, and a PRO badge. Public-storage add-ons are available separately, starting at $12/TB/month.\n\nSource: [Hugging Face PRO](https://huggingface.co/pro).","start_blocked":false,"block":""},{"id":"wv-Huggingface--4","source":"WebVoyager","site":"Huggingface","group":"possible","task":"Locate an open-source conversational AI model on Hugging Face, trained in English and list its main features and applications. Start at https://huggingface.co/.","claimed":"partial","stop":"final_answer","steps":6,"sec":22.8,"tok":43554,"verdict":"none","cause":"env_block","note":"첫 모델 페이지(DialoGPT)에서 HTTP 429. 프롬프트대로 6스텝 만에 포기","answer":"I couldn’t verify a model’s features or applications from its Hugging Face page: the site rate-limited access with HTTP 429 when I tried to open a model listing. I don’t want to guess at details without a source.\n\nUnfinished: locate an accessible Hugging Face model page and confirm its English training, features, and applications.","start_blocked":false,"block":""},{"id":"wv-Wolfram Alpha--45","source":"WebVoyager","site":"Wolfram Alpha","group":"golden","task":"A 175cm tall, 85kg, 40yo man climbs 2500 steps at about 18cm per step and 40 steps per minute. summarise the Metabolic properties. Start at https://www.wolframalpha.com/.","claimed":"partial","stop":"final_answer","steps":17,"sec":91.3,"tok":84302,"verdict":"wrong","cause":"reasoning","note":"5스텝에서 Wolfram의 대사량 표(2741 kJ, 0.91 kJ/step, 지방 0.0849 kg)를 봤지만(시간을 37.5분으로 잘못 넣은 질의) 버리고 직접 물리 계산으로 답함. 작업 문장을 그대로 넣어 보지 않음","answer":"## Estimated metabolic summary\n\nUsing the stated pace and step height:\n\n- **Vertical ascent:** 2,500 × 0.18 m = **450 m**\n- **Climbing time:** 2,500 ÷ 40 steps/min = **62.5 minutes**\n- **Vertical climbing rate:** **7.2 m/min** (0.12 m/s)\n\nFor an **85 kg** person, the increase in gravitational potential energy is about **375 kJ**, or **90 dietary kcal**. That is the *mechanical work* to raise body mass; it is not the same as calories your body burns. Allowing for the body’s inefficiency, a rough estimate is around **300–450 kcal of active energy** for the climb, with actual expenditure varying by technique, pauses, and whether the steps are climbed continuously.\n\nThis would be **vigorous, sustained stair climbing**. The supplied height and weight give a BMI of about **27.8**; age and height do not substantially change the basic climbing-work calculation. These are estimates, not a medical assessment. Wolfram|Alpha did not return a usable metabolic estimate for the full query, so the energy estimate above is calculated from the stated inputs.","start_blocked":false,"block":""},{"id":"wv-Wolfram Alpha--24","source":"WebVoyager","site":"Wolfram Alpha","group":"golden","task":"Solve the differential equation y''(t) - 2y'(t) + 10y(t) = 0 and display its general solution. Start at https://www.wolframalpha.com/.","claimed":"succeeded","stop":"final_answer","steps":3,"sec":14.2,"tok":10636,"verdict":"correct","cause":"","note":"y(t)=e^t(C1 sin 3t + C2 cos 3t), golden","answer":"Wolfram|Alpha gives the general solution:\n\\[\n\\boxed{y(t)=e^t\\bigl(C_1\\sin(3t)+C_2\\cos(3t)\\bigr),}\n\\]\nwhere \\(C_1\\) and \\(C_2\\) are arbitrary constants.","start_blocked":false,"block":""},{"id":"wv-Wolfram Alpha--39","source":"WebVoyager","site":"Wolfram Alpha","group":"golden","task":"Use Wolfram alpha to write the expression of the ellipse x^2 + 3 y^2 = 4 rotated 33 degrees counterclockwise. Start at https://www.wolframalpha.com/.","claimed":"succeeded","stop":"final_answer","steps":3,"sec":17.4,"tok":11820,"verdict":"correct","cause":"","note":"회전 타원식이 golden과 일치(22df4f2 기준 실행에서는 오답)","answer":"Wolfram|Alpha gives the rotated ellipse as\n\\[\nx^2\\left(\\sin\\frac{2\\pi}{15}-2\\right)+2xy\\cos\\frac{2\\pi}{15}+4\n=\ny^2\\left(2+\\sin\\frac{2\\pi}{15}\\right).\n\\]\nEquivalently, moving everything to one side:\n\\[\n\\left(\\sin\\frac{2\\pi}{15}-2\\right)x^2\n+2\\cos\\frac{2\\pi}{15}\\,xy\n-\\left(2+\\sin\\frac{2\\pi}{15}\\right)y^2+4=0.\n\\]","start_blocked":false,"block":""},{"id":"wv-Wolfram Alpha--22","source":"WebVoyager","site":"Wolfram Alpha","group":"golden","task":"Determine the area of a regular hexagon with a side length of 7 cm. Start at https://www.wolframalpha.com/.","claimed":"succeeded","stop":"final_answer","steps":3,"sec":19.4,"tok":10089,"verdict":"correct","cause":"","note":"147√3/2 = 127.306 cm², golden","answer":"Wolfram|Alpha gives the area as \\(\\frac{147\\sqrt{3}}{2}\\text{ cm}^2\\), approximately **127.306 cm²**.","start_blocked":false,"block":""},{"id":"om2w-b962927dfe03","source":"Online-Mind2Web","site":"bandcamp.com","group":"medium","task":"Find the best-selling vinyl record by an artist from New York City in the classical music genre. Start at https://bandcamp.com/.","claimed":"succeeded","stop":"final_answer","steps":25,"sec":80.9,"tok":328552,"verdict":"correct","cause":"","note":"6스텝 만에 vinyl > classical > 뉴욕 아티스트(best-selling) 설정, 첫 결과 Fifteen(Threadgill, Iyer, Prieto). 이후 18스텝 동안 앨범 페이지를 오가다 답함","answer":"Bandcamp’s **best-selling** list for **classical vinyl** by artists from **New York City** placed **_Fifteen_ by Henry Threadgill, Vijay Iyer, and Dafnis Prieto** first. Vijay Iyer’s artist page lists his location as **New York, New York**, and the album page offers a **Black 140g vinyl record**.\n\n[View _Fifteen_ on Bandcamp](https://vijayiyer.bandcamp.com/album/fifteen)","start_blocked":false,"block":""},{"id":"om2w-3dca7cbe7d08","source":"Online-Mind2Web","site":"zara.com","group":"easy","task":"Can you show me products under the category path 'zara home' -> 'rug', with an additional filter for the color beige? Start at https://zara.com/us.","claimed":"blocked","stop":"final_answer","steps":2,"sec":7.8,"tok":2905,"verdict":"none","cause":"env_block","note":"zara.com/us Access Denied(HTTP 403, Akamai)","answer":"I couldn’t access Zara’s US site: it returned an “Access Denied” (HTTP 403) page, so I wasn’t able to apply the “zara home” → “rug” category path and beige color filter.","start_blocked":true,"block":"403"},{"id":"om2w-bbbc243b4f18","source":"Online-Mind2Web","site":"nba.com","group":"easy","task":"Find out how many assists Chris Paul has been averaging in the current season. Start at https://www.nba.com/.","claimed":"succeeded","stop":"final_answer","steps":10,"sec":54.6,"tok":99138,"verdict":"correct","cause":"","note":"nba.com HTTP 403, Google /sorry. ESPN 통산 기록에서 2025–26 시즌 3.3 어시스트(2026–27 시즌은 개막 전)","answer":"ESPN lists Chris Paul at **3.3 assists per game** for the 2025–26 regular season (current season). The NBA.com site returned an access-denied error, so I checked his season stats on ESPN. [ESPN stats](https://www.espn.com/nba/player/stats/_/id/2779/chris-paul)","start_blocked":true,"block":"403"},{"id":"om2w-b69eb4de621e","source":"Online-Mind2Web","site":"adoptapet.com","group":"medium","task":"Find an adult husky near zip code 10019. Start at https://www.adoptapet.com/.","claimed":"succeeded","stop":"final_answer","steps":23,"sec":124.9,"tok":185181,"verdict":"correct","cause":"","note":"adoptapet.com과 petfinder.com HTTP 403. PetPlace 검색(시베리안 허스키, 성견, 10019, 10마일)으로 뉴욕의 5살 허스키 Masha","answer":"I found **Masha**, an adult female husky listed in **New York, NY**, near ZIP code 10019. Her profile describes her as about **5 years old** and around **55 pounds**. The listing identifies the rescue as **Animal Rights Rescue** and says to use **“Submit an inquiry”** on her profile to get started.\n\n[View Masha’s profile](https://www.petplace.com/pet-adoption/pet/48671875/288363)\n\nNote: Adopt-a-Pet was unavailable (HTTP 403), so I used PetPlace’s adoption search instead. The profile calls Masha an Alaskan Husky in her description, while the listing’s breed label says Siberian Husky.","start_blocked":true,"block":"403"},{"id":"om2w-bb5d90e6f2fb","source":"Online-Mind2Web","site":"ted.com","group":"hard","task":"Find the most viewed TED talk on the topic of robots that lasts between 12 and 18 minutes. Start at https://www.ted.com/.","claimed":"succeeded","stop":"final_answer","steps":13,"sec":59.0,"tok":119423,"verdict":"correct","cause":"","note":"robots 주제, sort=popular, 12–18분: 첫 결과 'The astounding athletic power of quadcopters' 15:50, 조회 1,450만","answer":"The most-viewed matching talk is **“The astounding athletic power of quadcopters”** by Raffaello D’Andrea. TED lists it at **15:54** and **14.5 million views**, so it fits the 12–18 minute range and has more views than the other matching talk shown. [Watch on TED](https://www.ted.com/talks/raffaello_d_andrea_the_astounding_athletic_power_of_quadcopters)","start_blocked":false,"block":""},{"id":"om2w-47e314cc452c","source":"Online-Mind2Web","site":"recreation.gov","group":"medium","task":"Find the park that offers the cheapest paddling permits. Start at https://www.recreation.gov/.","claimed":"partial","stop":"final_answer","steps":17,"sec":92.2,"tok":189751,"verdict":"partly","cause":"strategy","note":"Pine National Scenic River의 1일 $2/보트는 찾았지만 다른 허가(Desolation/Gray) 하나와만 비교하며 두 페이지를 8번 오감. 최저가는 확정 못 함","answer":"The **Pine National Scenic River**, managed by the Huron-Manistee National Forests, lists a recreation fee of **$2 per day per watercraft** for paddling. Recreation.gov also lists a **$6 nonrefundable reservation fee**. I can’t confirm that this is the cheapest among all paddling-permit options from the pages reviewed.","start_blocked":false,"block":""},{"id":"om2w-8103786e0e59","source":"Online-Mind2Web","site":"mayoclinic.org","group":"medium","task":"Find possible causes for the symptoms of chest pain which is sharp which is accompanied by anxiety. Start at https://www.mayoclinic.org/.","claimed":"partial","stop":"final_answer","steps":6,"sec":29.6,"tok":25157,"verdict":"none","cause":"env_block","note":"mayoclinic.org HTTP 403, Google /sorry. 일반적인 응급 안내만 답함","answer":"Mayo Clinic’s website blocked access with an HTTP 403 error, so I couldn’t verify its information directly. I can’t reliably identify Mayo Clinic-listed causes from the pages available in this session.\n\nSharp chest pain with anxiety can have several possible causes, but chest pain can also signal a medical emergency. **Call emergency services now** for new or severe pain, trouble breathing, fainting, sweating, nausea, or pain spreading to the arm, jaw, back, or shoulder. If the pain is mild but new or recurring, seek medical advice promptly rather than assuming anxiety is the cause.","start_blocked":true,"block":"403"},{"id":"om2w-eb2db4b769c1","source":"Online-Mind2Web","site":"akc.org","group":"medium","task":"Find an energetic hairless dog with medium barking. Start at https://www.akc.org/.","claimed":"partial","stop":"final_answer","steps":13,"sec":64.0,"tok":152120,"verdict":"partly","cause":"extraction","note":"American Hairless Terrier(활발함, 털 없음). AKC의 짖음 정도는 막대로만 표시되어 접근성 트리에 값이 없고, 스크린샷은 찍지 않음","answer":"The **American Hairless Terrier** matches: AKC describes the breed as energetic, and it comes in a hairless variety. Its AKC barking-level trait is shown on a scale from “Only To Alert” to “Very Vocal”; the page display doesn’t state a specific “medium” label, so I can’t confirm that part from the information available.  \nhttps://www.akc.org/dog-breeds/american-hairless-terrier/","start_blocked":false,"block":""},{"id":"om2w-461ab9b0c7b2","source":"Online-Mind2Web","site":"nyse.com","group":"easy","task":"Find the NYSE Rule 605 Market Center Files data for July 2024. Start at https://www.nyse.com/.","claimed":"partial","stop":"no_progress","steps":24,"sec":94.6,"tok":231408,"verdict":"none","cause":"unsettled","note":"NYSE 사이트 검색 결과의 <main>이 두 번 모두 비어 있음(렌더링 전 스냅샷, 'may still be changing' 표시 없음). 이어서 추측 URL 2개 404, 아무 일도 하지 않는 푸터 링크를 9번 클릭해 no_progress","answer":"I couldn’t locate the July 2024 NYSE Rule 605 Market Center Files. The NYSE search page and attempted Market Center Files URLs did not lead to the data, and the page reached was the unrelated Auctions page.","start_blocked":false,"block":""},{"id":"om2w-1df24ec81137","source":"Online-Mind2Web","site":"bestbuy.com","group":"medium","task":"Search for NordicTrack with the lowest price. Start at https://www.bestbuy.com/.","claimed":"succeeded","stop":"final_answer","steps":24,"sec":133.3,"tok":172300,"verdict":"correct","cause":"","note":"브랜드 NordicTrack + 가격 낮은순: 트레드밀 매트 $69.99가 첫 번째, 다음은 $199.00","answer":"The lowest-priced NordicTrack result is the **NordicTrack Treadmill Mat – Black** for **$69.99**. It’s listed as available for pickup, with shipping unavailable. [View it on Best Buy](https://www.bestbuy.com/product/nordictrack-treadmill-mat-black/J7G2HQ5LXC)\n\nResults were sorted by **Price Low to High** and filtered to **NordicTrack**. The next listed item was a dumbbell stand at $199.00.","start_blocked":false,"block":""},{"id":"om2w-26810ed9c123","source":"Online-Mind2Web","site":"accuweather.com","group":"easy","task":"Show daily weather for New York City. Start at https://www.accuweather.com/.","claimed":"blocked","stop":"final_answer","steps":2,"sec":5.3,"tok":2876,"verdict":"none","cause":"env_block","note":"accuweather.com Access Denied(HTTP 403)","answer":"AccuWeather is unavailable in this browser: the site returned an “Access Denied” (HTTP 403) page, so I couldn’t show New York City’s daily weather.","start_blocked":true,"block":"403"},{"id":"om2w-ef289e34a2f5","source":"Online-Mind2Web","site":"cars.com","group":"medium","task":"Compare the Acura CL 2003 with the ILX 2022. Start at https://www.cars.com/.","claimed":"partial","stop":"step_limit","steps":30,"sec":117.4,"tok":221527,"verdict":"partly","cause":"env_block","note":"cars.com, edmunds, autoblog, kbb 모두 HTTP 403. 결과를 열기 전 검색 결과 페이지 7개. fueleconomy.gov 비교에서 차체·엔진·용적은 얻었지만 Specs/Fuel Economy 탭을 5번 오가다 스텝 한도, 연비 수치는 없음","answer":"Cars.com was unavailable during this comparison: its site returned a Cloudflare HTTP 403. I could still verify a few differences using the U.S. government’s fuel-economy comparison tool, but I couldn’t complete a full Cars.com comparison.\n\n| | 2003 Acura CL 3.2 | 2022 Acura ILX |\n|---|---|---|\n| Body style | 2-door coupe | 4-door sedan |\n| Engine / transmission | 3.2L V6, 5-speed automatic | 2.4L 4-cylinder, 8-speed automatic |\n| Drive | Front-wheel drive | Front-wheel drive |\n| Passenger volume | 90 cu ft | 89 cu ft |\n| Luggage volume | 14 cu ft | 12 cu ft |\n| Fuel | Premium gasoline | Premium recommended |\n| MSRP shown by the comparison source | — | $27,300–$33,200 |\n\n**Bottom line:** The CL is the larger-engine, two-door coupe with slightly more listed passenger and luggage space. The ILX is a newer four-door compact sedan with a smaller engine and a broader modern trim-price range. I don’t have verified fuel-economy figures or a complete feature/safety comparison from the pages I could access.","start_blocked":true,"block":"403"},{"id":"om2w-e7f6cca9a887","source":"Online-Mind2Web","site":"tumblr.com","group":"easy","task":"Find the posts liked by the user Taylor Swift on Tumblr. Start at https://www.tumblr.com/.","claimed":"partial","stop":"final_answer","steps":7,"sec":24.6,"tok":42144,"verdict":"none","cause":"strategy","note":"tumblr.com/taylor-swift를 추측(404, 실제 블로그는 taylorswift). 검색 URL은 중단되고 Google /sorry. 7스텝 만에 포기","answer":"I couldn’t find Taylor Swift’s Tumblr likes. The direct profile and likes URLs returned 404, and the available search attempt was blocked by a bot check.","start_blocked":false,"block":""},{"id":"om2w-7072d0943697","source":"Online-Mind2Web","site":"americanexpress.com","group":"medium","task":"Show me the comparison of the first two personal credit cards that do not charge foreign transaction fees. Start at https://www.americanexpress.com/.","claimed":"partial","stop":"step_limit","steps":30,"sec":128.2,"tok":378537,"verdict":"correct","cause":"","note":"No Foreign Transaction Fee 카테고리의 첫 두 카드(Platinum, Gold)를 각 카드 페이지로 비교. 비교 체크박스 클릭 2번 실패(label이 가로챔, 화면 밖, 불안정). 최신 get_text만 남아 두 카드 텍스트를 8번 번갈아 읽음. 스텝 한도, partial로 보고(관대 판정)","answer":"## First two personal cards shown in Amex’s “No Foreign Transaction Fee” category\n\n|  | Platinum Card® | American Express® Gold Card |\n|---|---|---|\n| **Annual fee** | $895 | $325 |\n| **Featured rewards** | 5X points on prepaid hotels and flights booked through Amex Travel | 4X at restaurants worldwide (up to $50,000/year) and at U.S. supermarkets (up to $25,000/year); 5X on prepaid hotel stays booked through Amex Travel |\n| **Featured benefits** | Access to 1,550+ airport lounges; up to $600 in annual statement credits on select prepaid hotel bookings through Amex Travel | Dining, Uber, Resy, and Dunkin’ credits; The Hotel Collection benefits |\n| **Welcome offer shown** | As high as 175,000 Membership Rewards® points after $12,000 in purchases in the first 6 months | As high as 100,000 Membership Rewards® points after $8,000 in purchases in the first 6 months |\n\nThese were the first two cards listed on the Amex no-foreign-transaction-fee category page. Amex notes that welcome offers vary and you may not be eligible for the displayed maximum. The category listing identifies these cards as qualifying, though I wasn’t able to get the site’s side-by-side comparison tool to open.\n\n[Platinum Card details](https://www.americanexpress.com/us/credit-cards/card/platinum/) · [Gold Card details](https://www.americanexpress.com/us/credit-cards/card/gold-card/) · [No foreign transaction fee card category](https://www.americanexpress.com/us/credit-cards/category/no-foreign-transaction-fee/)","start_blocked":false,"block":""},{"id":"om2w-29526b17a324","source":"Online-Mind2Web","site":"drugs.com","group":"easy","task":"Browse Humira dosage information. Start at https://www.drugs.com/.","claimed":"partial","stop":"final_answer","steps":7,"sec":30.6,"tok":47570,"verdict":"correct","cause":"","note":"drugs.com HTTP 403. DailyMed Humira 라벨의 용법·용량을 정확히 인용. partial로 보고","answer":"I couldn’t access Drugs.com itself because it returned **HTTP 403 (Access Denied)**. I found the Humira dosage information in the current DailyMed prescribing label instead (updated December 23, 2025). Humira dosing varies by condition and, for some pediatric uses, by weight. Examples from the label:\n\n- **Rheumatoid arthritis, psoriatic arthritis, or ankylosing spondylitis (adults):** 40 mg under the skin every other week. Some adults with rheumatoid arthritis not taking methotrexate may benefit from 40 mg weekly or 80 mg every other week.\n- **Plaque psoriasis or adult uveitis:** 80 mg initially, then 40 mg every other week beginning one week later.\n- **Crohn’s disease (adults):** 160 mg on Day 1 (may be split across two days), 80 mg on Day 15, then 40 mg every other week starting Day 29.\n- **Ulcerative colitis (adults):** 160 mg on Day 1, 80 mg on Day 15, then 40 mg every other week from Day 29. The label says to discontinue in adults without clinical remission by Day 57.\n\nThese are label examples, not individualized medical advice; the prescribed schedule depends on the condition and patient. **Source:** [DailyMed Humira label, Dosage and Administration](https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=608d4f0d-b19f-46d3-749a-7159aa5f933d).","start_blocked":true,"block":"403"},{"id":"om2w-1aeca99e6a60","source":"Online-Mind2Web","site":"ca.gov","group":"medium","task":"Find full-time legal occupation jobs in San Diego County with a minimum salary of $4,000+ per month. Start at https://www.ca.gov/.","claimed":"succeeded","stop":"final_answer","steps":15,"sec":44.3,"tok":84677,"verdict":"correct","cause":"","note":"CalCareers 검색(legal, 샌디에이고) → 정규직 법무부 패러리걸 공고 월 $6,330–$7,929. 필터된 목록이 아니라 공고 하나(관대 판정)","answer":"## Full-time legal job found\n\n**Paralegal, Government Law Section — Senior Legal Analyst**  \n- **Employer:** California Department of Justice  \n- **Location:** San Diego County  \n- **Schedule:** Permanent, full time; Monday–Friday, 8:00 a.m.–5:00 p.m.  \n- **Salary:** **$6,330–$7,929 per month** (the posting says new-to-state hires start at the classification minimum).  \n- **Work arrangement:** Hybrid  \n- **Duties:** Support attorneys in the Government Law Section, including analyzing legal documents, drafting memoranda, managing case and discovery files, and assisting with witness and election-related matters.  \n- **Filing deadline:** October 14, 2026  \n- **Job control:** JC-533698  \n- **Posting:** [View the job posting](https://calcareers.ca.gov/CalHrPublic/Jobs/JobPosting.aspx?JobControlId=533698)\n\nThe posting also says it may consider applicants in the **Legal Assistant** classification ($4,873–$6,102/month) or **Legal Analyst** classification ($5,529–$6,922/month), both above the requested $4,000 monthly minimum. The posting requires a resume, cover letter, writing sample, and references.","start_blocked":false,"block":""},{"id":"om2w-e43cbc8a0bf9","source":"Online-Mind2Web","site":"airbnb.com","group":"hard","task":"Show me an event to do in Miami for 2 adults, that last between 1 to 3 hours per session, cost under $100 per person, and are available for booking between next Monday and next Friday, have a rating of 4.5+. Start at https://www.airbnb.com/.","claimed":"succeeded","stop":"final_answer","steps":18,"sec":48.8,"tok":114719,"verdict":"correct","cause":"","note":"마이애미 체험, 10/12–16(다음 주 월–금), 성인 2명: Sunset Boat Tour, 2시간, 4.85(739), 1인 KRW 70,455(약 $50). 모든 조건이 화면에 있음","answer":"## Sunset Boat Tour: Mansions, Skyline & Cocktails\n\nA 2-hour sunset cruise through Biscayne Bay, past Millionaires’ Row and the Miami skyline, with music and an onboard bar.\n\n- **Rating:** 4.85/5 (739 ratings)\n- **Duration:** Around 2 hours\n- **Price:** From ₩70,455 per guest (shown on Airbnb as the per-person price)\n- **Available:** Monday, October 12; Tuesday, October 13; Thursday, October 15; and Friday, October 16, 2026, 6–8 PM\n- **For:** 2 adults; the listing allows guests ages 6 and up\n- **Location:** Miami Beach, Florida\n\n[View the Airbnb experience](https://www.airbnb.com/experiences/3692695)","start_blocked":false,"block":""},{"id":"om2w-323bd85e3559","source":"Online-Mind2Web","site":"amtrak.com","group":"medium","task":"Tell me information about what identification I need to bring on my trip on Amtrak. Start at https://www.amtrak.com/.","claimed":"succeeded","stop":"final_answer","steps":3,"sec":14.9,"tok":15600,"verdict":"correct","cause":"","note":"Amtrak 신분증 안내 페이지를 3스텝에 정확히 요약","answer":"Amtrak’s **Passenger Identification** guidance says:\n\n- For passengers **18 and older**, carry **current, valid identification**. Amtrak may ask for it during random onboard ticket checks, and it is required for certain transactions and situations—such as changing, refunding or reprinting travel documents; checking or storing baggage; traveling as a Pass Rider; or when requested by train crew, Amtrak police or law enforcement.\n- The standard is **one government-issued photo ID**, or **two forms of ID, at least one issued by a government authority**.\n- Examples include a state or provincial driver’s license, passport, official government ID, military photo ID, or student photo ID. Amtrak also lists a Canadian provincial health card with photo and Job Corps photo ID.\n- If buying a ticket onboard from a conductor, you must show photo ID and be at least 16; an onboard service fee applies. Amtrak advises buying before boarding at staffed stations or stations with a kiosk.\n- For travel **into Canada**, check Amtrak’s separate border-crossing requirements; the passenger-ID page says travelers crossing into Canada must produce valid photo ID.\n\nSource: [Amtrak Passenger Identification](https://www.amtrak.com/passenger-identification).","start_blocked":false,"block":""},{"id":"om2w-070c907d34a4","source":"Online-Mind2Web","site":"healthgrades.com","group":"medium","task":"Find a dentist who specializes in pediatric dentistry and is located near zip code 90210 (within 5-mile distance). Start at https://www.healthgrades.com/.","claimed":"blocked","stop":"final_answer","steps":8,"sec":33.3,"tok":45647,"verdict":"none","cause":"env_block","note":"healthgrades.com HTTP 403 'not available in your area'. Google /sorry, Brave 429","answer":"I couldn’t verify a dentist on Healthgrades because the site returned an HTTP 403 (“This page is not available in your area”). The available search results also didn’t provide usable listings, so I can’t reliably name a pediatric dentist or confirm one is within 5 miles of 90210.\n\nUnfinished: identify a pediatric dentist and verify their distance from 90210.","start_blocked":true,"block":"403"},{"id":"om2w-56f8890a837c","source":"Online-Mind2Web","site":"imdb.com","group":"medium","task":"Show crazy credits for the movie \" Prometheus\" on IMDb. Start at https://www.imdb.com/.","claimed":"blocked","stop":"final_answer","steps":2,"sec":7.2,"tok":2780,"verdict":"none","cause":"env_block","note":"imdb.com HTTP 403","answer":"IMDb is returning **403 Forbidden**, so I can’t access the movie page to show the crazy credits.","start_blocked":true,"block":"403"},{"id":"om2w-9ed3827266b3","source":"Online-Mind2Web","site":"chase.com","group":"hard","task":"If I'm 30, plan to retire at 65, and have $30000 as starting balance, with a 3% annual return, 13% current tax rate, and 24% retirement tax rate, show the comparison chart between Traditional and Roth IRA. Start at https://www.chase.com/.","claimed":"partial","stop":"no_progress","steps":12,"sec":37.7,"tok":131934,"verdict":"none","cause":"overlay","note":"빈 대화상자 2개가 먼저 표시됨('page behind may not accept clicks'). Escape를 5번 누르고 iframe 계산기에 값 하나만 입력, no_progress(열린 이슈 #156)","answer":"I found Chase’s IRA calculator and its comparison chart, but I wasn’t able to enter your assumptions or retrieve the resulting Traditional-versus-Roth comparison. The calculator’s inputs include age range, starting balance, annual return, current tax rate, and estimated retirement tax rate; its chart also includes taxable-account scenarios.\n\nYour requested assumptions are ages **30 to 65**, **$30,000** starting balance, **3%** annual return, **13%** current tax rate, and **24%** retirement tax rate. Since I couldn’t apply those values in the calculator, I can’t report its chart results.","start_blocked":false,"block":""},{"id":"om2w-7c09c2c7c87c","source":"Online-Mind2Web","site":"phys.org","group":"medium","task":"Find the comments for the most popular news in the past month under the Quantum Physics topic. Start at https://phys.org/.","claimed":"blocked","stop":"final_answer","steps":6,"sec":25.6,"tok":13571,"verdict":"none","cause":"env_block","note":"phys.org 홈과 주제 페이지 모두 HTTP 400 차단 페이지. Google /sorry, DuckDuckGo 확인 페이지","answer":"I couldn’t access Phys.org: the homepage and Quantum Physics page both returned HTTP 400. Search was also unavailable because the search pages presented access challenges, so I couldn’t identify the most popular news item or read its comments.","start_blocked":true,"block":"400"},{"id":"om2w-38203be65401","source":"Online-Mind2Web","site":"new.mta.info","group":"medium","task":"Check the status of bus S92 for any disruptions on new.mta.info. Start at https://new.mta.info/.","claimed":"blocked","stop":"final_answer","steps":2,"sec":5.4,"tok":2879,"verdict":"none","cause":"env_block","note":"new.mta.info Access Denied(HTTP 403)","answer":"I couldn’t check bus S92’s disruption status on new.mta.info because the site returned an **Access Denied (HTTP 403)** error. I wasn’t able to verify whether S92 has any disruptions.","start_blocked":true,"block":"403"},{"id":"om2w-180ed2ec377e","source":"Online-Mind2Web","site":"umich.edu","group":"easy","task":"Find the way to give a gift to UM-Dearborn. Start at https://umich.edu/.","claimed":"partial","stop":"final_answer","steps":13,"sec":78.0,"tok":71743,"verdict":"none","cause":"env_block","note":"umich.edu, giving.umich.edu, umdearborn.edu 모두 HTTP 403 보안 확인. Google /sorry, 검색 결과 페이지 6개","answer":"I couldn’t verify the steps for making a gift. The starting site and UM-Dearborn’s giving page returned security checks, and the search results didn’t provide usable information. You can try the “Give” or “Giving” section of the official UM-Dearborn website directly.","start_blocked":true,"block":"403"},{"id":"om2w-0b2623e9fa5c","source":"Online-Mind2Web","site":"petfinder.com","group":"hard","task":"Find a list of shorthaired dogs available for adoption within 100 miles of zip code 94587 that are good with kids and cats, and have been on Petfinder for over 10 days. Start at https://www.petfinder.com/.","claimed":"blocked","stop":"final_answer","steps":4,"sec":35.8,"tok":15500,"verdict":"none","cause":"env_block","note":"petfinder.com HTTP 403, Google /sorry","answer":"I couldn’t produce a verified list. Petfinder returned HTTP 403 when I opened the requested site, so I couldn’t use its adoption search or confirm which dogs meet the shorthaired, within-100-miles, good-with-kids-and-cats, and listed-over-10-days criteria.","start_blocked":true,"block":"403"},{"id":"om2w-85b284c18d7e","source":"Online-Mind2Web","site":"student.com","group":"medium","task":"View the cheapest apartment available for students at New York University with bills that include WIFI and cleaning services. Start at https://www.student.com/.","claimed":"succeeded","stop":"final_answer","steps":13,"sec":46.2,"tok":138490,"verdict":"correct","cause":"","note":"NYU 숙소, 공과금 필터 Wifi + Cleaning, 가격 낮은순: Bushwick Terrace Home $920부터. 공과금 항목에 Wifi와 청소 확인","answer":"The cheapest matching listing I found is **Bushwick Terrace Home**, from **$920/month**. The lowest-priced room is a **Twin Male Shared room** at **$920/month for a 12-month stay**.\n\nThe listing includes **Wi‑Fi and cleaning service** in the bills; its description also mentions weekly cleaning. It’s at **587 Central Ave, Brooklyn, NY 11207**.\n\n[View Bushwick Terrace Home on Student.com](https://www.student.com/us/new-york-city/p/bushwick-terrace-home-i)","start_blocked":false,"block":""},{"id":"om2w-b7258ee05d75","source":"Online-Mind2Web","site":"traderjoes.com","group":"medium","task":"Find the store location and hours of the closest Trader Joe's to zip code 90028 and set it as my home store. Start at https://www.traderjoes.com/.","claimed":"partial","stop":"final_answer","steps":8,"sec":46.7,"tok":41743,"verdict":"partly","cause":"env_block","note":"traderjoes.com HTTP 403. locations.traderjoes.com에서 Hollywood #206, 1600 N Vine St, 9–9. 홈 매장 지정은 막힌 본 사이트가 필요","answer":"The closest Trader Joe’s to ZIP code 90028 is **Hollywood (Store #206)** at **1600 N Vine St, Los Angeles, CA 90028**. Its regular hours are **9:00 AM–9:00 PM daily**.\n\nI couldn’t set it as your home store: Trader Joe’s’ website returned an access-denied error, and I wasn’t able to complete that change.","start_blocked":true,"block":"403"},{"id":"om2w-c801d1c951f5","source":"Online-Mind2Web","site":"store.steampowered.com","group":"hard","task":"Browse the latest negative reviews from players with over 100 hours of playtime for the game that won the 2023 VR Game of the Year Award. Start at https://store.steampowered.com/.","claimed":"partial","stop":"final_answer","steps":9,"sec":44.2,"tok":86324,"verdict":"wrong","cause":"strategy","note":"Google 검색이 막힌 뒤 2023 VR Game of the Year를 The Light Brigade로 추측. Steam Awards 2023 수상작은 Labyrinthine(Steam 자체 steamawards 페이지는 쓰지 않음). 리뷰는 appreviews JSON에서 읽음. partial로 보고","answer":"The likely 2023 VR Game of the Year winner is *The Light Brigade*. Steam’s recent negative-review feed includes several reviews from players with more than 100 hours; the newest qualifying ones visible were:\n\n- **Bridget GG :) — 104 hours:** Says the game feels too straightforward and easy, with repetitive combat, unremarkable bosses, and confusing sound direction.\n- **FlairHayden — 360 hours:** Praises the gunplay and much of the game, but calls the final stretch and final boss disappointing and frustrating.\n- **dizzlemasterd — 312 hours:** Complains that the final boss is difficult to play and that spells and attachments fail to track properly.\n- **LittleForest — 1,041 hours:** Says the final boss is so dark they couldn’t see the boss or attacks, making the fight unplayable for them.\n- **Jamie — 1,150 hours:** Reports being unable to play without Steam Link or Virtual Desktop, which they couldn’t use.\n\nThese are the latest qualifying reviews I could identify in Steam’s recent negative-review results. I used the playtime shown at the time of review.","start_blocked":false,"block":""},{"id":"om2w-27fa3ac20745","source":"Online-Mind2Web","site":"stanford.edu","group":"hard","task":"Browse the class schedule of graduate-level chemistry courses on Monday afternoons in the winter of 2023. Start at https://www.stanford.edu/.","claimed":"partial","stop":"tool_failures","steps":21,"sec":90.3,"tok":352370,"verdict":"partly","cause":"tool_timeout","note":"ExploreCourses 시간표를 CHEM, 겨울, 2022–2023으로 필터. '다음 페이지' 후 거대한 페이지에서 innerText·ariaSnapshot이 3번 타임아웃(tool_failures). 대학원·월요일 오후 필터는 못 함","answer":"The Stanford ExploreCourses schedule I reached was filtered to Chemistry (CHEM), Winter quarter, academic year 2022–2023. It showed some Monday-afternoon entries, but the visible examples were undergraduate courses—such as CHEM 33, whose lectures met Mondays 12:30–1:20 p.m. The schedule page timed out before I could review the full set of results and identify all graduate-level chemistry courses meeting Monday afternoons. So I can’t provide a complete, verified schedule.","start_blocked":false,"block":""},{"id":"om2w-2532fd402d3c","source":"Online-Mind2Web","site":"thumbtack.com","group":"easy","task":"find electricians near 10203. Start at https://www.thumbtack.com/.","claimed":"succeeded","stop":"final_answer","steps":7,"sec":24.0,"tok":41029,"verdict":"correct","cause":"","note":"Thumbtack 전기 기사 즉시 결과(ZIP 10203): 평점이 있는 4명 모두 페이지에 있음","answer":"Thumbtack shows these electricians serving New York, NY near ZIP code **10203**:\n\n- **Voltair Solutions** — Top Pro; **4.8/5** (81 reviews); 137 hires; responds in about 4 hours. Review mentions repairing messy wiring in electrical sockets.\n- **Magnetic Electric** — Top Pro; **4.9/5** (110 reviews); 153 hires; responds in about 47 minutes.\n- **DNBElectric** — Top Pro; **4.9/5** (28 reviews); 23 hires; responds in about 4 hours.\n- **Bryan Torres** — **5.0/5** (1 review); 1 hire; responds within a day. Listed services include lights, ceiling fans, switches, outlets, and smart-home switches.\n\nThumbtack presented these as matching electricians and offered an option to request quotes from the top three. Ratings and availability are as shown on the listing.","start_blocked":false,"block":""},{"id":"om2w-b7a9a6b5d451","source":"Online-Mind2Web","site":"uniqlo.com","group":"hard","task":"Show me the list of Men's Blazers, Black, Size M on Uniqlo. Start at https://www.uniqlo.com/.","claimed":"blocked","stop":"final_answer","steps":2,"sec":5.2,"tok":2900,"verdict":"none","cause":"env_block","note":"uniqlo.com이 /kr/ko/로 이동한 뒤 Access Denied(HTTP 403)","answer":"Uniqlo’s site returned an “Access Denied” page (HTTP 403), so I couldn’t show the list of men’s black blazers in size M.","start_blocked":true,"block":"403"},{"id":"om2w-20a460a8fe19","source":"Online-Mind2Web","site":"stubhub.com","group":"easy","task":"Show theatre events for Las Vegas and select one. Start at https://www.stubhub.com/.","claimed":"blocked","stop":"final_answer","steps":3,"sec":16.1,"tok":4610,"verdict":"none","cause":"env_block","note":"stubhub.com HTTP 403 봇 확인","answer":"StubHub blocked access with an HTTP 403 and a bot-verification page, so I couldn’t show Las Vegas theatre events or select one.","start_blocked":true,"block":"403"},{"id":"om2w-662ae0f2d3ac","source":"Online-Mind2Web","site":"wanderlog.com","group":"easy","task":"What is the second stop among the best stops along the road trip from Yellowstone National Park to Las Vegas? Start at https://wanderlog.com/.","claimed":"partial","stop":"final_answer","steps":11,"sec":45.7,"tok":55512,"verdict":"none","cause":"strategy","note":"/roadtrip·/drive/between/… URL을 4번 추측했는데 모두 빈 'Best drives and road trips from' 화면(soft 404, 실제 URL에는 장소 ID가 있음). 사이트의 목적지 검색은 쓰지 않음. Google /sorry","answer":"I couldn’t identify the second stop: Wanderlog’s route page didn’t provide readable stop information, and Google search was blocked by a bot check. The requested answer remains unverified.","start_blocked":false,"block":""},{"id":"om2w-92160852a6bb","source":"Online-Mind2Web","site":"ups.com","group":"easy","task":"Find the shipping cost of a Common medium-sized box in flat-rate shipping and compare it with other parcel services. Start at https://www.ups.com/.","claimed":"partial","stop":"final_answer","steps":18,"sec":77.3,"tok":133232,"verdict":"partly","cause":"env_block","note":"ups.com의 모든 URL(추측한 PDF 포함 6번)이 application/blank 다운로드(봇 응답). USPS Priority Mail 정액 중형 상자 $25.80(소매)/$22.02(상업)만 확인, UPS 가격은 없음","answer":"I couldn’t verify the UPS “Common” medium-box flat-rate price because UPS pages repeatedly returned a download/error instead of a viewable page, and the search results didn’t surface a reliable UPS price. FedEx’s One Rate page was also unavailable.\n\nFor comparison, USPS Priority Mail Flat Rate medium boxes are **$25.80 retail** or **$22.02 commercial**. USPS lists both medium-box styles at those prices; the top-loading box is 11¼″ × 8¾″ × 6″, and the side-loading box is 14″ × 12″ × 3½″. Those USPS prices are the only parcel-service rates I could confirm, so I can’t make a verified UPS-versus-others price comparison. ([USPS Priority Mail](https://www.usps.com/ship/priority-mail.htm))","start_blocked":true,"block":"다운로드"},{"id":"om2w-33bd2cdcea4f","source":"Online-Mind2Web","site":"raisingcanes.com","group":"hard","task":"Add a Box Combo to my bag with Diet Coke as the drink, and a Kids Combo with milk as the drink. Select the store closest to ZIP 10001 for pickup tomorrow at 12:00 PM. Start at https://raisingcanes.com/.","claimed":"blocked","stop":"final_answer","steps":3,"sec":8.9,"tok":4870,"verdict":"none","cause":"env_block","note":"raisingcanes.com HTTP 403","answer":"I couldn’t add the items or schedule pickup because Raising Cane’s is returning an access error (HTTP 403) and says the site is temporarily unavailable. The order remains incomplete: Box Combo with Diet Coke, Kids Combo with milk, closest store to ZIP 10001, pickup tomorrow at 12:00 PM.","start_blocked":true,"block":"403"},{"id":"om2w-dd44c665cec1","source":"Online-Mind2Web","site":"spothero.com","group":"hard","task":"Find parking near the San Francisco Museum of Modern Art for next Sunday from 1:00 PM to 5:00 PM. I'm driving a Ford F-150 and need a garage that allows in-and-out privileges. If there are multiple options, show me the details of the one with the lowest price. Start at https://spothero.com/.","claimed":"unknown","stop":"step_limit","steps":30,"sec":138.4,"tok":332206,"verdict":"partly","cause":"loop","note":"SFMOMA, 10/11(일) 13–17시, Ford F-150, 가격순까지 설정. 이후 두 주차장 상세를 번갈아 열다 스텝 한도. 최저가(재출입 불가)와 재출입 가능한 곳($47.70)을 답했지만 outcome 줄이 없음","answer":"I couldn’t confirm a garage that meets all your requirements. The lowest-priced Ford F-150 result I saw was **1 St Francis Pl. (333 3rd St.) – SOMA Square Apartments Garage**: **$8.12 total** (shown with fees; $8.49 before fees), about a **6-minute walk** from SFMOMA. But its details explicitly say **“No In & Out,”** so it does not meet your in-and-out requirement.\n\nThe listing that did allow in-and-out was **Unlimited In/Out Access – 155 Stevenson St. – Hearst Garage**: **$47.70 total**, about a **6-minute walk**. Its listing showed a 6′8″ height restriction and Sunday access hours of 8:00 AM–10:00 PM. I couldn’t verify whether that garage accepts an F-150.\n\nThe search was for **Sunday, October 11, 2026, 1:00–5:00 PM**.","start_blocked":false,"block":""},{"id":"om2w-9bb63ad0e38d","source":"Online-Mind2Web","site":"google.com","group":"easy","task":"Look for reviews of a Nest Hello Video Doorbell and filter by 1-star ratings. Start at https://www.google.com/shopping?udm=28.","claimed":"blocked","stop":"final_answer","steps":5,"sec":23.7,"tok":27745,"verdict":"none","cause":"env_block","note":"google.com/shopping이 /sorry로 이동. Bing에는 리뷰 필터가 없음","answer":"Google Shopping blocked the search by redirecting to Google’s “Sorry” bot-check page, so I couldn’t reach the product reviews or apply the 1-star filter.","start_blocked":true,"block":"/sorry"},{"id":"om2w-1223b07536a8","source":"Online-Mind2Web","site":"coolmath4kids.com","group":"hard","task":"Complete a multiplication quiz on https://www.coolmath4kids.com/, covering multiplication facts for 11-12. The quiz should consist of 10 questions, with unlimited time allowed for each. The goal is to achieve a perfect score of 10 out of 10. Start at https://www.coolmath4kids.com/.","claimed":"succeeded","stop":"final_answer","steps":23,"sec":104.5,"tok":98012,"verdict":"correct","cause":"","note":"퀴즈 iframe의 URL을 직접 열어 11–12단과 무제한을 고르고 10문제를 풀어 '10 out of 10'","answer":"Completed the multiplication quiz covering 11–12 facts, with 10 questions and unlimited time. Score: **10 out of 10**. All answers were marked correct.","start_blocked":false,"block":""},{"id":"om2w-50d91eabde54","source":"Online-Mind2Web","site":"babycenter.com","group":"hard","task":"My baby boy was born on Dec 1, 2025. His weight is 7 lb 8 oz, height is 20 inches, and head circumference is 35 cm. The measurement date is Dec 1, 2025. Can you calculate his growth percentiles using a calculator? Start at https://www.babycenter.com/.","claimed":"partial","stop":"final_answer","steps":14,"sec":84.0,"tok":161166,"verdict":"partly","cause":"widget","note":"두 날짜를 모두 12-01-2025로 입력했지만 계산기가 나이를 10개월로 표시해 측정일이 들어가지 않음. 표시된 백분위를 단서와 함께 답함","answer":"Using BabyCenter’s growth percentile calculator for a boy born and measured on Dec. 1, 2025, the results are:\n\n- **Weight (7 lb 8 oz): 55th percentile**\n- **Height (20 in): 69th percentile**\n- **Head circumference (35 cm): 66th percentile**\n\nThe calculator displayed his age as **10 months old**, which doesn’t match the birth and measurement dates provided. Those dates indicate he was measured at birth, so the percentiles above are the calculator’s displayed results but may not be valid for the intended age. BabyCenter notes that its calculator is an educational tool, not a substitute for a healthcare provider’s growth assessment.","start_blocked":false,"block":""},{"id":"om2w-1b867afecf07","source":"Online-Mind2Web","site":"americashealthrankings.org","group":"hard","task":"Display the figure comparing unemployment trends among women in Illinois and Michigan. Start at https://www.americashealthrankings.org/.","claimed":"succeeded","stop":"final_answer","steps":17,"sec":87.8,"tok":148069,"verdict":"correct","cause":"","note":"Unemployment – Women 비교 페이지에서 일리노이와 미시간 선택, 스크린샷으로 확인","answer":"Displayed the **Unemployment – Women Trends** figure comparing Illinois and Michigan. It shows the percentage of the female civilian workforce that is unemployed. The figure is visible on the current page.","start_blocked":false,"block":""}],"history":[{"label":"22df4f2","date":"2026-10-04","succeeded":48,"partial":29,"blocked":17,"golden":10,"step_limit":25,"no_progress":3,"steps":1576,"in_m":15.59,"tool_errors":119,"serp":77},{"label":"a502c7f","date":"2026-10-05","succeeded":50,"partial":35,"blocked":14,"golden":10,"step_limit":23,"no_progress":8,"steps":1526,"in_m":13.53,"tool_errors":61,"serp":130},{"label":"4885c4a","date":"2026-10-05","succeeded":47,"partial":31,"blocked":22,"golden":10,"step_limit":20,"no_progress":5,"steps":1412,"in_m":12.56,"tool_errors":70,"serp":94},{"label":"621ae1d","date":"2026-10-06","succeeded":52,"partial":26,"blocked":21,"golden":12,"step_limit":16,"no_progress":4,"steps":1370,"in_m":12.91,"tool_errors":80,"serp":91},{"label":"0878dbe","date":"2026-10-09","succeeded":46,"partial":39,"blocked":14,"golden":13,"step_limit":9,"no_progress":5,"steps":1209,"in_m":12.1,"tool_errors":37,"serp":46}]}</script>
+<script>
+(function () {
+  "use strict";
+  var D = JSON.parse(document.getElementById("report-data").textContent);
+  var ROWS = D.rows;
+  var ENV = { env_block: 1, env_geo: 1, env_error: 1, task_stale: 1 };
+  var VERDICTS = [
+    { key: "correct", label: "정답", glyph: "✓" },
+    { key: "partly", label: "부분 정답", glyph: "◐" },
+    { key: "wrong", label: "오답", glyph: "✕" },
+    { key: "unfinished", label: "미완료", glyph: "○" },
+    { key: "env", label: "환경 차단", glyph: "⊘" }
+  ];
+  var VBY = {}; VERDICTS.forEach(function (v) { VBY[v.key] = v; });
+  var CAUSES = {
+    env_block: ["접근 차단", "403·402·429, 봇 확인 페이지"],
+    env_geo: ["지역 차이", "원화 가격, 한국 배송 불가"],
+    env_error: ["사이트 오류", "Google Flights ‘No results’"],
+    task_stale: ["사라진 기능", "작업이 요구한 필터가 없음"],
+    strategy: ["탐색 전략", "URL 추측, 비교 누락, 근거 없는 추측"],
+    reasoning: ["추론 오류", "날짜, 버린 근거, ‘최신’ 판단"],
+    widget: ["입력 위젯", "날짜 선택기, 인원·날짜 입력"],
+    extraction: ["정보 추출", "화면에만 있는 값, 잘린 스냅샷"],
+    loop: ["왕복 루프", "두 페이지·요소를 번갈아 열기"],
+    premature: ["이른 포기", "남은 스텝이 많은데 확인 없이 종료"],
+    unsettled: ["렌더링 전 관찰", "빈 검색 결과에서 판단"],
+    overlay: ["빈 대화상자", "Escape만 반복"],
+    tool_timeout: ["도구 타임아웃", "거대한 페이지의 스냅샷"]
+  };
+  var STOP = { final_answer: "최종 답", step_limit: "스텝 한도", no_progress: "진전 없음", tool_failures: "도구 실패" };
+  var CLAIM = { succeeded: "succeeded", partial: "partial", blocked: "blocked", unknown: "unknown" };
+
+  function group(r) {
+    if (r.verdict === "correct") return "correct";
+    if (r.verdict === "none") return ENV[r.cause] ? "env" : "unfinished";
+    return r.verdict;
+  }
+  ROWS.forEach(function (r) { r.g = group(r); });
+
+  function h(tag, attrs) {
+    var e = document.createElement(tag);
+    if (attrs) for (var k in attrs) {
+      if (k === "class") e.className = attrs[k];
+      else if (k === "text") e.textContent = attrs[k];
+      else if (k === "style") e.setAttribute("style", attrs[k]);
+      else e.setAttribute(k, attrs[k]);
+    }
+    for (var i = 2; i < arguments.length; i++) {
+      var c = arguments[i];
+      if (c == null) continue;
+      e.append(c);
+    }
+    return e;
+  }
+  var NS = "http://www.w3.org/2000/svg";
+  function s(tag, attrs, parent) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function fmt(n) { return n.toLocaleString("en-US"); }
+  function short(id) { return id.replace(/^wv-/, "").replace(/^om2w-/, ""); }
+
+  /* Tooltip: values and labels are inserted with textContent. */
+  var tip = document.getElementById("tip");
+  function tipShow(lines, x, y) {
+    tip.textContent = "";
+    lines.forEach(function (l, i) { tip.append(h("div", { class: i === 0 ? "t1" : (i === 1 ? "" : "t2"), text: l })); });
+    tip.classList.add("on");
+    tipMove(x, y);
+  }
+  function tipMove(x, y) {
+    var w = tip.offsetWidth, hh = tip.offsetHeight;
+    var left = Math.min(window.innerWidth - w - 8, x + 14);
+    var top = y + 16 + hh > window.innerHeight ? y - hh - 12 : y + 16;
+    tip.style.left = Math.max(8, left) + "px";
+    tip.style.top = Math.max(8, top) + "px";
+  }
+  function tipHide() { tip.classList.remove("on"); }
+  function bindTip(el, lines) {
+    el.addEventListener("pointerenter", function (e) { tipShow(lines(), e.clientX, e.clientY); });
+    el.addEventListener("pointermove", function (e) { tipMove(e.clientX, e.clientY); });
+    el.addEventListener("pointerleave", tipHide);
+    el.addEventListener("focus", function () { var b = el.getBoundingClientRect(); tipShow(lines(), b.left + b.width / 2, b.bottom); });
+    el.addEventListener("blur", tipHide);
+  }
+  function runLines(r) {
+    var lines = [r.id + " · " + r.site, VBY[r.g].label + (r.cause ? " · " + CAUSES[r.cause][0] : "") + " · 자가보고 " + r.claimed + " · " + r.steps + "스텝"];
+    if (r.note) lines.push(r.note);
+    return lines;
+  }
+
+  function legendInto(id) {
+    var el = document.getElementById(id);
+    VERDICTS.forEach(function (v) {
+      el.append(h("span", null, h("i", { class: "sw v-" + v.key }), h("span", { class: "glyph", text: v.glyph }), v.label));
+    });
+  }
+  legendInto("verdict-legend");
+  legendInto("site-legend");
+
+  /* 1. Composition bars */
+  (function () {
+    var wv = ROWS.filter(function (r) { return r.source === "WebVoyager"; });
+    var om = ROWS.filter(function (r) { return r.source !== "WebVoyager"; });
+    var groups = [
+      ["전체", ROWS, false],
+      ["WebVoyager", wv, false],
+      ["golden (정답 고정)", wv.filter(function (r) { return r.group === "golden"; }), true],
+      ["possible", wv.filter(function (r) { return r.group === "possible"; }), true],
+      ["Online-Mind2Web", om, false],
+      ["easy", om.filter(function (r) { return r.group === "easy"; }), true],
+      ["medium", om.filter(function (r) { return r.group === "medium"; }), true],
+      ["hard", om.filter(function (r) { return r.group === "hard"; }), true]
+    ];
+    var host = document.getElementById("composition");
+    groups.forEach(function (g) {
+      var rs = g[1], n = rs.length;
+      var bar = h("div", { class: "bar", role: "img", "aria-label": g[0] + " 결과" });
+      var counts = h("div", { class: "counts" });
+      VERDICTS.forEach(function (v, i) {
+        var list = rs.filter(function (r) { return r.g === v.key; });
+        var c = list.length;
+        if (c) {
+          var seg = h("div", { class: "seg v-" + v.key, tabindex: "0", style: "flex:" + c + " 1 0" });
+          bindTip(seg, function () {
+            return [c + "건 · " + Math.round(c / n * 100) + "%", g[0] + " · " + v.label].concat(list.length <= 8 ? [list.map(function (r) { return short(r.id); }).join(", ")] : []);
+          });
+          bar.append(seg);
+        }
+        if (i) counts.append(" · ");
+        counts.append(h("span", { class: "glyph", text: v.glyph + " " }), h("b", { text: String(c) }));
+      });
+      var name = h("div", { class: "name" + (g[2] ? " sub" : "") }, g[0], h("span", { class: "n", text: "n=" + n }));
+      host.append(h("div", { class: "comp-row" }, name, bar, counts));
+    });
+  })();
+
+  /* 2. Site grid and Online-Mind2Web chips */
+  (function () {
+    var grid = document.getElementById("wv-grid");
+    var order = [];
+    ROWS.forEach(function (r) { if (r.source === "WebVoyager" && order.indexOf(r.site) < 0) order.push(r.site); });
+    order.forEach(function (site) {
+      var rs = ROWS.filter(function (r) { return r.site === site && r.source === "WebVoyager"; });
+      var cells = h("div", { class: "cells" });
+      rs.forEach(function (r) {
+        var c = h("button", { class: "cell v-" + r.g, type: "button", "aria-label": r.id + " " + VBY[r.g].label, text: VBY[r.g].glyph });
+        bindTip(c, function () { return runLines(r); });
+        cells.append(c);
+      });
+      var ok = rs.filter(function (r) { return r.g === "correct"; }).length;
+      grid.append(h("div", { class: "site" }, h("span", { class: "sname" }, site, h("span", { class: "muted small", text: "  " + ok + "/4" })), cells));
+    });
+    var host = document.getElementById("om-chips");
+    [["easy", "easy"], ["medium", "medium"], ["hard", "hard"]].forEach(function (lv) {
+      var rs = ROWS.filter(function (r) { return r.group === lv[0]; });
+      var ok = rs.filter(function (r) { return r.g === "correct"; }).length;
+      var chips = h("div", { class: "chips" });
+      rs.forEach(function (r) {
+        var chip = h("span", { class: "chip", tabindex: "0" }, h("span", { class: "dot v-" + r.g, text: VBY[r.g].glyph }), r.site);
+        bindTip(chip, function () { return runLines(r); });
+        chips.append(chip);
+      });
+      host.append(h("div", { class: "level" }, h("div", { class: "level-head", text: lv[1] + " · 정답 " + ok + "/" + rs.length }), chips));
+    });
+  })();
+
+  /* 3. Cause chart */
+  (function () {
+    var host = document.getElementById("cause-chart");
+    var bad = ROWS.filter(function (r) { return r.g !== "correct"; });
+    var by = {};
+    bad.forEach(function (r) { (by[r.cause] = by[r.cause] || []).push(r); });
+    var max = 0; for (var k in by) max = Math.max(max, by[k].length);
+    [["에이전트", false], ["환경", true]].forEach(function (grp) {
+      var keys = Object.keys(by).filter(function (k) { return !!ENV[k] === grp[1]; }).sort(function (a, b) { return by[b].length - by[a].length; });
+      var total = keys.reduce(function (a, k) { return a + by[k].length; }, 0);
+      var box = h("div", { class: "cause-group" }, h("div", { class: "cause-head" }, grp[0] + " 원인", h("span", { text: total + "건" })));
+      keys.forEach(function (k) {
+        var list = by[k];
+        var fill = h("span", { class: "fill " + (grp[1] ? "env" : "agent"), style: "width:" + (list.length / max * 88) + "%" });
+        var row = h("div", { class: "cause-row", tabindex: "0" },
+          h("div", { class: "clabel" }, CAUSES[k][0], h("small", { text: CAUSES[k][1] })),
+          h("div", { class: "cbar" }, fill, h("span", { class: "val", text: String(list.length) })));
+        bindTip(row, function () {
+          var vs = {}; list.forEach(function (r) { vs[r.g] = (vs[r.g] || 0) + 1; });
+          var parts = VERDICTS.filter(function (v) { return vs[v.key]; }).map(function (v) { return v.label + " " + vs[v.key]; }).join(" · ");
+          return [CAUSES[k][0] + " " + list.length + "건", parts, list.map(function (r) { return short(r.id); }).join(", ")];
+        });
+        box.append(row);
+      });
+      host.append(box);
+    });
+  })();
+
+  /* 4. Calibration matrix */
+  (function () {
+    var t = document.getElementById("matrix");
+    var claims = ["succeeded", "partial", "blocked", "unknown"];
+    var head = h("tr", null, h("th", { class: "rowh", text: "자가보고 \\ 검증" }));
+    VERDICTS.forEach(function (v) { head.append(h("th", null, h("span", { class: "glyph", text: v.glyph + " " }), v.label)); });
+    head.append(h("th", { text: "합계" }));
+    t.append(h("thead", null, head));
+    var body = h("tbody");
+    var max = 0;
+    claims.forEach(function (c) { VERDICTS.forEach(function (v) { max = Math.max(max, ROWS.filter(function (r) { return r.claimed === c && r.g === v.key; }).length); }); });
+    claims.forEach(function (c) {
+      var rowRuns = ROWS.filter(function (r) { return r.claimed === c; });
+      var tr = h("tr", null, h("th", { class: "rowh mono", text: c }));
+      VERDICTS.forEach(function (v) {
+        var list = rowRuns.filter(function (r) { return r.g === v.key; });
+        var n = list.length;
+        var cls = n ? "" : "zero";
+        if (c === "succeeded" && (v.key === "wrong") && n) cls = "flag";
+        if (c === "partial" && v.key === "correct" && n) cls = "under";
+        var td = h("td", { class: cls, text: String(n) });
+        if (n) {
+          td.style.background = "color-mix(in srgb, var(--accent) " + Math.round(8 + n / max * 42) + "%, transparent)";
+          td.tabIndex = 0;
+          bindTip(td, function () { return [n + "건", "자가보고 " + c + " → " + v.label, list.length <= 10 ? list.map(function (r) { return short(r.id); }).join(", ") : ""]; });
+        }
+        tr.append(td);
+      });
+      tr.append(h("td", { class: "muted", text: String(rowRuns.length) }));
+      body.append(tr);
+    });
+    t.append(body);
+  })();
+
+  /* 5. Steps strip */
+  (function () {
+    var host = document.getElementById("strip");
+    var W = 720, rowH = 42, top = 8, left = 112, right = 16, bottom = 30;
+    var H = top + rowH * VERDICTS.length + bottom;
+    var svg = s("svg", { viewBox: "0 0 " + W + " " + H, class: "chart-svg", role: "img", "aria-label": "검증 결과별 스텝 수 분포" }, host);
+    function x(v) { return left + (W - left - right) * v / 30; }
+    [0, 5, 10, 15, 20, 25, 30].forEach(function (t) {
+      s("line", { x1: x(t), x2: x(t), y1: top, y2: H - bottom, stroke: "var(--grid)", "stroke-width": 1 }, svg);
+      var tx = s("text", { x: x(t), y: H - bottom + 18, "text-anchor": "middle", "font-size": 11, fill: "var(--muted)" }, svg);
+      tx.textContent = String(t);
+    });
+    var lab = s("text", { x: W - right, y: H - 2, "text-anchor": "end", "font-size": 11, fill: "var(--muted)" }, svg);
+    lab.textContent = "스텝";
+    function rand(i) { var v = Math.sin(i * 12.9898) * 43758.5453; return v - Math.floor(v); }
+    VERDICTS.forEach(function (v, i) {
+      var cy = top + rowH * i + rowH / 2;
+      var rs = ROWS.filter(function (r) { return r.g === v.key; });
+      var steps = rs.map(function (r) { return r.steps; }).sort(function (a, b) { return a - b; });
+      var mid = steps.length % 2 ? steps[(steps.length - 1) / 2] : (steps[steps.length / 2 - 1] + steps[steps.length / 2]) / 2;
+      var t = s("text", { x: 0, y: cy - 2, "font-size": 12.5, fill: "var(--ink)" }, svg);
+      t.textContent = v.glyph + " " + v.label + " " + rs.length;
+      var t2 = s("text", { x: 0, y: cy + 13, "font-size": 11, fill: "var(--muted)" }, svg);
+      t2.textContent = "중앙값 " + mid + "스텝";
+      rs.forEach(function (r, j) {
+        var cx = x(r.steps), dy = (rand(j + i * 97 + r.steps) - 0.5) * (rowH - 16);
+        var g = s("g", { tabindex: "0" }, svg);
+        s("circle", { cx: cx, cy: cy + dy, r: 12, fill: "transparent" }, g);
+        s("circle", { cx: cx, cy: cy + dy, r: 4.5, fill: "var(--v-" + v.key + ")", stroke: "var(--surface)", "stroke-width": 2 }, g);
+        bindTip(g, function () { return runLines(r); });
+      });
+      s("line", { x1: x(mid), x2: x(mid), y1: cy - rowH / 2 + 3, y2: cy + rowH / 2 - 3, stroke: "var(--ink)", "stroke-width": 2, "stroke-linecap": "round" }, svg);
+    });
+  })();
+
+  /* 6. Trend small multiples */
+  (function () {
+    var H = D.history;
+    var metrics = [
+      ["자가보고 성공", "succeeded 건수", function (r) { return r.succeeded; }, String],
+      ["golden 정답", "16개 중", function (r) { return r.golden; }, String],
+      ["step_limit 종료", "건수", function (r) { return r.step_limit; }, String],
+      ["총 스텝", "100개 작업 합계", function (r) { return r.steps; }, fmt],
+      ["입력 토큰", "백만", function (r) { return r.in_m; }, function (v) { return v.toFixed(1); }],
+      ["툴 오류", "건수", function (r) { return r.tool_errors; }, String]
+    ];
+    var host = document.getElementById("multiples");
+    metrics.forEach(function (m) {
+      var W = 260, Ht = 150, top = 20, bottom = 30, left = 6, right = 6;
+      var vals = H.map(m[2]);
+      var max = Math.max.apply(null, vals) * 1.08;
+      var svg = s("svg", { viewBox: "0 0 " + W + " " + Ht, class: "chart-svg", role: "img", "aria-label": m[0] });
+      var bw = Math.min(24, (W - left - right) / H.length * 0.5);
+      var step = (W - left - right) / H.length;
+      s("line", { x1: left, x2: W - right, y1: Ht - bottom, y2: Ht - bottom, stroke: "var(--rule)", "stroke-width": 1 }, svg);
+      H.forEach(function (r, i) {
+        var v = vals[i];
+        var bh = (Ht - top - bottom) * v / max;
+        var cx = left + step * i + step / 2;
+        var latest = i === H.length - 1;
+        var y = Ht - bottom - bh;
+        var g = s("g", { tabindex: "0" }, svg);
+        s("rect", { x: cx - step / 2, y: top, width: step, height: Ht - top - bottom, fill: "transparent" }, g);
+        var path = "M" + (cx - bw / 2) + "," + (Ht - bottom) + " V" + (y + 4) + " Q" + (cx - bw / 2) + "," + y + " " + (cx - bw / 2 + 4) + "," + y + " H" + (cx + bw / 2 - 4) + " Q" + (cx + bw / 2) + "," + y + " " + (cx + bw / 2) + "," + (y + 4) + " V" + (Ht - bottom) + " Z";
+        s("path", { d: path, fill: latest ? "var(--accent)" : "var(--env-bar)" }, g);
+        var t = s("text", { x: cx, y: y - 5, "text-anchor": "middle", "font-size": 11, fill: latest ? "var(--ink)" : "var(--ink-2)", "font-weight": latest ? 600 : 400 }, g);
+        t.textContent = m[3](v);
+        var xl = s("text", { x: cx, y: Ht - bottom + 15, "text-anchor": "middle", "font-size": 10, fill: "var(--muted)", "font-family": "var(--font-mono)" }, svg);
+        xl.textContent = r.label.slice(0, 4);
+        var dl = s("text", { x: cx, y: Ht - bottom + 27, "text-anchor": "middle", "font-size": 9.5, fill: "var(--muted)" }, svg);
+        dl.textContent = r.date.slice(5);
+        bindTip(g, function () { return [m[3](v) + (m[0] === "입력 토큰" ? "M" : ""), m[0] + " · " + r.label + " (" + r.date + ")"]; });
+      });
+      host.append(h("div", { class: "mult" }, h("div", { class: "t", text: m[0] }), h("div", { class: "s", text: m[1] }), svg));
+    });
+    var t = document.getElementById("trend-table");
+    var head = h("tr", null, h("th", { text: "실행" }), h("th", { text: "날짜" }));
+    ["succeeded", "partial", "blocked", "golden", "step_limit", "no_progress", "총 스텝", "입력 토큰(M)", "툴 오류", "검색 결과 페이지"].forEach(function (c) { head.append(h("th", { class: "r", text: c })); });
+    t.append(h("thead", null, head));
+    var tb = h("tbody");
+    H.forEach(function (r, i) {
+      var tr = h("tr", { class: i === H.length - 1 ? "latest" : "" }, h("td", { class: "mono", text: r.label }), h("td", { text: r.date }));
+      [r.succeeded, r.partial, r.blocked, r.golden + "/16", r.step_limit, r.no_progress, fmt(r.steps), r.in_m.toFixed(2), r.tool_errors, r.serp].forEach(function (v) { tr.append(h("td", { class: "r", text: String(v) })); });
+      tb.append(tr);
+    });
+    t.append(tb);
+  })();
+
+  /* 7. Blocked start sites */
+  (function () {
+    var host = document.getElementById("blocked-chips");
+    ROWS.filter(function (r) { return r.start_blocked; }).forEach(function (r) {
+      var chip = h("span", { class: "chip", tabindex: "0" }, h("span", { class: "dot v-" + r.g, text: VBY[r.g].glyph }), r.site + (r.block ? " · " + r.block : ""));
+      bindTip(chip, function () { return runLines(r); });
+      host.append(chip);
+    });
+  })();
+
+  /* 8. Appendix table */
+  (function () {
+    var tbody = document.querySelector("#runs tbody");
+    var buttons = document.getElementById("filter-buttons");
+    var search = document.getElementById("run-search");
+    var shown = document.getElementById("shown");
+    var state = { v: "all", q: "" };
+    try { var saved = localStorage.getItem("owa-report-filter"); if (saved && (saved === "all" || VBY[saved])) state.v = saved; } catch (e) { }
+    var trs = ROWS.map(function (r) {
+      var ans = h("details", null, h("summary", { text: "작업과 답변" }), h("div", null, h("p", { class: "full", text: r.task }), r.answer || "(답변 없음)"));
+      var taskCell = h("td", null, h("div", { class: "id", text: r.id }), h("div", { class: "task", text: r.site + " · " + r.task }), ans);
+      var v = VBY[r.g];
+      var tr = h("tr", null,
+        taskCell,
+        h("td", null, h("span", { class: "vpill" }, h("i", { class: "sw v-" + r.g }), v.label)),
+        h("td", { class: "mono", text: r.claimed }),
+        h("td", { text: STOP[r.stop] || r.stop }),
+        h("td", { class: "r", text: String(r.steps) }),
+        h("td", { class: "r", text: Math.round(r.sec) + "초" }),
+        h("td", { class: "r", text: (r.tok / 1000).toFixed(0) + "k" }),
+        h("td", { text: r.cause ? CAUSES[r.cause][0] : "" }),
+        h("td", { class: "note", text: r.note }));
+      tr._r = r;
+      tr._text = (r.id + " " + r.site + " " + r.task + " " + r.note + " " + (r.cause ? CAUSES[r.cause][0] : "")).toLowerCase();
+      tbody.append(tr);
+      return tr;
+    });
+    var opts = [{ key: "all", label: "전체" }].concat(VERDICTS);
+    var btns = opts.map(function (o) {
+      var count = o.key === "all" ? ROWS.length : ROWS.filter(function (r) { return r.g === o.key; }).length;
+      var b = h("button", { class: "fbtn", type: "button", "aria-pressed": "false" }, o.key === "all" ? null : h("i", { class: "sw v-" + o.key }), o.label + " " + count);
+      b.addEventListener("click", function () { state.v = o.key; try { localStorage.setItem("owa-report-filter", o.key); } catch (e) { } apply(); });
+      b._key = o.key;
+      buttons.append(b);
+      return b;
+    });
+    search.addEventListener("input", function () { state.q = search.value.trim().toLowerCase(); apply(); });
+    function apply() {
+      var n = 0;
+      trs.forEach(function (tr) {
+        var ok = (state.v === "all" || tr._r.g === state.v) && (!state.q || tr._text.indexOf(state.q) >= 0);
+        tr.hidden = !ok;
+        if (ok) n++;
+      });
+      btns.forEach(function (b) { b.setAttribute("aria-pressed", String(b._key === state.v)); });
+      shown.textContent = n + "건 표시";
+    }
+    apply();
+  })();
+})();
+</script>
+</body>
+</html>
