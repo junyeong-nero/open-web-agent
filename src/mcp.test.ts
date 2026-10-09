@@ -96,7 +96,10 @@ it("returns compact structured outcomes and marks incomplete delegation as an er
   for (const outcome of ["succeeded", "partial", "blocked"]) {
     const session = new BrowserSession({ headless: true })
     const server = createMcpServer({ session, tools: selectTools(), agentModel: scriptedModel([
-      () => ({ text: JSON.stringify({ answer: "answer", outcome, unfinished: outcome === "succeeded" ? [] : ["Read price"] }), toolCalls: [] }),
+      (request) => {
+        expect(request.messages[0]).toMatchObject({ role: "user", content: [{ type: "text", text: expect.stringMatching(/^Today is .+\n\nTask: t\n/) }] })
+        return { text: JSON.stringify({ answer: "answer", outcome, unfinished: outcome === "succeeded" ? [] : ["Read price"] }), toolCalls: [] }
+      },
     ]) })
     const response = await server.handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "browser_task", arguments: { task: "t" } } })
     const result = response?.result as any

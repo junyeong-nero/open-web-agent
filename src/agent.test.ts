@@ -4,6 +4,9 @@ import { BrowserSession } from "./browser"
 import { refFor, startFixtureServer } from "./testing/fixture"
 import { lastToolText, scriptedModel } from "./testing/scripted-model"
 
+const clock = { now: new Date("2026-10-09T16:30:00Z"), timeZone: "Asia/Seoul" }
+const dateLine = "Today is Saturday, 2026-10-10 (Asia/Seoul)."
+
 const fixture = startFixtureServer()
 let session: BrowserSession
 
@@ -25,7 +28,7 @@ describe("runAgent", () => {
       (request) => ({ text: `The Pro plan is ${lastToolText(request.messages).match(/\$\d+/)?.[0]}.`, toolCalls: [], usage: { inputTokens: 4, outputTokens: 2 } }),
     ])
     const events: AgentEvent[] = []
-    const result = await runAgent({ task: "Find the Pro price", model, browser: session, onEvent: (event) => events.push(event) })
+    const result = await runAgent({ task: "Find the Pro price", model, browser: session, onEvent: (event) => events.push(event), ...clock })
 
     expect(result).toMatchObject({ status: "completed", answer: "The Pro plan is $42.", steps: 4, usage: { inputTokens: 7, outputTokens: 3 } })
     expect(events.filter((event) => event.type === "tool").map((event) => event.type === "tool" && event.call.name)).toEqual([
@@ -33,6 +36,11 @@ describe("runAgent", () => {
       "browser_click",
       "browser_get_text",
     ])
+
+    expect(model.requests[0]!.messages[0]).toEqual({ role: "user", content: [{ type: "text", text: `${dateLine}\n\nTask: Find the Pro price\n\nThe browser has not opened any page yet.` }] })
+    for (const request of model.requests) {
+      expect(request.messages[0]).toEqual(model.requests[0]!.messages[0])
+    }
 
     // Only the newest snapshot stays in context.
     const lastRequest = model.requests.at(-1)?.messages ?? []
@@ -44,9 +52,11 @@ describe("runAgent", () => {
   it("includes the current page when the browser is already open", async () => {
     await (await session.page()).goto(`${fixture.url}/pricing`)
     const model = scriptedModel([() => ({ text: "ok", toolCalls: [] })])
-    await runAgent({ task: "t", model, browser: session })
+    await runAgent({ task: "t", model, browser: session, ...clock })
     const first = model.requests[0]?.messages[0]
-    expect(first?.role === "user" && first.content[0]?.type === "text" && first.content[0].text).toContain("Page title: Pricing")
+    const text = first?.role === "user" && first.content[0]?.type === "text" && first.content[0].text
+    expect(text).toStartWith(`${dateLine}\n\nTask: t\n\nCurrent page:`)
+    expect(text).toContain("Page title: Pricing")
   }, 30_000)
 
   it("stops after repeated failing steps", async () => {

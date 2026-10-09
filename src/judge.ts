@@ -22,7 +22,7 @@ export interface Verdict {
 }
 
 /** One tool-less request with the task, the answer, and the page content still in the agent's context. */
-export function judgeRequest(task: string, answer: string, pages: { text?: string; snapshot?: string }): Omit<ModelRequest, "signal"> {
+export function judgeRequest(task: string, answer: string, pages: { text?: string; snapshot?: string }, dateLine: string): Omit<ModelRequest, "signal"> {
   const parts: Array<[string, string]> = []
   if (pages.text !== undefined) parts.push(["Text the agent read last", pages.text])
   // Refs and cursor hints only matter for acting on the page.
@@ -32,6 +32,7 @@ export function judgeRequest(task: string, answer: string, pages: { text?: strin
     return `${label}${kept === text ? "" : " (excerpt; … marks skipped lines)"}:\n${kept}`
   })
   const text = [
+    dateLine,
     `Task: ${task}`,
     `Answer: ${answer}`,
     ...(evidence.length ? evidence : ["Evidence: none; the agent opened no page."]),
