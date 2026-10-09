@@ -384,3 +384,20 @@ test("resolveModel loads the default module factory with extraBody options", asy
   const driver = await resolveModel({ module: "./examples/systemone-driver.ts", extraBody: { llm: "ollama:offline", llmOptions: {} } })
   expect(driver.name).toBe("systemone-driver")
 })
+
+test("logFile records one line per step with Jev's operation and who acted", async () => {
+  const { mkdtempSync } = await import("node:fs")
+  const { tmpdir } = await import("node:os")
+  const dir = mkdtempSync(`${tmpdir()}/owa-driver-log-`)
+  const logFile = `${dir}/decisions.jsonl`
+  const jev = await setup("CLICK", "e50", { logFile })
+  await jev.driver.complete(request())
+  const low = await setup("CLICK", "e50", { logFile }, 0.3)
+  await low.driver.complete(request())
+  const done = await setup("DONE", "e50", { logFile })
+  await done.driver.complete(request())
+  const lines = (await Bun.file(logFile).text()).trim().split("\n").map((line) => JSON.parse(line))
+  expect(lines.map((line) => line.outcome)).toEqual(["jev:CLICK", "llm:low-confidence", "llm:done"])
+  expect(lines[0]).toMatchObject({ goal: "Find flights from Pune", url: "https://example.test/search", operation: "CLICK", confidence: 0.93, jevInputTokens: 100 })
+  expect(JSON.stringify(lines)).not.toContain(secret)
+})

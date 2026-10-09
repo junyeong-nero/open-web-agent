@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs"
 import { setTimeout as delay } from "node:timers/promises"
 import { resolveModel, type ModelConfig } from "../src/model/resolve"
 import { reportedUsage, type FetchLike, type ModelAdapter, type ModelRequest, type ModelResponse } from "../src/model/types"
@@ -9,6 +10,8 @@ export interface SystemOneDriverOptions {
   llmOptions?: Record<string, unknown>
   minConfidence?: number
   maxTargets?: number
+  /** Append one JSON line per step (goal, URL, Jev's operation and confidence, who acted and why) for analysis. */
+  logFile?: string
   fetch?: FetchLike
 }
 
@@ -226,31 +229,46 @@ export async function systemOneDriver(options: SystemOneDriverOptions = {}): Pro
   return {
     name: "systemone-driver",
     async complete(request) {
-      const fallback = () => llm.complete(request)
-      if (!request.tools.length) return fallback()
-      const page = context(request)
-      if (!/^https?:\/\/[^\s]+$/i.test(page.url)) return fallback()
+      const started = performance.now()
+      let page: ReturnType<typeof context> | undefined
+      let reply: Reply | undefined
+      const log = (outcome: string) => {
+        if (!options.logFile) return
+        const raw = reply?.answers?.operation as { choice?: unknown, confidence?: unknown } | undefined
+        try {
+          appendFileSync(options.logFile, `${JSON.stringify({ at: new Date().toISOString(), goal: page?.goal.slice(0, 100), url: page?.url, operation: raw?.choice, confidence: raw?.confidence, outcome, ms: Math.round(performance.now() - started), jevInputTokens: reply?.usage?.input_tokens })}\n`)
+        } catch { /* Logging must never break a step. */ }
+      }
+      const fallback = (reason: string) => {
+        log(`llm:${reason}`)
+        return llm.complete(request)
+      }
+      if (!request.tools.length) return fallback("no-tools")
+      page = context(request)
+      if (!/^https?:\/\/[^\s]+$/i.test(page.url)) return fallback("no-page")
       const parsed = table(page.snapshot, maxTargets)
       const recent_actions = recentActions(request)
       const state = { goal: page.goal, page: { url: page.url, title: page.title, text: parsed.text }, elements: parsed.elements, recent_actions }
       const offered = questions(page.goal, parsed.heads)
-      let reply: Reply
       let operation: Answer | undefined
       let target: Target | undefined
       try {
         reply = await ask(options.fetch ?? fetch, options.systemOneUrl ?? "https://api.typesafe.ai/v1/systemone", key,
           { model: options.systemOneModel ?? "jev-latest", state, questions: offered }, request.signal)
         operation = answer(reply.answers?.operation, offered.operation)
-        if (!operation || operation.confidence < minConfidence) return fallback()
+        if (!operation) return fallback("invalid-operation")
+        if (operation.confidence < minConfidence) return fallback("low-confidence")
         const head = OPERATIONS[operation.choice]?.head
         if (head) {
           const selected = answer(reply.answers?.[head], offered[head])
-          if (!selected || selected.confidence < minConfidence) return fallback()
+          if (!selected) return fallback("invalid-target")
+          if (selected.confidence < minConfidence) return fallback("low-target-confidence")
           target = parsed.heads[head].find((target) => target.id === selected.choice)
         }
-      } catch { return fallback() }
+      } catch { return fallback("error") }
       const spec = OPERATIONS[operation.choice]
-      if (!spec || !request.tools.some((tool) => tool.name === spec.tool)) return fallback()
+      if (!spec) return fallback(operation.choice.toLowerCase())
+      if (!request.tools.some((tool) => tool.name === spec.tool)) return fallback("tool-missing")
       const args = target ? { ref: target.element.ref, element: `${target.element.name || target.element.role} [jev ${operation.choice} ${operation.confidence.toFixed(2)}]` } : { ...spec.args }
       let helper: ModelResponse | undefined
       if (operation.choice === "TYPE_TEXT" && target) {
@@ -262,14 +280,15 @@ export async function systemOneDriver(options: SystemOneDriverOptions = {}): Pro
           })
           const text = (helper.text ?? "").trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i, "$1")
           const value = JSON.parse(text)
-          if (helper.toolCalls.length || typeof value?.text !== "string" || !value.text.trim() || typeof value.submit !== "boolean") return fallback()
+          if (helper.toolCalls.length || typeof value?.text !== "string" || !value.text.trim() || typeof value.submit !== "boolean") return fallback("text-invalid")
           Object.assign(args, { text: value.text, submit: value.submit })
-        } catch { return fallback() }
+        } catch { return fallback("text-error") }
       }
       if (operation.choice === "SELECT" && target) Object.assign(args, { values: [target.optionLabel] })
+      log(`jev:${operation.choice}`)
       return {
         toolCalls: [{ id: `jev-${crypto.randomUUID()}`, name: spec.tool, arguments: args }],
-        model: helper ? helper.model : reply.model,
+        model: helper ? helper.model : reply?.model,
         usage: helper ? helper.usage : reportedUsage({ inputTokens: reply.usage?.input_tokens, outputTokens: reply.usage?.output_tokens }),
       }
     },
