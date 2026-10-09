@@ -236,10 +236,12 @@ function truncate(tree: string, max: number): string {
 }
 
 function emptyDialog(lines: string[]): boolean {
+  // Icon fonts use private-use glyphs that carry no readable text. Keep the original snapshot intact.
+  const text = lines.map((line) => line.replace(/[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}]/gu, " "))
   // The dialog's name is only a label; values and named descendants are content.
   const emptyRoot = /^ *- '?(?:alert)?dialog(?: "(?:\\.|[^"\\])*")?(?: \[[^\]]*\])*'?:?\s*$/
   const emptyStructure = /^ *- '?(?:generic|group|none|presentation|paragraph|list|listitem|region|main|navigation|banner|contentinfo|article|complementary)(?: \[[^\]]*\])*'?:?\s*$/
-  return emptyRoot.test(lines[0]) && lines.slice(1).every((line) => !line.trim() || emptyStructure.test(line))
+  return emptyRoot.test(text[0]) && text.slice(1).every((line) => !line.trim() || emptyStructure.test(line) || /^ *- text:\s*$/.test(line))
 }
 
 /** Playwright pins an exact browser build; fall back to any cached Chromium when that build is missing. */

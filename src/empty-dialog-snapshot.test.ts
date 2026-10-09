@@ -44,6 +44,11 @@ const empty = [
   "- dialog",
   "- dialog [ref=e2]",
   "- dialog [ref=e2]:   ",
+  "- dialog [ref=e627]:            ",
+  "- dialog [ref=e2]:\n  - generic [ref=e3]: ",
+  "- dialog [ref=e2]:\n  - text:  ",
+  "- dialog [ref=e2]: \uE000 \uF8FF \u{F0000} \u{FFFFD} \u{100000} \u{10FFFD}",
+  "- dialog [ref=e2]:\n  - generic [ref=e3]: \u{F0000} \u{FFFFD}\n    - text: \u{100000} \u{10FFFD}",
   '- dialog "Label only" [ref=e2]',
   '- alertdialog "Label only" [active] [ref=e2]:  ',
   "- 'dialog \"Label: only\" [ref=e2]':   ",
@@ -61,6 +66,9 @@ for (const dialog of empty) {
 
 const content = [
   "- dialog [ref=e2]: Content",
+  "- dialog [ref=e2]:  Close",
+  "- dialog [ref=e2]:\n  - generic [ref=e3]:  Close",
+  "- dialog [ref=e2]:\n  - text:  Close",
   "- alertdialog [ref=e2]: Content",
   "- 'dialog \"Label: only\" [ref=e2]': Content",
   '- dialog [ref=e2]:\n  - generic "Named wrapper" [ref=e3]',
