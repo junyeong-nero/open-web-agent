@@ -162,7 +162,7 @@ it("gives the model rules for the HTTP statuses that navigation results report",
   expect(lastToolText(blocked!.messages)).toContain("The server responded with HTTP 403.")
   expect(lastToolText(missing!.messages)).toContain("The server responded with HTTP 404.")
   // One assertion per prompt rule, so dropping a rule drops only its line.
-  expect(missing!.system).toContain("the server responds with HTTP 401, 402, 403, or 429")
+  expect(missing!.system).toContain("the server responds with HTTP 401, 402 or 403")
   expect(missing!.system).toContain("If a URL you guessed returns HTTP 404")
   expect(missing!.system).toContain("do not keep rewriting search queries whose results point back to it")
 }, 30_000)

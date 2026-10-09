@@ -64,6 +64,57 @@ it("reports HTTP error statuses while still returning the error page, including 
   expect(back.snapshot).toContain("Access denied")
 }, 30_000)
 
+it("waits and reloads a rate-limited page once, returning the recovered page", async () => {
+  const started = performance.now()
+  const result = await callTool(tools, session, "browser_navigate", { url: `${fixture.url}/rate-limit?recover` })
+  expect(result.isError).toBeUndefined()
+  expect(result.snapshot).toContain("Page title: Recovered")
+  expect(result.snapshot).toContain("Request 2")
+  expect(result.text).toContain("The first response was HTTP 429; the browser waited 1 s and reloaded once.")
+  expect(result.text).not.toContain("The server responded with HTTP 429.")
+  expect(performance.now() - started).toBeGreaterThanOrEqual(1_000)
+}, 30_000)
+
+it("reports a persistent rate limit after exactly one reload, including history navigation", async () => {
+  const page = await session.page()
+  let requests = 0
+  page.on("request", (request) => {
+    if (request.isNavigationRequest() && request.url().includes("/rate-limit")) requests++
+  })
+  const result = await callTool(tools, session, "browser_navigate", { url: `${fixture.url}/rate-limit?always` })
+  expect(requests).toBe(2)
+  await callTool(tools, session, "browser_navigate", { url: `${fixture.url}/pricing` })
+  requests = 0
+  const back = await callTool(tools, session, "browser_go_back", {})
+  expect(requests).toBe(2)
+  for (const response of [result, back]) {
+    expect(response.isError).toBeUndefined()
+    expect(response.text).toContain("The server responded with HTTP 429.")
+    expect(response.text).toContain("The site is rate-limiting this browser and may be blocking it; it still answered HTTP 429 after waiting 1 s and one reload.")
+    expect(response.snapshot).toContain("Too many requests")
+  }
+}, 30_000)
+
+it("handles downloads and still-loading pages during the automatic reload", async () => {
+  const download = await callTool(tools, session, "browser_navigate", { url: `${fixture.url}/rate-limit?then=/blank-file` })
+  expect(download.isError).toBe(true)
+  expect(download.text).toContain("waited 1 s and reloaded once")
+  expect(download.text).toContain("This counts as a block under the rules; use another site.")
+  const slow = await callTool(tools, session, "browser_navigate", { url: `${fixture.url}/rate-limit?then=/slow-body` })
+  expect(slow.isError).toBeUndefined()
+  expect(slow.text).toContain("waited 1 s and reloaded once")
+  expect(slow.text).toContain("may still be loading")
+  expect(slow.snapshot).toContain("Usable content")
+}, 30_000)
+
+it("treats a non-document attachment as a site block", async () => {
+  const result = await callTool(tools, session, "browser_navigate", { url: `${fixture.url}/blank-file` })
+  expect(result.isError).toBe(true)
+  expect(result.text).toContain("non-document file (content-type `application/blank`, filename `response`) instead of a page")
+  expect(result.text).toContain("other URLs on the same site will likely do the same.")
+  expect(result.text).toContain("This counts as a block under the rules; use another site.")
+})
+
 it("explains navigations that download a file instead of opening a page", async () => {
   const result = await callTool(tools, session, "browser_navigate", { url: `${fixture.url}/paper` })
   expect(result.isError).toBe(true)
