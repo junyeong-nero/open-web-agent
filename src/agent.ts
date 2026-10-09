@@ -63,6 +63,10 @@ export interface AgentOptions {
   timeoutMs?: number
   /** Stop after identical action/state steps; waits and scrolls are exempt (default three). */
   maxRepeatedSteps?: number
+  /** Clock used for the run's date (default current time). */
+  now?: Date
+  /** Time zone used for the run's date (default process time zone). */
+  timeZone?: string
   systemPrompt?: string
   /**
    * Checks a final answer whose outcome is succeeded against the page content still in context, in one tool-less request.
@@ -75,12 +79,13 @@ export interface AgentOptions {
 }
 
 type Entry = Message
-  | { role: "user"; task: string; snapshot: string }
+  | { role: "user"; task: string; dateLine: string; snapshot: string }
   | { role: "tool"; toolCallId: string; name: string; result: ToolResult }
 
 export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   const timeoutMs = options.timeoutMs ?? 300_000
   if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) throw new Error("timeoutMs must be a positive integer up to 2147483647")
+  const dateLine = todayLine(options.now ?? new Date(), options.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone)
   const deadline = new AbortController()
   const timer = setTimeout(() => deadline.abort(new Error("Task deadline exceeded")), timeoutMs)
   const signal = options.signal ? AbortSignal.any([options.signal, deadline.signal]) : deadline.signal
@@ -158,7 +163,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   const judge = async (judgeModel: ModelAdapter, answer: string) => {
     const requestedAt = performance.now()
     try {
-      const response = await interruptible(() => judgeModel.complete({ ...judgeRequest(options.task, answer, latestPages(entries)), signal }), signal)
+      const response = await interruptible(() => judgeModel.complete({ ...judgeRequest(options.task, answer, latestPages(entries), dateLine), signal }), signal)
       judgeUsage.push(response.usage)
       emit({ type: "model", role: "judge", step, text: response.text, toolCalls: response.toolCalls, model: response.model, durationMs: Math.round(performance.now() - requestedAt), usage: response.usage })
       const verdict = parseVerdict(response.text)
@@ -172,7 +177,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
 
   try {
     signal.throwIfAborted()
-    const initial = await interruptible(() => taskMessage(options), signal, pending => options.browser.cancelPending(pending))
+    const initial = await interruptible(() => taskMessage(options, dateLine), signal, pending => options.browser.cancelPending(pending))
     entries.push(initial)
     if ("snapshot" in initial) visit("", initial.snapshot)
     while (step < maxSteps) {
@@ -301,9 +306,21 @@ export function sumUsage(calls: Array<Usage | undefined>): AgentResult["usage"] 
   return total
 }
 
-async function taskMessage(options: AgentOptions): Promise<Entry> {
-  if (!options.browser.started) return { role: "user", content: [{ type: "text", text: `Task: ${options.task}\n\nThe browser has not opened any page yet.` }] }
-  return { role: "user", task: options.task, snapshot: await options.browser.snapshot() }
+function todayLine(now: Date, timeZone: string): string {
+  let formatter: Intl.DateTimeFormat
+  try {
+    formatter = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "long", year: "numeric", month: "2-digit", day: "2-digit" })
+  } catch {
+    throw new Error(`Invalid timeZone: ${timeZone}`)
+  }
+  const parts = formatter.formatToParts(now)
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)!.value
+  return `Today is ${part("weekday")}, ${part("year")}-${part("month")}-${part("day")} (${timeZone}).`
+}
+
+async function taskMessage(options: AgentOptions, dateLine: string): Promise<Entry> {
+  if (!options.browser.started) return { role: "user", content: [{ type: "text", text: `${dateLine}\n\nTask: ${options.task}\n\nThe browser has not opened any page yet.` }] }
+  return { role: "user", task: options.task, dateLine, snapshot: await options.browser.snapshot() }
 }
 
 /**
@@ -356,7 +373,7 @@ export function render(entries: Entry[]): Message[] {
   return entries.map((entry, index): Message => {
     if ("snapshot" in entry) {
       const snapshot = index === lastSnapshot ? entry.snapshot : "[older snapshot omitted: superseded by a newer one]"
-      return { role: "user", content: [{ type: "text", text: `Task: ${entry.task}\n\nCurrent page:\n${snapshot}` }] }
+      return { role: "user", content: [{ type: "text", text: `${entry.dateLine}\n\nTask: ${entry.task}\n\nCurrent page:\n${snapshot}` }] }
     }
     if (!("result" in entry)) return entry
     const result: ToolResult = { ...entry.result }

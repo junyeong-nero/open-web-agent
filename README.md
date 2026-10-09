@@ -220,6 +220,8 @@ keeps its locale. Library callers can set `BrowserOptions.locale`, for example
 
 ## Library
 
+Each run tells the model today's date and time zone; library callers can set `now` and `timeZone` in `runAgent` options.
+
 ```ts
 import { BrowserSession, runAgent, resolveModel } from "open-web-agent"
 

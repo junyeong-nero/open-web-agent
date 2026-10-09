@@ -26,7 +26,11 @@ it.each(["browser_navigate", "browser_select_tab"])("replaces the initial snapsh
     },
   ])
   const tools = selectTools().map(tool => tool.name === name ? { ...tool, run: async () => ({ text: "Navigated", snapshot: "NEW_PAGE_WITH_FRESH_REFS" }) } : tool)
-  const result = await runAgent({ task, browser: new ExistingSession(), model, tools })
+  const result = await runAgent({ task, browser: new ExistingSession(), model, tools, now: new Date("2026-10-09T16:30:00Z"), timeZone: "Asia/Seoul", systemPrompt: "Custom prompt" })
+  for (const request of model.requests) {
+    expect(request.system).toBe("Custom prompt")
+    expect(request.messages[0]).toMatchObject({ role: "user", content: [{ type: "text", text: expect.stringMatching(/^Today is Saturday, 2026-10-10 \(Asia\/Seoul\)\.\n\nTask: /) }] })
+  }
   expect(result.status).toBe("completed")
 })
 
@@ -43,4 +47,14 @@ it("retains the initial snapshot until another snapshot replaces it", async () =
     },
   ])
   expect((await runAgent({ task: "t", browser: new ExistingSession(), model })).status).toBe("completed")
+})
+
+it("rejects an invalid timeZone before the run starts", async () => {
+  const model = scriptedModel([])
+  const events: unknown[] = []
+  const browser = new BrowserSession()
+  await expect(runAgent({ task: "t", browser, model, timeZone: "Invalid/Zone", onEvent: event => events.push(event) })).rejects.toThrow("Invalid timeZone: Invalid/Zone")
+  expect(model.requests).toHaveLength(0)
+  expect(events).toHaveLength(0)
+  expect(browser.started).toBe(false)
 })

@@ -20,6 +20,9 @@ type Reply = (request: ModelRequest) => ModelResponse | Promise<ModelResponse>
 const fixture = startFixtureServer()
 afterAll(() => fixture.stop())
 
+const dateLine = "Today is Saturday, 2026-10-10 (Asia/Seoul)."
+const clock = { now: new Date("2026-10-09T16:30:00Z"), timeZone: "Asia/Seoul" }
+
 const price = "The Pro plan costs $42 per month."
 const reply = (text: string, outcome = "succeeded"): Reply => () => ({ text: `${text}\n{"outcome":"${outcome}","unfinished":[]}`, toolCalls: [], usage: { inputTokens: 1000, outputTokens: 20 } })
 const read: Reply = () => ({ toolCalls: [{ id: "r", name: "browser_get_text", arguments: {} }], usage: { inputTokens: 1000, outputTokens: 5 } })
@@ -53,7 +56,7 @@ it("sends a wrong answer on the pricing page back once and judges the corrected 
     ], [
       () => ({ text: '{"reason":"The page says $42 per month, not $24.","supported":0.05}', toolCalls: [], model: "judge-v1", usage: { inputTokens: 300, outputTokens: 20 } }),
       () => ({ text: '```json\n{"reason":"The page text shows $42 per month.","supported":0.97}\n```', toolCalls: [], usage: { inputTokens: 320, outputTokens: 18 } }),
-    ], { task, browser, tools: undefined })
+    ], { task, browser, tools: undefined, ...clock })
 
     expect(result).toMatchObject({ status: "completed", stopReason: "final_answer", answer: price, steps: 4 })
     expect(result.outcome).toEqual({
@@ -69,7 +72,7 @@ it("sends a wrong answer on the pricing page back once and judges the corrected 
     expect(judgeModel!.requests).toHaveLength(2)
     expect(first).toMatchObject({ system: JUDGE_PROMPT, tools: [] })
     expect(first!.messages).toHaveLength(1)
-    expect(userText(first!)).toStartWith(`Task: ${task}\n\nAnswer: The Pro plan costs $24 per month.\n\nLatest page snapshot:\nPage URL: ${fixture.url}/pricing`)
+    expect(userText(first!)).toStartWith(`${dateLine}\n\nTask: ${task}\n\nAnswer: The Pro plan costs $24 per month.\n\nLatest page snapshot:\nPage URL: ${fixture.url}/pricing`)
     expect(userText(first!)).toContain(price)
     expect(userText(first!)).not.toContain("[ref=")
     expect(userText(first!)).not.toContain('"outcome"')
@@ -197,21 +200,21 @@ it("judges only a final answer that claims success", async () => {
 
 it("builds one tool-less judge request from the task, the answer and the newest page content", () => {
   const format = 'Reply with only JSON: {"reason":"<one sentence>","supported":<probability from 0 to 1 that the answer is supported>}'
-  expect(judgeRequest("Find the Pro price", "$42", {})).toEqual({
+  expect(judgeRequest("Find the Pro price", "$42", {}, dateLine)).toEqual({
     system: JUDGE_PROMPT,
     tools: [],
-    messages: [{ role: "user", content: [{ type: "text", text: `Task: Find the Pro price\n\nAnswer: $42\n\nEvidence: none; the agent opened no page.\n\n${format}` }] }],
+    messages: [{ role: "user", content: [{ type: "text", text: `${dateLine}\n\nTask: Find the Pro price\n\nAnswer: $42\n\nEvidence: none; the agent opened no page.\n\n${format}` }] }],
   })
 
   // Refs and cursor hints are left out of the snapshot.
-  const both = judgeRequest("Find the Pro price", "$42", { text: price, snapshot: '- link "Pricing" [ref=e3] [cursor=pointer]\n- paragraph: The Pro plan costs $42 per month. [ref=e4]' })
+  const both = judgeRequest("Find the Pro price", "$42", { text: price, snapshot: '- link "Pricing" [ref=e3] [cursor=pointer]\n- paragraph: The Pro plan costs $42 per month. [ref=e4]' }, dateLine)
   expect(userText(both)).toBe(
-    `Task: Find the Pro price\n\nAnswer: $42\n\nText the agent read last:\n${price}\n\nLatest page snapshot:\n- link "Pricing"\n- paragraph: ${price}\n\n${format}`,
+    `${dateLine}\n\nTask: Find the Pro price\n\nAnswer: $42\n\nText the agent read last:\n${price}\n\nLatest page snapshot:\n- link "Pricing"\n- paragraph: ${price}\n\n${format}`,
   )
 
   // A long page is cut to the lines that match the task and the answer.
   const filler = Array.from({ length: 2000 }, (_, index) => `Menu item ${index}`)
-  const long = userText(judgeRequest("Find the Pro price", "$42 per month", { text: [...filler.slice(0, 1000), price, ...filler.slice(1000)].join("\n") }))
+  const long = userText(judgeRequest("Find the Pro price", "$42 per month", { text: [...filler.slice(0, 1000), price, ...filler.slice(1000)].join("\n") }, dateLine))
   expect(long).toContain("Text the agent read last (excerpt; … marks skipped lines):\n…\n")
   expect(long).toContain(`\n${price}\n`)
   expect(long.length).toBeLessThan(16_500)
@@ -318,7 +321,8 @@ it("judges with TypeSafe System One through owa run and owa mcp --agent", async 
       authorization: "Bearer test-key",
       body: { model: "jev-latest", questions: { answer: { type: "noul", instructions: JUDGE_PROMPT } }, tag: "owa-test" },
     })
-    expect(requests[0]!.body.state).toStartWith(`Task: Find the Pro price\n\nAnswer: ${price}\n\nEvidence: none`)
+    expect(requests[0]!.body.state).toStartWith("Today is ")
+    expect(requests[0]!.body.state).toContain(`Task: Find the Pro price\n\nAnswer: ${price}\n\nEvidence: none`)
     const events = (await readFile(trace, "utf8")).trim().split("\n").map((line) => JSON.parse(line))
     expect(events.filter((event) => event.type === "model" && event.role === "judge")).toMatchObject([{ step: 1, text: "0.9", model: "jev-1.13.0" }])
 
