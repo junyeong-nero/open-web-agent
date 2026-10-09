@@ -91,6 +91,20 @@ export default (config): ModelAdapter => ({
 owa run "..." --model-module ./my-model.ts
 ```
 
+### Experimental System One action driver
+
+The example driver ([#182](https://github.com/junyeong-nero/open-web-agent/issues/182)) lets TypeSafe Jev choose
+routine browser actions, with an LLM supplying typed text, uncertain steps, and final answers. It needs
+`TYPESAFE_API_KEY` and the LLM provider's key (by default `OPENAI_API_KEY`). From the repository root:
+
+```bash
+owa run "..." --model-module examples/systemone-driver.ts --model-options '{"llm":"openai:gpt-6-luna","llmOptions":{"reasoning_effort":"none"}}' --headless
+```
+
+Jev cannot write answers, count, or reason about dates; those steps need the LLM. The driver is experimental,
+and its speed and task success have not yet been validated in live runs. Options also include `systemOneModel`
+(`jev-latest`), `systemOneUrl` (`https://api.typesafe.ai/v1/systemone`), `minConfidence` (`0.6`), and `maxTargets` (`250`).
+
 ### Checking answers with a judge model
 
 `--judge-model <provider:model>` (or `OWA_JUDGE_MODEL`) adds an optional second model that checks a final answer
