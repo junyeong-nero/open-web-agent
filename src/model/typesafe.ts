@@ -13,8 +13,8 @@ export interface TypeSafeSystemOneOptions {
  * TypeSafe System One (`POST /v1/systemone`), e.g. `typesafe:jev-latest`. Jev answers typed questions about a text and
  * writes no text of its own, so it can only judge and check. The system prompt becomes one yes/no (Noul) question about
  * the text of the messages, and the response text is Jev's probability of yes, e.g. `0.82`. With `choices`, it becomes
- * one Choice question over them instead, about that text sent as an object when it is a JSON object, and the response
- * text is `{"label":"<choice>","confidence":<its probability>}`. Requests that offer tools fail.
+ * one Choice question over them instead, and a text that is a JSON object goes as that object. The response text is then
+ * `{"label":"<choice>","confidence":<its probability>}`. Requests that offer tools fail.
  */
 export function typesafeSystemOne(options: TypeSafeSystemOneOptions): ModelAdapter {
   const baseUrl = (options.baseUrl ?? "https://api.typesafe.ai/v1").replace(/\/+$/, "")
