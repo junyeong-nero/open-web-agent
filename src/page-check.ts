@@ -129,9 +129,9 @@ export function pageChecker(model: ModelAdapter, browser: BrowserSession, signal
     if (result.isError || READS.has(tool) || result.snapshot === undefined) return { result }
     const url = /^Page URL: (.*)/.exec(result.snapshot)?.[1]
     if (url === undefined) return { result }
-    const opened = OPENS.has(tool) || url.replace(/#.*/, "") !== last
+    const previous = last
     last = url.replace(/#.*/, "")
-    if (!opened) return { result }
+    if (!OPENS.has(tool) && last === previous) return { result }
     const call = await askPageKind(model, { url, result: result.text, snapshot: result.snapshot }, signal)
     return { result: await applyVerdict(call.verdict, result, browser, signal), call }
   }

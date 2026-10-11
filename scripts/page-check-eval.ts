@@ -52,8 +52,9 @@ async function main(): Promise<number> {
   console.log(`\nmodel ${model.name}, served by ${[...new Set(answers.map(({ call }) => call.response?.model ?? "?"))].join(", ")}`)
   const right = (list: Answer[]) => list.filter(({ sample, call }) => call.verdict?.label === sample.label).length
   console.log(`accuracy ${right(answers)}/${answers.length} (${orders.map(([order]) => `${order} ${right(answers.filter((answer) => answer.order === order))}/${samples.length}`).join(", ")})`)
-  const sure = answers.filter(({ call }) => call.verdict && call.verdict.confidence >= SURE_AT)
-  console.log(`at confidence ${SURE_AT} or more: ${sure.length} answers, ${right(sure)} right`)
+  // The agent changes a result only for a kind other than content at SURE_AT or more.
+  const acted = answers.filter(({ call }) => call.verdict && call.verdict.label !== "content" && call.verdict.confidence >= SURE_AT)
+  console.log(`acted on (a kind other than content at confidence ${SURE_AT} or more): ${acted.length} answers, ${right(acted)} right`)
   console.log("confusion (right label: answers)")
   for (const label of labels) {
     const got = answers.filter(({ sample }) => sample.label === label).map(({ call }) => call.verdict?.label ?? "error")

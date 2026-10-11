@@ -139,9 +139,14 @@ snapshots of real sites, so keep them outside the repository. The checker model 
 `--checker-model-options`, or `OWA_CHECKER_MODEL` and `OWA_CHECKER_MODEL_OPTIONS`.
 
 The script asks about every sample twice, once with the kinds in their usual order and once rotated by three, one call
-at a time. It prints each answer, then the accuracy for both orders, how many answers reached the 0.8 confidence at
-which the agent acts and how many of those were right, the answers given for each right kind, the median and longest
-latency, and the input tokens.
+at a time. It prints each answer, then the accuracy for both orders, how many answers the agent would act on (a kind
+other than `content` at confidence 0.8 or more) and how many of those were right, the answers given for each right
+kind, the median and longest latency, and the input tokens.
+
+On 2026-10-11, `typesafe:jev-latest` (served by `jev-1.13.0`) on 21 pages from the 2026-10-09 benchmark traces got
+40 of 42 answers right, 20 in each order. It would have acted on 28 answers, all right. Both misses took the same
+empty page shell, a soft 404, for `content`, so they changed nothing. The median latency was 239 ms (max 907 ms, the
+first call), with about 4,640 input tokens per call.
 
 ## Recorded baseline (2026-09-28)
 

@@ -416,7 +416,7 @@ it("measures a checker model on labeled pages with scripts/page-check-eval.ts", 
     const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited])
     expect({ code, stderr }).toEqual({ code: 0, stderr: "" })
     expect(stdout).toContain("accuracy 2/4 (given 1/2, rotated 1/2)")
-    expect(stdout).toContain("at confidence 0.8 or more: 4 answers, 2 right")
+    expect(stdout).toContain("acted on (a kind other than content at confidence 0.8 or more): 2 answers, 2 right")
     expect(stdout).toContain(`\n  ${"access_denied".padEnd(15)} access_denied 2\n  ${"not_found".padEnd(15)} content 2\n`)
     // Each sample is asked with the labels in their order and rotated by three.
     const labels = Object.keys(PAGE_KINDS)

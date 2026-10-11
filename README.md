@@ -172,7 +172,8 @@ owa run "..." --model openai:gpt-6-luna --model-options '{"reasoning_effort":"no
 
 `typesafe:jev-latest` needs `TYPESAFE_API_KEY`. It answers one Choice question over the seven kinds, and the
 probability of its choice is the confidence. On 21 pages from real-site runs, each asked with the kinds in two orders,
-Jev (`jev-1.13.0`) chose the right kind in 40 of 42 answers, in about 250 ms and 4,700 input tokens per page. Any other
+Jev (`jev-1.13.0`) chose the right kind in 40 of 42 answers, with a median of 239 ms and about 4,600 input tokens per
+page. All 28 answers it would have acted on were right; both misses took an empty page shell for `content`. Any other
 `provider:model` also works: it gets the kinds in the system prompt and replies `{"label":"<kind>"}`, which counts
 as sure. `scripts/page-check-eval.ts` measures a checker model on labeled pages ([page-check
 evaluation](docs/evaluation.md#page-check-evaluation)).
