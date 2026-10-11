@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { errors, type Download, type Frame, type Locator, type Page, type Request, type Response, type WebSocket } from "playwright"
 import type { BrowserSession } from "./browser"
+import { hasEmptyContent } from "./empty-content"
 import type { ContentPart, ToolSpec } from "./model/types"
 
 export interface ToolResult {
@@ -317,8 +318,9 @@ async function act(session: BrowserSession, summary: string, action: (page: Page
     throw error
   }
   settling?.observe()
-  if (await navigated) await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {})
-  return snapshotAfterAction(session, summary, settling)
+  const openedDocument = await navigated
+  if (openedDocument) await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {})
+  return snapshotAfterAction(session, summary, settling, openedDocument)
 }
 
 /** Retry-After in seconds, bounded so a rate limit cannot stall the task. */
@@ -381,7 +383,7 @@ async function navigate(session: BrowserSession, summary: string, action: (page:
       summary += "\nThe page may still be loading."
     }
   }
-  return snapshotAfterAction(session, summary, settling)
+  return snapshotAfterAction(session, summary, settling, response !== null)
 }
 
 /** Explain a download so the agent stops reopening a URL whose file the browser cannot show. */
@@ -425,11 +427,14 @@ function failureReason(error: unknown): string {
 }
 
 /** A failed observation must not turn an already completed action into a retryable failure. */
-async function snapshotAfterAction(session: BrowserSession, summary: string, settling?: Settling): Promise<ToolResult> {
+async function snapshotAfterAction(session: BrowserSession, summary: string, settling?: Settling, openedDocument = false): Promise<ToolResult> {
   const { note, last } = (await settling?.settle()) ?? { note: "" }
   summary += note
   try {
-    return snapshotResult(summary, await session.snapshot(last))
+    const snapshot = await session.snapshot(last)
+    const tree = snapshot.split("\nSnapshot:\n")[1] ?? ""
+    if (openedDocument && hasEmptyContent(tree)) summary += "\nThe page loaded, but its content is empty: the URL may not exist, or the content may still be loading."
+    return snapshotResult(summary, snapshot)
   } catch (error) {
     return {
       text: `${summary}\nThe browser action completed, but its follow-up snapshot failed: ${failureReason(error)}\nDo not repeat the action just to recover the snapshot. Call browser_snapshot to inspect the current page before taking another action.`,
