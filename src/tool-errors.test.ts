@@ -30,6 +30,8 @@ function clickFailingWith(error: Error) {
   const session = new BrowserSession()
   session.page = async () => ({ waitForEvent: async () => { throw new Error("No navigation") } }) as unknown as Page
   session.locator = async () => ({ count: async () => 1, click: async () => { throw error } }) as unknown as Locator
+  // The snapshot an interception asks for fails without a browser, so the failure text is the plain one.
+  session.snapshot = async () => { throw new Error("No browser") }
   return callTool(tools, session, "browser_click", { ref: "e2" })
 }
 
@@ -50,7 +52,9 @@ it("names the element that intercepts a click", async () => {
     expect(result.text.match(/intercepts pointer events/g)).toHaveLength(1)
     expect(result.text).not.toContain("retrying click action")
     expect(result.text).not.toContain("\u001b[")
-    expect(result.text).toEndWith(`\n${guidance}`)
+    // An interception returns the current snapshot instead of asking for one.
+    expect(result.text).not.toContain(guidance)
+    expect(result.snapshot).toContain('button "Buy now"')
   } finally { await session.close() }
 }, 30_000)
 

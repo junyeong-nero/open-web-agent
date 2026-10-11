@@ -106,6 +106,13 @@ const PAGES: Record<string, string> = {
   "/sorry": `<!doctype html><title>Just a moment...</title><h1>Check you are human</h1>`,
   "/overlay": `<!doctype html><title>Overlay</title>
     <button>Buy now</button><div id="overlay" style="position: fixed; inset: 0"></div>`,
+  // Like a sign-in popup that covers the whole page and opens after the click's own snapshot, which comes about 0.8 s after the click.
+  "/late-overlay": `<!doctype html><title>Late overlay</title><h1>Checkout</h1>
+    <button onclick="setTimeout(() => document.body.append(document.querySelector('template').content.cloneNode(true)), 1500)">Buy now</button>
+    <template><div role="dialog" aria-label="Sign in" style="position: fixed; inset: 0; background: white">
+      <h2>Sign in for member prices</h2>
+      <button onclick="this.closest('[role=dialog]').remove()">Close</button>
+    </div></template>`,
   "/toggles": `<!doctype html>${TOGGLES}`,
   // Like americanexpress.com, replace window.eval, which breaks Playwright's page-world evaluate but not its actions.
   "/toggles-no-eval": `<!doctype html><script>window.eval = () => { throw new Error("eval is disabled") }</script>${TOGGLES}`,
