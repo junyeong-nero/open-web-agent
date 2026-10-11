@@ -190,7 +190,8 @@ the end of the page stays visible and its refs work.
 A checkbox or radio covered by its own label, as when a site hides the input under a styled label, is
 clicked through that label at the same point instead of waiting for the action timeout, and the result
 says so. Anything else on top, such as a dialog or a cookie banner, still fails the click with an error
-that names it.
+that names it. Such overlays often open after the last snapshot, so the error comes with the current one,
+and the model can deal with the overlay before it retries.
 
 ## Options
 

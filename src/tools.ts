@@ -777,6 +777,22 @@ function omitNullOptionals(schema: z.ZodObject, args: unknown): unknown {
   return input
 }
 
+/**
+ * The error result of a failed tool run. Overlays such as a late modal, sign-in popup or cookie banner often open after
+ * the last snapshot, so an action they intercept returns the current snapshot, as a stale ref does. If that snapshot
+ * fails too, the action's own failure is returned as for any other failure.
+ */
+async function failureResult(session: BrowserSession, name: string, error: unknown): Promise<ToolResult> {
+  const reason = failureReason(error)
+  if (reason.includes("intercepts pointer events")) {
+    try {
+      const covered = "Another element covers the target. The snapshot in this result shows the current page, and its refs are current; use it to deal with the covering element, such as a dialog, popup or banner, before retrying."
+      return { ...snapshotResult(`${name} failed: ${reason}\n${covered}`, await session.snapshot()), isError: true }
+    } catch { /* The snapshot's own error must not replace the action's. */ }
+  }
+  return { text: `${name} failed: ${reason}\nTake a new browser_snapshot if the page may have changed.`, isError: true }
+}
+
 /** Validate arguments, run the tool, and turn any failure into an error result the model can react to. */
 export async function callTool(
   tools: BrowserTool[],
@@ -794,7 +810,7 @@ export async function callTool(
   try {
     return await definition.run(session, parsed.data)
   } catch (error) {
-    return { text: `${name} failed: ${failureReason(error)}\nTake a new browser_snapshot if the page may have changed.`, isError: true }
+    return failureResult(session, name, error)
   }
 }
 
