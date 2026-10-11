@@ -119,7 +119,34 @@ To try a [judge model](../README.md#checking-answers-with-a-judge-model), give i
 `"flags": ["--judge-model", "gemini:gemini-3.1-flash-lite"]`; the runner removes `OWA_JUDGE_MODEL` like other `OWA_*`
 variables. The summary then counts the judge's calls among the model calls, with their time and served model, but
 its token sums and cost estimate cover only the result's `usage`, which leaves out the judge. Read `judgeUsage`,
-`judgeError` and `outcome.judge` from each run's `result.json`.
+`judgeError` and `outcome.judge` from each run's `result.json`. A [checker model](../README.md#checking-page-state-with-a-system-one-model)
+(`--checker-model`) works the same way: its calls count among the model calls, and `checkerUsage` and `checkerError`
+are in `result.json`.
+
+## Page-check evaluation
+
+`scripts/page-check-eval.ts` measures a checker model on pages whose kind is known. It calls a real model API, so
+`bun run test` never runs it against one.
+
+```bash
+bun scripts/page-check-eval.ts ~/owa-bench/page-samples.json --checker-model typesafe:jev-latest
+```
+
+The samples file is a JSON array of `{ id, label, url, result, snapshot }`: the page URL, the tool result text and the
+snapshot as the agent saw them in a trace, and the right kind (`content`, `access_denied`, `rate_limited`,
+`not_found`, `empty_results`, `login_required` or `blocking_dialog`). Other fields are ignored. Such samples are
+snapshots of real sites, so keep them outside the repository. The checker model comes from `--checker-model` and
+`--checker-model-options`, or `OWA_CHECKER_MODEL` and `OWA_CHECKER_MODEL_OPTIONS`.
+
+The script asks about every sample twice, once with the kinds in their usual order and once rotated by three, one call
+at a time. It prints each answer, then the accuracy for both orders, how many answers the agent would act on (a kind
+other than `content` at confidence 0.8 or more) and how many of those were right, the answers given for each right
+kind, the median and longest latency, and the input tokens.
+
+On 2026-10-11, `typesafe:jev-latest` (served by `jev-1.13.0`) on 21 pages from the 2026-10-09 benchmark traces got
+40 of 42 answers right, 20 in each order. It would have acted on 28 answers, all right. Both misses took the same
+empty page shell, a soft 404, for `content`, so they changed nothing. The median latency was 239 ms (max 907 ms, the
+first call), with about 4,640 input tokens per call.
 
 ## Recorded baseline (2026-09-28)
 

@@ -24,6 +24,8 @@ export interface McpServerOptions {
   agentModel?: ModelAdapter
   /** Checks a `browser_task` answer that claims success; see `AgentOptions.judgeModel`. */
   agentJudgeModel?: ModelAdapter
+  /** Checks each page a `browser_task` opens; see `AgentOptions.checkerModel`. */
+  agentCheckerModel?: ModelAdapter
   agentMaxSteps?: number
   agentTimeoutMs?: number
 }
@@ -75,14 +77,16 @@ export function createMcpServer(options: McpServerOptions) {
         maxSteps: parsed.data.maxSteps ?? options.agentMaxSteps,
         timeoutMs: parsed.data.timeoutMs ?? options.agentTimeoutMs,
         judgeModel: options.agentJudgeModel,
+        checkerModel: options.agentCheckerModel,
         signal,
       })
     } catch (error) {
       return { text: `browser_task failed: ${error instanceof Error ? error.message : String(error)}`, isError: true }
     }
     const judgeTokens = result.judgeUsage ? `, judge tokens: ${result.judgeUsage.inputTokens} in / ${result.judgeUsage.outputTokens} out` : ""
+    const checkerTokens = result.checkerUsage ? `, checker tokens: ${result.checkerUsage.inputTokens} in / ${result.checkerUsage.outputTokens} out` : ""
     return {
-      text: `${result.answer || result.error || "No answer returned"}\n\n[status: ${result.status}, steps: ${result.steps}]\n[stop: ${result.stopReason}, outcome: ${result.outcome.status} (${result.outcome.verification}), duration: ${result.durationMs}ms, tokens: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out${judgeTokens}]${result.outcome.unfinished.length ? `\nUnfinished: ${result.outcome.unfinished.join("; ")}` : ""}${result.observedUrls.length ? `\nObserved URLs (not verified citations): ${result.observedUrls.join(", ")}` : ""}`,
+      text: `${result.answer || result.error || "No answer returned"}\n\n[status: ${result.status}, steps: ${result.steps}]\n[stop: ${result.stopReason}, outcome: ${result.outcome.status} (${result.outcome.verification}), duration: ${result.durationMs}ms, tokens: ${result.usage.inputTokens} in / ${result.usage.outputTokens} out${judgeTokens}${checkerTokens}]${result.outcome.unfinished.length ? `\nUnfinished: ${result.outcome.unfinished.join("; ")}` : ""}${result.observedUrls.length ? `\nObserved URLs (not verified citations): ${result.observedUrls.join(", ")}` : ""}`,
       structuredContent: { ...result },
       isError: taskIncomplete(result),
     }

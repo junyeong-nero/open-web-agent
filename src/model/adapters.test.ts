@@ -74,7 +74,7 @@ describe("typesafeSystemOne", () => {
 
   it("refuses requests with tools, fails without a yes/no answer, and redacts the key from HTTP errors", async () => {
     const answered = recordingFetch({ model: "jev-1.13.0", answers: { answer: { type: "noul", noul: 0.5 } } })
-    await expect(typesafeSystemOne({ model: "jev-latest", fetch: answered.fetchImpl }).complete(request)).rejects.toThrow("only answers yes/no questions")
+    await expect(typesafeSystemOne({ model: "jev-latest", fetch: answered.fetchImpl }).complete(request)).rejects.toThrow("only answers yes/no and choice questions; use it as the judge or checker model")
     expect(answered.calls).toHaveLength(0)
     await expect(typesafeSystemOne({ model: "jev-latest", fetch: recordingFetch({ answers: {} }).fetchImpl }).complete(question)).rejects.toThrow("returned no yes/no answer")
 
@@ -83,6 +83,54 @@ describe("typesafeSystemOne", () => {
     expect(error).toBeInstanceOf(ModelHttpError)
     expect(String(error)).toContain("typesafe-systemone:jev-latest request failed with HTTP 401")
     expect(String(error)).not.toContain("test-secret-token")
+  })
+
+  const choices = { content: "The page works.", access_denied: "A bot check or 'Access Denied' page." }
+  const page = { url: "https://example.com/", browser_result: "Navigated to https://example.com/", accessibility_snapshot: "Page URL: https://example.com/\n- heading \"Access Denied\"" }
+
+  it("asks one Choice question when the request has choices, with a JSON object message as the state", async () => {
+    const { calls, fetchImpl } = recordingFetch({
+      model: "jev-1.13.0",
+      answers: { answer: { type: "choice", choice: "access_denied", confidence: 0.94, probabilities: { access_denied: 0.97, content: 0.03 } } },
+      usage: { input_tokens: 896, output_tokens: 95 },
+    })
+    const model = typesafeSystemOne({ model: "jev-latest", apiKey: "k", extraBody: { tag: "x" }, fetch: fetchImpl })
+    expect(model.answersChoices).toBe(true)
+    const response = await model.complete({ system: "Which kind of page is it?", tools: [], choices, messages: [{ role: "user", content: [{ type: "text", text: JSON.stringify(page) }] }] })
+    expect(calls).toEqual([{
+      url: "https://api.typesafe.ai/v1/systemone",
+      headers: { "content-type": "application/json", authorization: "Bearer k" },
+      body: { model: "jev-latest", state: page, questions: { answer: { type: "choice", instructions: "Which kind of page is it?", criteria: choices } }, tag: "x" },
+    }])
+    // The confidence is the probability of the choice, not the API's spread-based confidence.
+    expect(response).toEqual({ text: '{"label":"access_denied","confidence":0.97}', toolCalls: [], model: "jev-1.13.0", usage: { inputTokens: 896, outputTokens: 95 } })
+
+    // Text that is not a JSON object stays a string.
+    await model.complete({ ...question, choices })
+    expect(calls[1]!.body.state).toBe("Task: t\n\nAnswer: a")
+  })
+
+  it("fails a choice request without a choice and its probability", async () => {
+    for (const answer of [{ type: "noul", noul: 0.9 }, { type: "choice", choice: "content" }, { type: "choice", choice: "content", probabilities: { content: "1" } }]) {
+      const { fetchImpl } = recordingFetch({ answers: { answer } })
+      await expect(typesafeSystemOne({ model: "jev-latest", fetch: fetchImpl }).complete({ ...question, choices })).rejects.toThrow("typesafe-systemone:jev-latest returned no choice")
+    }
+  })
+})
+
+describe("choices", () => {
+  it("are left out of the chat adapters' requests", async () => {
+    const withChoices: ModelRequest = { system: "Which kind of page is it?", tools: [], choices: { content: "The page works." }, messages: [{ role: "user", content: [{ type: "text", text: "page" }] }] }
+    const openai = recordingFetch({ choices: [{ message: { content: '{"label":"content"}' } }] })
+    const anthropic = recordingFetch({ content: [{ type: "text", text: '{"label":"content"}' }] })
+    expect(openaiChat({ model: "m", fetch: openai.fetchImpl }).answersChoices).toBeUndefined()
+    await openaiChat({ model: "m", fetch: openai.fetchImpl }).complete(withChoices)
+    await anthropicMessages({ model: "m", fetch: anthropic.fetchImpl }).complete(withChoices)
+    const { choices: _ignored, ...plain } = withChoices
+    await openaiChat({ model: "m", fetch: openai.fetchImpl }).complete(plain)
+    await anthropicMessages({ model: "m", fetch: anthropic.fetchImpl }).complete(plain)
+    expect(openai.calls[0]!.body).toEqual(openai.calls[1]!.body)
+    expect(anthropic.calls[0]!.body).toEqual(anthropic.calls[1]!.body)
   })
 })
 

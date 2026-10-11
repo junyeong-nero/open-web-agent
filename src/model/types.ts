@@ -23,6 +23,11 @@ export interface ModelRequest {
   system: string
   messages: Message[]
   tools: ToolSpec[]
+  /**
+   * Label → description, for a request that asks which label applies. An adapter that `answersChoices` replies with
+   * `{"label":"<label>","confidence":<its probability>}`. Other adapters ignore this field, so the prompt must list the labels for them.
+   */
+  choices?: Record<string, string>
   signal?: AbortSignal
 }
 
@@ -52,6 +57,8 @@ export interface ModelResponse {
 /** The whole model boundary: one provider-neutral request in, one response out. */
 export interface ModelAdapter {
   readonly name: string
+  /** True when the adapter asks a request's `choices` as a question of their own, as TypeSafe System One does. */
+  readonly answersChoices?: boolean
   complete(request: ModelRequest): Promise<ModelResponse>
 }
 

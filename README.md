@@ -47,7 +47,7 @@ Any other MCP client can use the equivalent JSON config:
 | `openrouter` | openai | `OPENROUTER_API_KEY` |
 | `gemini` | openai (Gemini's OpenAI endpoint) | `GEMINI_API_KEY` |
 | `ollama` | openai (`localhost:11434`) | — |
-| `typesafe` | TypeSafe System One (`/v1/systemone`), [judge model](#checking-answers-with-a-judge-model) only | `TYPESAFE_API_KEY` |
+| `typesafe` | TypeSafe System One (`/v1/systemone`), [judge](#checking-answers-with-a-judge-model) or [checker](#checking-page-state-with-a-system-one-model) model only | `TYPESAFE_API_KEY` |
 
 To reach any other OpenAI- or Anthropic-compatible endpoint (vLLM, LM Studio, a gateway, …), pass the URL and the format:
 
@@ -130,7 +130,8 @@ rejected.
 
 `typesafe:jev-latest` uses a small client for TypeSafe's System One API (`POST /v1/systemone`). The judge prompt
 becomes one yes/no (Noul) question about the request text, and Jev's probability of yes is the verdict, without a
-reason. It works only as a judge, since System One models do not call tools.
+reason. It works only as a judge or a [checker](#checking-page-state-with-a-system-one-model), since System One models
+do not call tools.
 
 ```bash
 owa run "..." --model openai:gpt-6-luna --model-options '{"reasoning_effort":"none"}' \
@@ -144,6 +145,44 @@ key never reaches another provider. `--judge-model ""` turns off a judge model s
 without a judge model are an error. The judge also checks `browser_task` answers in `owa mcp --agent`. Library
 callers pass `judgeModel` to `runAgent`; a custom `ModelAdapter` gets the same tool-less request and can reply with
 the JSON or a bare probability.
+
+### Checking page state with a System One model
+
+`--checker-model <provider:model>` (or `OWA_CHECKER_MODEL`) adds an optional model that says what kind of page the
+agent just opened, so that the loop, not the agent model alone, notices a block, a missing page or an empty result
+list. It is off by default, and without it nothing changes: no extra requests, no new result fields, the same prompts.
+
+The agent asks the checker once after `browser_navigate` or `browser_go_back`, and after any other action whose
+snapshot shows another URL (the fragment does not count). It never asks after reads, waits, scrolls or failed tools.
+The request offers no tools and holds the page URL, the tool result's text and its snapshot, cut at 40,000
+characters. It asks which of seven kinds the page is: `content`, `access_denied`, `rate_limited`, `not_found`,
+`empty_results`, `login_required` or `blocking_dialog`.
+
+When the checker gives a kind other than `content` with a probability of 0.8 or more, the tool result gets one fixed
+sentence before the agent reads it, for example `Page check: this page is a bot check or access denial, so the site
+is blocking this browser.`, which brings in the prompt's rule for blocked sites. The checker's own text never reaches
+the agent. On an empty results page, the browser first waits 2 seconds and takes a new snapshot, which replaces the old
+one. A check that fails, takes longer than 5 seconds or names no kind changes nothing, and the result's
+`checkerError` says why.
+
+```bash
+owa run "..." --model openai:gpt-6-luna --model-options '{"reasoning_effort":"none"}' \
+  --checker-model typesafe:jev-latest
+```
+
+`typesafe:jev-latest` needs `TYPESAFE_API_KEY`. It answers one Choice question over the seven kinds, and the
+probability of its choice is the confidence. On 21 pages from real-site runs, each asked with the kinds in two orders,
+Jev (`jev-1.13.0`) chose the right kind in 40 of 42 answers, with a median of 239 ms and about 4,600 input tokens per
+page. All 28 answers it would have acted on were right; both misses took an empty page shell for `content`. Any other
+`provider:model` also works: it gets the kinds in the system prompt and replies `{"label":"<kind>"}`, which counts
+as sure. `scripts/page-check-eval.ts` measures a checker model on labeled pages ([page-check
+evaluation](docs/evaluation.md#page-check-evaluation)).
+
+`--checker-model-options` (or `OWA_CHECKER_MODEL_OPTIONS`) is a JSON object like `--judge-model-options`, and the
+checker model is resolved like the judge model, with its provider's own key. The checker also checks the pages of
+`browser_task` in `owa mcp --agent`. Library callers pass `checkerModel` to `runAgent`. A custom `ModelAdapter` that
+sets `answersChoices` gets the kinds as the request's `choices` instead of in the prompt and replies with
+`{"label":"<kind>","confidence":<probability>}`.
 
 ## Tools
 
@@ -216,6 +255,10 @@ and the model can deal with the overlay before it retries.
                              OWA_JUDGE_MODEL, opt-in model that checks an answer claiming success
 --judge-model-options <json>
                              OWA_JUDGE_MODEL_OPTIONS, its extra API request fields (JSON object)
+--checker-model <provider:model>
+                             OWA_CHECKER_MODEL, opt-in model that checks each page the agent opens
+--checker-model-options <json>
+                             OWA_CHECKER_MODEL_OPTIONS, its extra API request fields (JSON object)
 --trace run.jsonl            append agent events as JSONL
 --json                       (run) print the full result as JSON
 ```
@@ -255,7 +298,8 @@ bun run test          # launches headless Chromium against a local fixture serve
 
 `owa run --json` and MCP `browser_task.structuredContent` return the same compact result:
 `answer`, `status`, `stopReason`, `outcome`, `observedUrls`, `durationMs`, `steps`, and `usage`
-(and `error` for a failed model request, and `judgeUsage` and `judgeError` with a judge model). MCP still returns
+(and `error` for a failed model request, `judgeUsage` and `judgeError` with a judge model, and `checkerUsage` and
+`checkerError` with a checker model). MCP still returns
 readable text beginning with the answer.
 
 `status: completed` only means the model produced a final answer. `stopReason` distinguishes
@@ -316,6 +360,12 @@ verdict still writes its `model` event, but a judge request that fails writes no
 `judgeError` keeps the reason, and `owa run` prints it to stderr. The
 `browser_task` text shows the verification next to the outcome, for example `outcome: partial (judged)`, and the
 judge's tokens after the agent's.
+
+With `--checker-model`, `checkerUsage` sums the checker's calls by the same rules, apart from `usage` and
+`judgeUsage`. Each check is a `model` event with `role: "checker"`, right after the `tool` event of the result it
+checked, which shows the result as the agent read it. A check that gave no kind has `error` in its event, even when
+its request failed. `owa run` prints one line per check, and the `browser_task` text shows the checker's tokens
+after the judge's.
 
 ### Task limits and cancellation
 
