@@ -402,14 +402,14 @@ export function downloadMessage({ response, download }: { response?: Pick<Respon
 }
 
 /** Retain a compact record of the observed landing page when the snapshot is superseded. */
-function snapshotResult(summary: string, snapshot: string): ToolResult {
+function snapshotResult(summary: string, snapshot: string, note = ""): ToolResult {
   const headers = /^Page URL: ([^\n]*)\nPage title: ([\s\S]*?)\nPage tab:/.exec(snapshot)
   const compact = (value: string, max: number) => {
     const line = value.replace(/\s+/g, " ").trim()
     return line.length > max ? `${line.slice(0, max - 1)}…` : line
   }
   const landing = headers ? `\nLanding URL: ${compact(headers[1]!, 160)} | Title: ${compact(headers[2]!, 120)}` : ""
-  return { text: summary + landing, snapshot }
+  return { text: summary + (note ? `\n${note}` : "") + landing, snapshot }
 }
 
 /** Playwright call log lines that only narrate its retry loop; the reasons between them are kept. */
@@ -434,7 +434,7 @@ async function snapshotAfterAction(session: BrowserSession, summary: string, set
     const snapshot = await session.snapshot(last)
     const tree = snapshot.split("\nSnapshot:\n")[1] ?? ""
     if (openedDocument && hasEmptyContent(tree)) summary += "\nThe page loaded, but its content is empty: the URL may not exist, or the content may still be loading."
-    return snapshotResult(summary, snapshot)
+    return snapshotResult(summary, snapshot, session.snapshotNote)
   } catch (error) {
     return {
       text: `${summary}\nThe browser action completed, but its follow-up snapshot failed: ${failureReason(error)}\nDo not repeat the action just to recover the snapshot. Call browser_snapshot to inspect the current page before taking another action.`,
@@ -596,7 +596,7 @@ export const TOOLS: BrowserTool[] = [
       "Capture the accessibility snapshot of the current page. Elements carry [ref=…] handles that the other tools accept.",
     schema: z.object({}),
     readOnly: true,
-    run: async (session) => snapshotResult("Captured page snapshot", await session.snapshot()),
+    run: async (session) => snapshotResult("Captured page snapshot", await session.snapshot(), session.snapshotNote),
   }),
   tool({
     name: "browser_click",
@@ -704,7 +704,20 @@ export const TOOLS: BrowserTool[] = [
     run: async (session, { ref, offset = 0 }) => {
       // `used` is the ref actually read, which differs from `ref` after a stale ref was re-identified.
       const read = async (target: Locator, used?: string): Promise<ToolResult> => {
-        const text = (await target.innerText()).replace(/\n{3,}/g, "\n\n").trim()
+        let raw: string
+        let note = ""
+        try {
+          raw = await target.innerText()
+        } catch (error) {
+          if (!(error instanceof errors.TimeoutError)) throw error
+          // Check cancellation before starting another browser operation.
+          await session.page()
+          try {
+            raw = (await target.textContent({ timeout: 5_000 }) ?? "").replace(/[^\S\n]+/g, " ").replace(/ *\n */g, "\n")
+          } catch { throw error }
+          note = "Text was read without layout after a timeout, so it may include hidden text and lose line breaks.\n"
+        }
+        const text = raw.replace(/\n{3,}/g, "\n\n").trim()
         // No pageText flag, so an out-of-range read does not evict the part read last.
         if (offset > 0 && offset >= text.length) return { text: `No text at offset=${offset}: the text is ${text.length} chars long.`, isError: true }
         const max = session.options.maxSnapshotChars ?? 40_000
@@ -716,9 +729,9 @@ export const TOOLS: BrowserTool[] = [
         const part = text.slice(start, end)
         const range = `showing chars ${start}–${end} of ${text.length}`
         if (end < text.length) {
-          return { pageText: true, text: `${part}\n… [text truncated: ${range}; call browser_get_text with ${used ? `ref=${used} and ` : ""}offset=${end} to read more]` }
+          return { pageText: true, text: `${note}${part}\n… [text truncated: ${range}; call browser_get_text with ${used ? `ref=${used} and ` : ""}offset=${end} to read more]` }
         }
-        return { pageText: true, text: offset > 0 ? `${part}\n[end of text: ${range}]` : part || "(no text)" }
+        return { pageText: true, text: note + (offset > 0 ? `${part}\n[end of text: ${range}]` : part || "(no text)") }
       }
       return ref ? withRef(session, ref, read) : read((await session.page()).locator("body"))
     },

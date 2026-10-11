@@ -32,6 +32,23 @@ const PAGES: Record<string, string> = {
   "/content-outside-main": `<!doctype html><title>Content outside main</title><body><main></main>
     <h1>Local guide</h1><p>Explore the neighborhood on foot and discover its parks, cafes, and quiet streets.</p>
   </body>`,
+  "/busy-read": `<!doctype html><title>Busy read</title>
+    <script>
+      window.eval = () => { throw new Error("eval is disabled") }
+      function block() {
+        // Let the click finish before blocking; tests wait for the console signal.
+        setTimeout(() => {
+          console.log("renderer blocking")
+          const until = performance.now() + Number(new URLSearchParams(location.search).get("ms") || 2000)
+          while (performance.now() < until) {}
+        }, 500)
+      }
+    </script>
+    <body><button onclick="block()">Block renderer</button>
+    <article>Visible   text
+
+
+<span hidden>Hidden   text</span><p>Last line</p></article></body>`,
   "/empty-dialogs": `<!doctype html><title>Empty dialogs</title><body>
     <h1>Page content</h1>
     <div role="dialog" aria-modal="false" style="position: absolute; left: -9999px"></div>
