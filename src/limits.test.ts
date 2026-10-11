@@ -12,7 +12,7 @@ it("keeps only the latest page body while retaining concise action history", () 
     { role: "tool", toolCallId: "1", name: "browser_get_text", result: { text: "OLD".repeat(10_000), pageText: true } },
     { role: "tool", toolCallId: "2", name: "browser_click", result: { text: "Clicked Search" } },
     { role: "tool", toolCallId: "3", name: "browser_get_text", result: { text: "NEW BODY", pageText: true } },
-  ])
+  ], "t")
   const rendered = JSON.stringify(messages)
   expect(rendered).not.toContain("OLD")
   expect(rendered).toContain("older page text omitted")

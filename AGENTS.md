@@ -80,7 +80,7 @@ When you are Codex working on a delegated issue:
 | `src/browser.ts` | `BrowserSession`: lazy launch (or `--cdp` attach / persistent profile), one context, the current page follows new tabs, `snapshot()` via `page.ariaSnapshot({ mode: "ai" })`, `locator(ref)` via `aria-ref=` |
 | `src/tools.ts` | The single tool registry (`TOOLS`): zod schema + handler per tool. `callTool` validates and turns every failure into an `isError` result. Action tools go through `act()`, which waits for navigation and returns a fresh snapshot |
 | `src/mcp.ts` | Hand-written MCP server (`initialize`, `ping`, `tools/list`, `tools/call`), newline-delimited JSON-RPC over stdio. Tool calls are serialized. `browser_task` exists only when an agent model is configured |
-| `src/agent.ts` | `runAgent`: a native function-calling loop. A reply with no tool calls is the final answer. `render()` keeps only the newest snapshot and image in context |
+| `src/agent.ts` | `runAgent`: a native function-calling loop. A reply with no tool calls is the final answer. `render()` keeps the newest snapshot, text read and image whole, and up to four earlier pages as their task-relevant lines |
 | `src/judge.ts` | The optional judge model's tool-less request (task, answer, and the newest page content cut to relevant lines), verdict parsing and threshold. `runAgent` calls it for a final answer that claims success |
 | `src/model/types.ts` | Provider-neutral `Message` / `ModelAdapter`. This is the whole model boundary |
 | `src/model/openai.ts`, `anthropic.ts` | Wire-format adapters written directly on `fetch` (no SDKs). `typesafe.ts` is TypeSafe System One, which can only judge |

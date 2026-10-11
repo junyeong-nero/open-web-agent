@@ -158,7 +158,14 @@ the JSON or a bare probability.
 | `browser_screenshot` | PNG of the viewport or full page |
 | `browser_evaluate` | run JavaScript in the page (**opt-in**: `--caps unsafe`) |
 
-The agent keeps only the newest snapshot and screenshot in its context. It stops when it runs out of steps, after repeated failed steps, or when it stops making progress. In each of these cases it makes one last call to get a best-effort answer.
+The agent keeps the newest snapshot, text read and screenshot whole in its context. Superseded snapshots and text
+reads of the four newest earlier pages keep a digest of at most 1,500 characters: the page URL and title, and the
+lines that share uncommon words or numbers with the task (URLs in the task aside) plus the lines next to them, without
+refs or link URLs. A snapshot counts as the page at its URL and a text read as its text. Only the newest entry of a
+page keeps a digest, and none is kept for a page that the newest snapshot or text read shows, or for a long page
+without a matching line. Older page state is left out, so the model keeps any other facts it needs in a brief note.
+
+The agent stops when it runs out of steps, after repeated failed steps, or when it stops making progress. In each of these cases it makes one last call to get a best-effort answer.
 
 Before an action or navigation returns its snapshot, it waits for the page to settle: the page's own
 documents, scripts, styles and XHR/fetch requests started since the action have returned, a WebSocket of
@@ -323,7 +330,7 @@ and waits for the old operation to settle before releasing the queue. A subseque
 the session. Cancellation cannot undo actions already performed; browser launch/cleanup can extend
 past the requested deadline. Cancelling only a model request leaves the browser available.
 
-Only the newest `browser_get_text` body is sent back to the model; older bodies become placeholders.
+Only the newest `browser_get_text` body is sent back to the model whole; older bodies become digests or placeholders, as described under Tools.
 Three consecutive steps with identical actions and observed state stop with `no_progress`.
 Waits, scrolling, failed tools and results without observed state are excluded to avoid treating
 normal waiting as a loop. Cycles across pages are counted too: re-opening a page (same URL without

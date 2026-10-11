@@ -1,16 +1,16 @@
 import { createHash } from "node:crypto"
 import { interruptible } from "./cancel"
 import type { BrowserSession } from "./browser"
-import { judgeRequest, parseVerdict, UNSUPPORTED_AT } from "./judge"
+import { judgeRequest, matchingLines, parseVerdict, UNSUPPORTED_AT, withoutRefs } from "./judge"
 import type { Message, ModelAdapter, ToolCall, Usage } from "./model/types"
-import { type BrowserTool, callTool, resultContent, selectTools, type ToolResult, toolSpec } from "./tools"
+import { type BrowserTool, callTool, compactLine, resultContent, selectTools, type ToolResult, toolSpec } from "./tools"
 
 export const SYSTEM_PROMPT = `You are a web agent that completes the user's task by operating a real browser through tools.
 
 - Page state arrives as accessibility snapshots. Act on elements with their [ref=…] values from the most recent snapshot only; refs from older snapshots may be stale.
 - Actions return a fresh snapshot, so you rarely need browser_snapshot right after acting.
 - Prefer navigating directly to a URL when you know it. If a URL you guessed returns HTTP 404, stop guessing URLs on that site and use its links or search instead. Use browser_get_text to read long content.
-- Older snapshots are omitted. Before leaving a page whose facts you still need, read the relevant content with browser_get_text so it survives a tab switch. Before another text read, preserve earlier needed facts in a brief assistant note; only the newest text read is retained.
+- Only the newest snapshot and text read stay whole. Older ones from the last few pages are reduced to their task-relevant lines, without refs, and the rest are omitted. Before leaving a page whose facts you still need, read the relevant content with browser_get_text; keep any other needed facts in a brief assistant note.
 - If an action fails, look at the new snapshot and try a different approach instead of repeating the same call.
 - If a page's content, landing URL, or title indicates a bot check, CAPTCHA, or access denial (e.g. google.com/sorry or "Just a moment..."), or the server responds with HTTP 401, 402 or 403, or a result says HTTP 429 persisted after the automatic wait and reload, or a navigation returns a non-document file instead of a page, do not retry that site for the rest of this task, even with a different URL or query; use another site or search engine.
 - After a site is blocked, do not keep rewriting search queries whose results point back to it: after three searches without opening a result, answer from what you have seen, with outcome blocked or partial.
@@ -133,7 +133,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     const requestedAt = performance.now()
     const response = await interruptible(() => options.model.complete({
       system,
-      messages: render(entries),
+      messages: render(entries, options.task),
       tools: withTools ? specs : [],
       signal,
     }), signal)
@@ -364,22 +364,34 @@ function latestPages(entries: Entry[]): { text?: string; snapshot?: string } {
   return pages
 }
 
-/** Keep only the newest snapshot and image in context; older ones are superseded page state. */
-export function render(entries: Entry[]): Message[] {
-  const lastSnapshot = entries.findLastIndex((entry) => "snapshot" in entry || ("result" in entry && entry.result.snapshot !== undefined))
-  const lastPageText = entries.findLastIndex((entry) => "result" in entry && entry.result.pageText)
+const OMITTED_SNAPSHOT = "[older snapshot omitted: superseded by a newer one]"
+/** Superseded pages that keep a digest; page state older than theirs becomes a placeholder. */
+const DIGEST_PAGES = 4
+/** Characters in one digest, its label included. */
+const DIGEST_CHARS = 1_500
+/** The header that `BrowserSession.snapshot` puts before the tree. */
+const SNAPSHOT_HEADER = /^Page URL: ([^\n]*)\nPage title: ([\s\S]*?)\nPage tab: [^\n]*\nSnapshot:\n/
+
+/**
+ * Keep the newest snapshot, page text and image whole. Superseded snapshots and page texts of the last few pages keep a
+ * digest of their task-relevant lines (see `pageDigests`); older page state becomes a placeholder.
+ */
+export function render(entries: Entry[], task: string): Message[] {
+  const lastSnapshot = entries.findLastIndex((entry) => snapshotOf(entry) !== undefined)
+  const lastPageText = entries.findLastIndex((entry) => textOf(entry) !== undefined)
   const lastImage = entries.findLastIndex((entry) => "result" in entry && entry.result.image !== undefined)
+  const digests = pageDigests(entries, task)
 
   return entries.map((entry, index): Message => {
     if ("snapshot" in entry) {
-      const snapshot = index === lastSnapshot ? entry.snapshot : "[older snapshot omitted: superseded by a newer one]"
+      const snapshot = index === lastSnapshot ? entry.snapshot : digests.get(`snapshot ${index}`) ?? OMITTED_SNAPSHOT
       return { role: "user", content: [{ type: "text", text: `${entry.dateLine}\n\nTask: ${entry.task}\n\nCurrent page:\n${snapshot}` }] }
     }
     if (!("result" in entry)) return entry
     const result: ToolResult = { ...entry.result }
-    if (result.pageText && index !== lastPageText) result.text = "[older page text omitted: superseded by a newer read]"
+    if (result.pageText && index !== lastPageText) result.text = digests.get(`text ${index}`) ?? "[older page text omitted: superseded by a newer read]"
     if (result.snapshot !== undefined && index !== lastSnapshot) {
-      result.snapshot = "[older snapshot omitted: superseded by a newer one]"
+      result.snapshot = digests.get(`snapshot ${index}`) ?? OMITTED_SNAPSHOT
     }
     if (result.image !== undefined && index !== lastImage) {
       result.image = undefined
@@ -393,4 +405,63 @@ export function render(entries: Entry[]): Message[] {
       isError: result.isError,
     }
   })
+}
+
+function snapshotOf(entry: Entry): string | undefined {
+  return "snapshot" in entry ? entry.snapshot : "result" in entry ? entry.result.snapshot : undefined
+}
+
+function textOf(entry: Entry): string | undefined {
+  return "result" in entry && entry.result.pageText ? entry.result.text : undefined
+}
+
+/**
+ * Digests of the newest DIGEST_PAGES superseded pages, keyed by kind and entry index. A snapshot belongs to the page at
+ * its URL, and a text read or a snapshot without a URL to its text. Going back from the newest entry, the newest snapshot
+ * and text read are shown whole, and every other page counts once, at its newest entry; a page shown whole gets no
+ * digest. This depends only on the task and the entries from each one on, so an entry only moves from whole to digest to
+ * placeholder, and messages before the first one that moves stay byte-identical for prompt caching.
+ */
+function pageDigests(entries: Entry[], task: string): Map<string, string> {
+  // A URL in the task, such as where to start, is not a fact to find; its pieces would match every link on the site.
+  const query = task.replace(/https?:\/\/\S+/g, " ")
+  const digests = new Map<string, string>()
+  const seen = new Set<string>()
+  const shownWhole = new Set<string>()
+  let pages = 0
+  for (let index = entries.length - 1; index >= 0 && pages < DIGEST_PAGES; index--) {
+    const entry = entries[index]!
+    for (const [kind, content] of [["text", textOf(entry)], ["snapshot", snapshotOf(entry)]] as const) {
+      if (content === undefined) continue
+      const page = kind === "text" ? `text ${content}` : `snapshot ${SNAPSHOT_HEADER.exec(content)?.[1] ?? content}`
+      const covered = seen.has(page)
+      seen.add(page)
+      if (!shownWhole.has(kind)) shownWhole.add(kind)
+      else if (!covered && pages < DIGEST_PAGES) {
+        pages += 1
+        const digest = digestOf(kind, content, query)
+        if (digest !== undefined) digests.set(`${kind} ${index}`, digest)
+      }
+    }
+  }
+  return digests
+}
+
+/**
+ * A superseded page cut to DIGEST_CHARS: a label, a snapshot's URL and title, and the lines that match `query`.
+ * Undefined for a long page without a matching line, since its start is usually navigation, and for a snapshot
+ * without the page header, which marks unavailable page state.
+ */
+function digestOf(kind: "text" | "snapshot", content: string, query: string): string | undefined {
+  let label = "[older page text, reduced to task-relevant lines]"
+  let body = content
+  if (kind === "snapshot") {
+    const header = SNAPSHOT_HEADER.exec(content)
+    if (!header) return undefined
+    label = `[older snapshot, reduced to task-relevant lines; refs removed and not usable]\nPage URL: ${compactLine(header[1]!, 160)}\nPage title: ${compactLine(header[2]!, 120)}`
+    // Like refs, link targets serve acting; their slugs repeat the link text and would crowd out the page's facts.
+    body = withoutRefs(content.slice(header[0].length)).replace(/^ *- \/url: .*\n?/gm, "")
+  }
+  const lines = matchingLines(body, query, DIGEST_CHARS - label.length - 1)
+  return lines?.trim() ? `${label}\n${lines}` : undefined
 }

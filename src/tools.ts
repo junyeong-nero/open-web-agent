@@ -401,14 +401,16 @@ export function downloadMessage({ response, download }: { response?: Pick<Respon
     + (pdf ? " For a PDF, look for an HTML version of the same document, such as its abstract or landing page." : "")
 }
 
+/** `value` on one line, cut to `max` characters. */
+export function compactLine(value: string, max: number): string {
+  const line = value.replace(/\s+/g, " ").trim()
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line
+}
+
 /** Retain a compact record of the observed landing page when the snapshot is superseded. */
 function snapshotResult(summary: string, snapshot: string, note = ""): ToolResult {
   const headers = /^Page URL: ([^\n]*)\nPage title: ([\s\S]*?)\nPage tab:/.exec(snapshot)
-  const compact = (value: string, max: number) => {
-    const line = value.replace(/\s+/g, " ").trim()
-    return line.length > max ? `${line.slice(0, max - 1)}…` : line
-  }
-  const landing = headers ? `\nLanding URL: ${compact(headers[1]!, 160)} | Title: ${compact(headers[2]!, 120)}` : ""
+  const landing = headers ? `\nLanding URL: ${compactLine(headers[1]!, 160)} | Title: ${compactLine(headers[2]!, 120)}` : ""
   return { text: summary + (note ? `\n${note}` : "") + landing, snapshot }
 }
 
