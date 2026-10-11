@@ -1,6 +1,6 @@
 import { existsSync, readdirSync } from "node:fs"
 import { join } from "node:path"
-import { chromium, firefox, webkit, type Browser, type BrowserContext, type Locator, type Page, type WebSocket } from "playwright"
+import { errors, chromium, firefox, webkit, type Browser, type BrowserContext, type Locator, type Page, type WebSocket } from "playwright"
 
 export interface BrowserOptions {
   headless?: boolean
@@ -30,11 +30,14 @@ export class BrowserSession {
   private current?: Page
   private opening?: Promise<Page>
   private interrupted = false
+  private wakeSnapshotRetry?: () => void
   private tabIds = new Map<Page, string>()
   private nextTabId = 1
   private sockets = new WeakMap<Page, Set<WebSocket>>()
   /** Tab, URL and untruncated tree of the last snapshot, for re-identifying a ref whose element was replaced. */
   lastSnapshot?: { page: Page; url: string; tree: string }
+  /** Recovery note for the most recent snapshot, kept in tool result text. */
+  snapshotNote = ""
 
   constructor(readonly options: BrowserOptions = {}) {}
 
@@ -61,8 +64,28 @@ export class BrowserSession {
 
   /** `last` is a tree of the current page that was just taken; it is used instead of taking another. */
   async snapshot(last?: { page: Page; tree: string }): Promise<string> {
+    this.snapshotNote = ""
     const page = await this.page()
-    const tree = last?.page === page ? last.tree : await page.ariaSnapshot({ mode: "ai" })
+    let tree: string
+    try {
+      tree = last?.page === page ? last.tree : await page.ariaSnapshot({ mode: "ai" })
+    } catch (error) {
+      if (!(error instanceof errors.TimeoutError) || this.interrupted) throw error
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          clearTimeout(timer)
+          this.wakeSnapshotRetry = undefined
+          resolve()
+        }
+        const timer = setTimeout(done, 1_000)
+        this.wakeSnapshotRetry = done
+      })
+      if (this.interrupted) throw error
+      try {
+        tree = await page.ariaSnapshot({ mode: "ai", timeout: 5_000 })
+      } catch { throw error }
+      this.snapshotNote = "The first snapshot attempt timed out; a second attempt succeeded."
+    }
     this.lastSnapshot = { page, url: page.url(), tree }
     return `Page URL: ${page.url()}\nPage title: ${await page.title()}\nPage tab: ${this.track(page)}\nSnapshot:\n${this.shown(tree)}`
   }
@@ -109,6 +132,7 @@ export class BrowserSession {
   /** Quiesce the old action before the serialized queue may start another task. */
   async cancelPending(pending: Promise<unknown>): Promise<void> {
     this.interrupted = true
+    this.wakeSnapshotRetry?.()
     try {
       await this.close()
       await pending.catch(() => {})
