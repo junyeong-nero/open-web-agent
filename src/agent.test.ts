@@ -144,7 +144,10 @@ it("retains landing URLs and titles after action and explicit snapshots are omit
     expect(landing.length).toBeLessThanOrEqual(303)
     expect(text).not.toContain("x".repeat(400))
   }
-  expect(messages[0]!.content[0]).toMatchObject({ type: "text", text: expect.stringContaining(`Navigated to ${fixture.url}/redirect\nLanding URL:`) })
+  // The bot-check page has almost no content, so an empty-content line may come before the landing line.
+  const first = messages[0]!.content[0]
+  expect(first?.type === "text" && first.text).toStartWith(`Navigated to ${fixture.url}/redirect\n`)
+  expect(first?.type === "text" && first.text).toContain("\nLanding URL:")
   const newest = messages[2]!.content.map((part) => part.type === "text" ? part.text : "").join("\n")
   expect(newest).toContain(`Landing URL: ${fixture.url}/pricing | Title: Pricing`)
   expect(newest).toContain("Page title: Pricing")

@@ -20,6 +20,18 @@ const LATE_LIST = `<script>
   </script>`
 
 const PAGES: Record<string, string> = {
+  "/empty-content": `<!doctype html><title>Empty shell</title><body>
+    <header>Welcome to our website with many useful resources</header>
+    <nav><a href="/short-content">Read our content</a><button>Menu</button></nav>
+    <main></main><footer>Contact us for more information about our services</footer>
+    <script>window.eval = () => { throw new Error("eval is disabled") }</script>
+  </body>`,
+  "/short-content": `<!doctype html><title>Short content</title><body><h1>Local guide</h1>
+    <p>Explore the neighborhood on foot and discover its parks, cafes, and quiet streets.</p>
+    <a href="/empty-content">Empty shell</a></body>`,
+  "/content-outside-main": `<!doctype html><title>Content outside main</title><body><main></main>
+    <h1>Local guide</h1><p>Explore the neighborhood on foot and discover its parks, cafes, and quiet streets.</p>
+  </body>`,
   "/empty-dialogs": `<!doctype html><title>Empty dialogs</title><body>
     <h1>Page content</h1>
     <div role="dialog" aria-modal="false" style="position: absolute; left: -9999px"></div>
