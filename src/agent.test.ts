@@ -42,11 +42,14 @@ describe("runAgent", () => {
       expect(request.messages[0]).toEqual(model.requests[0]!.messages[0])
     }
 
-    // Only the newest snapshot stays in context.
+    // Only the newest snapshot stays whole; the older one is reduced to its task-relevant lines, without refs.
     const lastRequest = model.requests.at(-1)?.messages ?? []
     const texts = lastRequest.flatMap((message) => (message.role === "tool" ? message.content.map((part) => (part.type === "text" ? part.text : "")) : []))
     expect(texts.filter((text) => text.startsWith("Page URL:"))).toHaveLength(1)
-    expect(texts.filter((text) => text.includes("older snapshot omitted"))).toHaveLength(1)
+    const older = texts.filter((text) => text.startsWith("[older snapshot, reduced to task-relevant lines; refs removed and not usable]"))
+    expect(older).toHaveLength(1)
+    expect(older[0]).toContain(`Page URL: ${fixture.url}/\nPage title: Fixture Home\n`)
+    expect(older[0]).not.toContain("[ref=")
   }, 30_000)
 
   it("includes the current page when the browser is already open", async () => {
@@ -123,7 +126,7 @@ it("preserves execution metadata when the model request fails", async () => {
   expect(result).toMatchObject({ status: "failed", stopReason: "model_error", error: "HTTP 503", outcome: { status: "unknown" } })
 })
 
-it("retains landing URLs and titles after action and explicit snapshots are omitted", async () => {
+it("retains landing URLs and titles after action and explicit snapshots are superseded", async () => {
   const model = scriptedModel([
     () => ({ toolCalls: [{ id: "1", name: "browser_navigate", arguments: { url: `${fixture.url}/redirect` } }] }),
     () => ({ toolCalls: [{ id: "2", name: "browser_snapshot", arguments: {} }] }),
@@ -134,10 +137,14 @@ it("retains landing URLs and titles after action and explicit snapshots are omit
   expect(result.status).toBe("completed")
   const messages = model.requests.at(-1)!.messages.filter((message) => message.role === "tool")
   expect(messages).toHaveLength(3)
-  for (const message of messages.slice(0, 2)) {
-    const text = message.content.map((part) => part.type === "text" ? part.text : "").join("\n")
-    expect(text).toContain("older snapshot omitted")
-    expect(text).not.toContain("Check you are human")
+  const [navigated, snapshotted] = messages.map((message) => message.content.map((part) => part.type === "text" ? part.text : "").join("\n"))
+  // Both show the same URL, so only the newer one keeps a digest: the short bot-check page whole, without refs.
+  expect(navigated).toContain("older snapshot omitted")
+  expect(navigated).not.toContain("Check you are human")
+  expect(snapshotted).toContain("[older snapshot, reduced to task-relevant lines; refs removed and not usable]\nPage URL: ")
+  expect(snapshotted).toContain('- heading "Check you are human" [level=1]')
+  for (const text of [navigated!, snapshotted!]) {
+    expect(text).not.toContain("[ref=")
     const landing = text.split("\n").find((line) => line.startsWith("Landing URL:"))!
     expect(landing).toContain(`Landing URL: ${fixture.url}/sorry?token=`)
     expect(landing).toEndWith("… | Title: Just a moment...")

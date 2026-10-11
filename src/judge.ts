@@ -25,8 +25,7 @@ export interface Verdict {
 export function judgeRequest(task: string, answer: string, pages: { text?: string; snapshot?: string }, dateLine: string): Omit<ModelRequest, "signal"> {
   const parts: Array<[string, string]> = []
   if (pages.text !== undefined) parts.push(["Text the agent read last", pages.text])
-  // Refs and cursor hints only matter for acting on the page.
-  if (pages.snapshot !== undefined) parts.push(["Latest page snapshot", pages.snapshot.replace(/ \[(?:ref|cursor)=[^\]]*\]/g, "")])
+  if (pages.snapshot !== undefined) parts.push(["Latest page snapshot", withoutRefs(pages.snapshot)])
   const evidence = parts.map(([label, text]) => {
     const kept = relevantLines(text, `${task}\n${answer}`, Math.floor(EVIDENCE_CHARS / parts.length))
     return `${label}${kept === text ? "" : " (excerpt; … marks skipped lines)"}:\n${kept}`
@@ -54,6 +53,11 @@ export function parseVerdict(text = ""): Verdict | undefined {
   }
 }
 
+/** A snapshot without its refs and cursor hints, which only matter for acting on the page. */
+export function withoutRefs(snapshot: string): string {
+  return snapshot.replace(/ \[(?:ref|cursor)=[^\]]*\]/g, "")
+}
+
 /** Lowercased words cut to four letters, and numbers: rough terms that survive plurals and case. */
 function terms(text: string): Set<string> {
   return new Set(text.toLowerCase().match(/\p{N}+|\p{L}{2,}/gu)?.map((term) => term.slice(0, 4)))
@@ -64,6 +68,11 @@ function terms(text: string): Set<string> {
  * in page order. Terms on many lines, such as menu words, are ignored. Without any match the start of the text is kept.
  */
 export function relevantLines(text: string, query: string, max: number): string {
+  return matchingLines(text, query, max) ?? `${text.slice(0, max - 1)}…`
+}
+
+/** `relevantLines` without its fallback: undefined when a text longer than `max` has no matching line that fits. */
+export function matchingLines(text: string, query: string, max: number): string | undefined {
   if (text.length <= max) return text
   const lines = text.split("\n")
   const lineTerms = lines.map(terms)
@@ -79,7 +88,7 @@ export function relevantLines(text: string, query: string, max: number): string 
     kept.push(index)
     size += lines[index]!.length + 3
   }
-  if (!kept.length) return `${text.slice(0, max - 1)}…`
+  if (!kept.length) return undefined
   const out: string[] = []
   let previous = -1
   for (const index of kept.sort((a, b) => a - b)) {
