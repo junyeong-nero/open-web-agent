@@ -117,7 +117,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   let partialAnswer = ""
   let sentBack = false
   let judgeError: string | undefined
-  const visit = pageVisits()
+  const revisit = revisits()
 
   const finish = (status: AgentResult["status"], stopReason: AgentResult["stopReason"], text: string, error?: string, outcome?: AgentResult["outcome"]): AgentResult => {
     const final = parseFinalAnswer(text)
@@ -179,7 +179,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     signal.throwIfAborted()
     const initial = await interruptible(() => taskMessage(options, dateLine), signal, pending => options.browser.cancelPending(pending))
     entries.push(initial)
-    if ("snapshot" in initial) visit("", initial.snapshot)
+    if ("snapshot" in initial) revisit("", { text: "", snapshot: initial.snapshot })
     while (step < maxSteps) {
       signal.throwIfAborted()
       step += 1
@@ -232,8 +232,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
         if (result.isError) failed += 1
         if (result.isError || ["browser_wait_for", "browser_scroll"].includes(call.name) || (!result.snapshot && !result.pageText)) canCompare = false
         state.update(JSON.stringify([call.name, call.arguments, result.snapshot, result.pageText ? result.text : undefined]))
-        const page = result.isError ? undefined : visit(call.name, result.snapshot)
-        if (page?.stop) revisited = `Stopped after opening ${page.url} ${page.visits} times without finding anything new`
+        revisited = revisit(call.name, result) ?? revisited
         emit({ type: "tool", step, call, result })
         entries.push({ role: "tool", toolCallId: call.id, name: call.name, result })
       }
@@ -323,31 +322,86 @@ async function taskMessage(options: AgentOptions, dateLine: string): Promise<Ent
   return { role: "user", task: options.task, dateLine, snapshot: await options.browser.snapshot() }
 }
 
+/** Tools that only look at the current page: on the same URL, what they see neither counts as a return nor resets the counts. */
+const OBSERVING = ["browser_snapshot", "browser_wait_for", "browser_scroll", "browser_get_text"]
+/** A first visit with this many new lines is new content even when a large shared template keeps them under a third of the page. */
+const NEW_CONTENT_LINES = 10
+
 /**
- * Count pages re-opened with nothing new seen since. A page is its URL without fragment plus its title.
- * Opening a page for the first time, or one whose snapshot is more than a third new lines (ads, clocks and
- * live numbers change fewer), resets every count, so a list revisited between new detail pages never adds up.
+ * Count returns with nothing new seen since, and return why to stop at the fourth repeat of any of them:
+ * - opening a page again (its URL without fragment plus its title) by navigating, or with any tool that reaches another URL
+ * - coming back through an action, such as a click, key press, typing or selecting, to a state of the current page seen
+ *   before: its URL, title and snapshot without refs, which pages renumber when they render an element again
+ * - reading the same text of a page again
+ * New content resets every count, so a list revisited between new detail pages never adds up: a snapshot of a page
+ * opened or of an action that is more than a third new lines (ads, clocks and live numbers change fewer), or a first
+ * visit to a page or state with at least NEW_CONTENT_LINES new lines. Another guessed URL that shows the same not-found
+ * page brings neither. Text reads are formatted unlike snapshots, so new text resets only the counts of text reads.
+ * Coming straight back to the state or text just seen is left to the check for identical consecutive steps.
  */
-function pageVisits() {
-  const pages = new Map<string, { visits: number; repeats: number }>()
-  const seen = new Set<string>()
-  let current = ""
-  return (tool: string, snapshot = "") => {
-    const [address = "", title, , , ...body] = snapshot.split("\n")
-    if (!address.startsWith("Page URL: ")) return undefined
-    const url = address.slice("Page URL: ".length).replace(/#.*/, "")
-    const lines = new Set(body.map((line) => line.replace(/\[ref=\w+\]/g, "")))
+function revisits() {
+  // Per page, state and text: how often it was reached, and its repeats since the last new content.
+  const counts = new Map<string, { visits: number; repeats: number }>()
+  const states = new Set<string>()
+  const snapshotLines = new Set<string>()
+  const textLines = new Set<string>()
+  let url = ""
+  let state = ""
+  let read = ""
+  const hash = (text: string) => createHash("sha256").update(text).digest("hex")
+  /** Remember the lines; true when they are new content. */
+  const learn = (seen: Set<string>, lines: string[], first: boolean) => {
+    const unique = new Set(lines)
     let fresh = 0
-    for (const line of lines) if (!seen.has(line)) { seen.add(line); fresh++ }
-    // Navigating opens a page even at the current URL; other tools (scrolls, waits, clicks in place) must reach another URL.
-    if (tool !== "browser_navigate" && url === current) return undefined
-    current = url
-    const key = `${url}\n${title}`
-    const page = pages.get(key) ?? { visits: 0, repeats: 0 }
-    pages.set(key, page)
-    if (++page.visits === 1 || fresh * 3 > lines.size) for (const other of pages.values()) other.repeats = 0
-    else page.repeats++
-    return { url, visits: page.visits, stop: page.repeats > 3 }
+    for (const line of unique) if (!seen.has(line)) { seen.add(line); fresh++ }
+    return fresh * 3 > unique.size || (first && fresh >= NEW_CONTENT_LINES)
+  }
+  const reset = (kind: string) => { for (const [key, entry] of counts) if (key.startsWith(kind)) entry.repeats = 0 }
+  /** Count reaching `key`, as a repeat when `again`; its visits once it has four repeats since the last reset. */
+  const reach = (key: string, again: boolean) => {
+    const entry = counts.get(key) ?? { visits: 0, repeats: 0 }
+    counts.set(key, entry)
+    entry.visits++
+    if (again) entry.repeats++
+    return entry.repeats > 3 ? entry.visits : 0
+  }
+  return (tool: string, result: ToolResult): string | undefined => {
+    if (result.isError) return undefined
+    let stop: string | undefined
+    const [address = "", title, , , ...body] = result.snapshot?.split("\n") ?? []
+    if (address.startsWith("Page URL: ")) {
+      const next = address.slice("Page URL: ".length).replace(/#.*/, "")
+      const lines = body.map((line) => line.replace(/\[ref=\w+\]/g, ""))
+      const page = `page\n${next}\n${title}`
+      const reached = `state\n${hash(`${next}\n${title}\n${lines.join("\n")}`)}`
+      // Navigating opens a page even at the current URL; other tools must reach another URL to open one.
+      const opened = tool === "browser_navigate" || next !== url
+      const news = learn(snapshotLines, lines, opened ? !counts.has(page) : !states.has(reached))
+      const returned = states.has(reached) && reached !== state
+      url = next
+      state = reached
+      states.add(reached)
+      if (opened) {
+        if (news) reset("")
+        const visits = reach(page, !news && counts.has(page))
+        if (visits) stop = `Stopped after opening ${url} ${visits} times without finding anything new`
+      } else if (!OBSERVING.includes(tool)) {
+        if (news) reset("")
+        const visits = returned && !news ? reach(reached, true) : 0
+        if (visits) stop = `Stopped after returning to the same state of ${url} ${visits} times without finding anything new`
+      }
+    }
+    if (result.pageText) {
+      // A truncation notice names the element's ref, which can change between reads of the same text.
+      const text = result.text.replace(/\bref=\w+/g, "")
+      const key = `text\n${hash(`${url}\n${text}`)}`
+      const news = learn(textLines, text.split("\n"), !counts.has(key))
+      if (news) reset("text\n")
+      const visits = reach(key, !news && counts.has(key) && key !== read)
+      read = key
+      if (visits) stop = `Stopped after reading the same text of ${url} ${visits} times without finding anything new`
+    }
+    return stop
   }
 }
 

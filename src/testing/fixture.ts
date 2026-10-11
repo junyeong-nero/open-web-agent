@@ -103,6 +103,14 @@ const PAGES: Record<string, string> = {
       </div>
     </div></template>
   </body></html>`,
+  // Like Coursera's filters: the panel is built again on every open, so its elements get new refs each time.
+  "/filters": `<!doctype html><title>Course search</title><body>
+    <h1>Machine Learning</h1><p>120 results</p>
+    <button onclick="document.querySelector('#panel').append(document.querySelector('template').content.cloneNode(true))">Filter & Sort</button>
+    <div id="panel"></div>
+    <template><div role="dialog" aria-label="Filters"><h2>Filters</h2><button>Learning Product</button><button>Duration</button>
+      <button onclick="document.querySelector('#panel').replaceChildren()">Close</button></div></template>
+  </body>`,
   "/sorry": `<!doctype html><title>Just a moment...</title><h1>Check you are human</h1>`,
   "/overlay": `<!doctype html><title>Overlay</title>
     <button>Buy now</button><div id="overlay" style="position: fixed; inset: 0"></div>`,
