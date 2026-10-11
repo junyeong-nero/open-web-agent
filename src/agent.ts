@@ -3,6 +3,7 @@ import { interruptible } from "./cancel"
 import type { BrowserSession } from "./browser"
 import { judgeRequest, matchingLines, parseVerdict, UNSUPPORTED_AT, withoutRefs } from "./judge"
 import type { Message, ModelAdapter, ToolCall, Usage } from "./model/types"
+import { type PageCheckCall, pageChecker } from "./page-check"
 import { type BrowserTool, callTool, compactLine, resultContent, selectTools, type ToolResult, toolSpec } from "./tools"
 
 export const SYSTEM_PROMPT = `You are a web agent that completes the user's task by operating a real browser through tools.
@@ -20,8 +21,8 @@ export const SYSTEM_PROMPT = `You are a web agent that completes the user's task
 
 export type AgentEvent =
   | { type: "step"; step: number }
-  /** `role` is set on the judge model's calls; agent model calls leave it out. */
-  | { type: "model"; step: number; text?: string; toolCalls: ToolCall[]; model?: string; durationMs: number; usage?: Usage; role?: "judge" }
+  /** `role` is set on the judge's and the checker's calls; agent model calls leave it out. `error` is why a page check gave no kind. */
+  | { type: "model"; step: number; text?: string; toolCalls: ToolCall[]; model?: string; durationMs: number; usage?: Usage; role?: "judge" | "checker"; error?: string }
   | { type: "tool"; step: number; call: ToolCall; result: ToolResult }
   | { type: "done"; result: AgentResult }
 
@@ -49,6 +50,10 @@ export interface AgentResult {
   judgeUsage?: Usage & { inputTokens: number; outputTokens: number }
   /** Why the last judge request gave no verdict. The answer and outcome stay as they were. */
   judgeError?: string
+  /** The checker model's calls, summed like `judgeUsage`; set once the checker replied. */
+  checkerUsage?: Usage & { inputTokens: number; outputTokens: number }
+  /** Why the last page check gave no page kind. The tool result it checked stayed as it was. */
+  checkerError?: string
 }
 
 export interface AgentOptions {
@@ -74,6 +79,13 @@ export interface AgentOptions {
    * partial when no step is left. A failed judge request changes nothing; the result's `judgeError` says why it failed.
    */
   judgeModel?: ModelAdapter
+  /**
+   * Asks which kind of page a tool result opened, in one tool-less request of at most five seconds (see `pageChecker`).
+   * When the checker is sure of a block, a rate limit, a missing page, a sign-in wall or a covering dialog, the result
+   * gets one fixed sentence saying so; on an empty results page the browser waits 2 s and takes a new snapshot. A failed
+   * check changes nothing; the result's `checkerError` says why it failed.
+   */
+  checkerModel?: ModelAdapter
   signal?: AbortSignal
   onEvent?: (event: AgentEvent) => void
 }
@@ -107,6 +119,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   const system = options.systemPrompt ?? SYSTEM_PROMPT
   const callUsage: Array<Usage | undefined> = []
   const judgeUsage: Array<Usage | undefined> = []
+  const checkerUsage: Array<Usage | undefined> = []
   const emit = options.onEvent ?? (() => {})
 
   const entries: Entry[] = []
@@ -117,14 +130,17 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   let partialAnswer = ""
   let sentBack = false
   let judgeError: string | undefined
+  let checkerError: string | undefined
   const revisit = revisits()
+  const checkPage = options.checkerModel && pageChecker(options.checkerModel, options.browser, signal)
 
   const finish = (status: AgentResult["status"], stopReason: AgentResult["stopReason"], text: string, error?: string, outcome?: AgentResult["outcome"]): AgentResult => {
     const final = parseFinalAnswer(text)
     if (outcome) final.outcome = outcome
     const result: AgentResult = {
       status, stopReason, ...final, observedUrls: [...observedUrls], durationMs: Math.round(performance.now() - startedAt), steps: step, usage: sumUsage(callUsage),
-      ...(judgeUsage.length ? { judgeUsage: sumUsage(judgeUsage) } : {}), ...(judgeError ? { judgeError } : {}), ...(error ? { error } : {}),
+      ...(judgeUsage.length ? { judgeUsage: sumUsage(judgeUsage) } : {}), ...(judgeError ? { judgeError } : {}),
+      ...(checkerUsage.length ? { checkerUsage: sumUsage(checkerUsage) } : {}), ...(checkerError ? { checkerError } : {}), ...(error ? { error } : {}),
     }
     emit({ type: "done", result })
     return result
@@ -173,6 +189,12 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       judgeError = error instanceof Error ? error.message : String(error)
       return undefined
     }
+  }
+  /** Trace a page check after the result it checked, with its usage once the checker replied and why it gave no kind. */
+  const recordCheck = ({ response, error, durationMs }: PageCheckCall) => {
+    if (response) checkerUsage.push(response.usage)
+    if (error) checkerError = error
+    emit({ type: "model", role: "checker", step, text: response?.text, toolCalls: response?.toolCalls ?? [], model: response?.model, durationMs, usage: response?.usage, ...(error ? { error } : {}) })
   }
 
   try {
@@ -233,8 +255,11 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
         if (result.isError || ["browser_wait_for", "browser_scroll"].includes(call.name) || (!result.snapshot && !result.pageText)) canCompare = false
         state.update(JSON.stringify([call.name, call.arguments, result.snapshot, result.pageText ? result.text : undefined]))
         revisited = revisit(call.name, result) ?? revisited
-        emit({ type: "tool", step, call, result })
-        entries.push({ role: "tool", toolCallId: call.id, name: call.name, result })
+        // A sure page check adds a fixed sentence, or a newer snapshot, before the result enters the transcript.
+        const checked = checkPage ? await checkPage(call.name, result) : { result, call: undefined }
+        emit({ type: "tool", step, call, result: checked.result })
+        if (checked.call) recordCheck(checked.call)
+        entries.push({ role: "tool", toolCallId: call.id, name: call.name, result: checked.result })
       }
 
       const fingerprint = canCompare ? state.digest("hex") : ""

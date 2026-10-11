@@ -8,7 +8,7 @@ import type { ModelAdapter } from "./types"
 export type ApiFormat = "openai" | "anthropic"
 
 interface ProviderPreset {
-  /** `systemone` answers yes/no questions only, so it can serve as the judge model but not as the agent model. */
+  /** `systemone` answers yes/no and choice questions only, so it can serve as the judge or checker model but not as the agent model. */
   api: ApiFormat | "systemone"
   baseUrl: string
   keyEnv?: string
@@ -53,7 +53,7 @@ export function modelConfigFromEnv(env: Record<string, string | undefined> = pro
 }
 
 /**
- * Config for an opt-in secondary model with one role, such as `judge`: `--<role>-model` or `OWA_<ROLE>_MODEL`, and
+ * Config for an opt-in secondary model with one role, such as `judge` or `checker`: `--<role>-model` or `OWA_<ROLE>_MODEL`, and
  * optional `--<role>-model-options` or `OWA_<ROLE>_MODEL_OPTIONS`, flag before env as for the main model. Undefined when
  * the model is unset or empty, so an empty flag turns off an environment setting. Only the `provider:model` spec and
  * options apply: the main model's base URL, API format, module and OWA_API_KEY do not, so a key never reaches another
