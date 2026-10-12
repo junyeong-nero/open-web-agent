@@ -88,7 +88,15 @@ const PAGES: Record<string, string> = {
       return `<li data-price="${price}" data-rank="${index}"><h2>${name}</h2>${index === 0 ? "<strong>Featured bestseller — recommended pick</strong>" : ""}<p>Price: ${price.toLocaleString("en-US")} KRW</p><p>New product, in stock. Includes styling attachments. Delivery included; no membership or coupon required.</p></li>`
     }).join("")}</ol>
   </body></html>`,
-  "/article": `<!doctype html><html><head><title>Long article</title></head><body>
+  // Like a shop's list: Filters opens a small panel in place, and Next page replaces the items at the same URL.
+  "/catalog": `<!doctype html><title>Catalog</title><body><h1>Catalog</h1>
+    <button onclick="document.querySelector('#filters').hidden = false">Filters</button>
+    <div id="filters" role="dialog" aria-label="Filters" hidden><button onclick="this.textContent = 'In stock only'">In stock</button>
+      <button onclick="document.querySelector('#filters').hidden = true">Close</button></div>
+    <ol id="items">${catalogItems(1)}</ol>
+    <button onclick="document.querySelector('#items').innerHTML = '${catalogItems(2)}'">Next page</button>
+    <a href="/pricing">Pricing</a></body>`,
+  "/article":`<!doctype html><html><head><title>Long article</title></head><body>
     <header>Site header</header>
     <main><h1>Long article</h1>${Array.from({ length: 8 }, (_, index) => `<h2>Table ${index + 1}</h2>${"<p>Measured values are listed in this table.</p>".repeat(250)}`).join("")}<p>End of article</p></main>
   </body></html>`,
@@ -114,14 +122,6 @@ const PAGES: Record<string, string> = {
     <template><div role="dialog" aria-label="Filters"><h2>Filters</h2><button>Learning Product</button><button>Duration</button>
       <button onclick="document.querySelector('#panel').replaceChildren()">Close</button></div></template>
   </body>`,
-  // Like a shop's list: Filters opens a small panel in place, and Next page replaces the items at the same URL.
-  "/catalog": `<!doctype html><title>Catalog</title><body><h1>Catalog</h1>
-    <button onclick="document.querySelector('#filters').hidden = false">Filters</button>
-    <div id="filters" role="dialog" aria-label="Filters" hidden><button onclick="this.textContent = 'In stock only'">In stock</button>
-      <button onclick="document.querySelector('#filters').hidden = true">Close</button></div>
-    <ol id="items">${catalogItems(1)}</ol>
-    <button onclick="document.querySelector('#items').innerHTML = '${catalogItems(2)}'">Next page</button>
-    <a href="/pricing">Pricing</a></body>`,
   "/sorry": `<!doctype html><title>Just a moment...</title><h1>Check you are human</h1>`,
   "/overlay": `<!doctype html><title>Overlay</title>
     <button>Buy now</button><div id="overlay" style="position: fixed; inset: 0"></div>`,
