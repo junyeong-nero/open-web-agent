@@ -4,7 +4,7 @@ import { runAgent } from "./agent"
 import { BrowserSession } from "./browser"
 import type { ModelRequest, ToolCall } from "./model/types"
 import { refFor, startFixtureServer } from "./testing/fixture"
-import { lastToolText, scriptedModel } from "./testing/scripted-model"
+import { currentPage, scriptedModel } from "./testing/scripted-model"
 import type { BrowserTool } from "./tools"
 
 const SITE = "https://site.test"
@@ -111,14 +111,14 @@ async function browse(calls: Call[], page = site, browser = new BrowserSession({
   return { result: await runAgent({ task: "t", browser, model: script(calls), tools: fakeTools(page) }) }
 }
 
-/** In a real browser, open `path` on the fixture site, then make one tool call per reply, built from the last tool result. */
-async function browseFixture(path: string, replies: Array<(last: string) => Omit<ToolCall, "id">>) {
+/** In a real browser, open `path` on the fixture site, then make one tool call per reply, built from the page the model sees. */
+async function browseFixture(path: string, replies: Array<(page: string) => Omit<ToolCall, "id">>) {
   const fixture = startFixtureServer()
   const browser = new BrowserSession({ headless: true })
   try {
     const model = scriptedModel([
       () => ({ toolCalls: [{ id: "0", name: "browser_navigate", arguments: { url: fixture.url + path } }] }),
-      ...replies.map((reply, index) => (request: ModelRequest) => ({ toolCalls: [{ id: `${index + 1}`, ...reply(lastToolText(request.messages)) }] })),
+      ...replies.map((reply, index) => (request: ModelRequest) => ({ toolCalls: [{ id: `${index + 1}`, ...reply(currentPage(request.messages)) }] })),
       () => ({ text: "done", toolCalls: [] }),
     ])
     return { url: fixture.url + path, result: await runAgent({ task: "t", browser, model }) }
@@ -212,8 +212,8 @@ it("does not count a list revisited between new detail pages under a large share
 
 it("stops toggling a panel open and closed on one URL, though its refs change", async () => {
   const clicked: string[] = []
-  const click = (name: RegExp) => (last: string) => {
-    clicked.push(refFor(last, name))
+  const click = (name: RegExp) => (page: string) => {
+    clicked.push(refFor(page, name))
     return { name: "browser_click", arguments: { ref: clicked.at(-1) } }
   }
   const { url, result } = await browseFixture("/filters", Array.from({ length: 4 }, () => [click(/button "Filter & Sort"/), click(/button "Close"/)]).flat())
@@ -232,9 +232,9 @@ it("does not count returns to one tab between tabs that each show new content", 
 
 it("stops alternating text reads of two unchanged elements", async () => {
   let refs: string[] = []
-  const read = (index: number) => (last: string) => {
+  const read = (index: number) => (page: string) => {
     // A text read shows no refs, so both come from the page opened first.
-    if (!refs.length) refs = [refFor(last, /heading "Pricing"/), refFor(last, /paragraph/)]
+    if (!refs.length) refs = [refFor(page, /heading "Pricing"/), refFor(page, /paragraph/)]
     return { name: "browser_get_text", arguments: { ref: refs[index % 2] } }
   }
   const { url, result } = await browseFixture("/pricing", Array.from({ length: 9 }, (_, index) => read(index)))

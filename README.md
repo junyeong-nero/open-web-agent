@@ -204,6 +204,13 @@ refs or link URLs. A snapshot counts as the page at its URL and a text read as i
 page keeps a digest, and none is kept for a page that the newest snapshot or text read shows, or for a long page
 without a matching line. Older page state is left out, so the model keeps any other facts it needs in a brief note.
 
+An action that stays on the same page (the same tab and URL, ignoring the fragment, without a navigation) is shown to
+the model as the lines that changed since the last full snapshot it saw, marked `+` and `-`, after the unchanged lines
+that show where they are. That full snapshot stays whole in place, so the request up to it stays the same for prompt
+caching, and only the newest changes are kept. `browser_snapshot`, `browser_navigate`, `browser_go_back`, an action
+that navigated, another tab or URL, and a change to more than 30% of the lines bring a full snapshot again. Tool
+results themselves, and so MCP clients, always get the full snapshot.
+
 The agent stops when it runs out of steps, after repeated failed steps, or when it stops making progress. In each of these cases it makes one last call to get a best-effort answer.
 
 Before an action or navigation returns its snapshot, it waits for the page to settle: the page's own

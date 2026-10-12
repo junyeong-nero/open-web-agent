@@ -215,6 +215,47 @@ it("starts each request with the previous one, byte for byte, up to the page sta
   expect(changed).toEqual([[], [], [2], [4], [6]])
 })
 
+it("keeps changes on one page cumulative and their full snapshot in place, and moves each message only forward", () => {
+  const cards = Array.from({ length: 20 }, (_, index) => `  - listitem [ref=e${index + 10}]: Card ${index + 1}`)
+  /** The shop page with `extra` lines in the middle of its list. */
+  const shop = (...extra: string[]) => snapshot("https://cards.example/shop", "Shop", ["- list [ref=e1]:", ...cards.slice(0, 10), ...extra, ...cards.slice(10)])
+  const click = (id: string, page: string): Entry[] => [
+    { role: "assistant", toolCalls: [{ id, name: "browser_click", arguments: {} }] },
+    { role: "tool", toolCallId: id, name: "browser_click", result: { text: "Clicked", snapshot: page } },
+  ]
+  const dialog = '  - dialog "Filters" [ref=e90]:'
+  const entries: Entry[] = [
+    { role: "user", task, dateLine, snapshot: page("a") },
+    ...navigate("1", shop()),
+    ...click("2", shop(dialog)),
+    ...click("3", shop(dialog, '    - button "Gold Card" [ref=e91]')),
+    ...read("4", "Platinum annual fee: $695"),
+    ...click("5", shop(dialog, '    - button "Gold Card" [pressed] [ref=e91]', '    - paragraph [ref=e92]: "Gold Card annual fee: $325"')),
+    ...navigate("6", page("b")),
+  ]
+  const stage = (text: string) => text.includes("omitted: superseded") ? 2 : text.includes("reduced to task-relevant lines") ? 1 : 0
+  const changed: Record<number, number[]> = {}
+  for (let count = 1; count < entries.length; count++) {
+    const before = render(entries.slice(0, count), task)
+    const after = render(entries.slice(0, count + 1), task)
+    expect(render(entries.slice(0, count + 1), task)).toEqual(after)
+    const moved = before.flatMap((message, index) => Bun.deepEquals(message, after[index]) ? [] : [index])
+    for (const index of moved) expect(stage(textOf(after[index]!))).toBeGreaterThan(stage(textOf(before[index]!)))
+    if (moved.length) changed[count] = moved
+  }
+  // The shop's full snapshot (2) never moves while changes follow it; each newer change replaces the older one (4, 6).
+  // When the agent leaves, the full snapshot goes, and the newest changes (10) keep the digest of the page's last state.
+  expect(changed).toEqual({ 2: [0], 6: [4], 10: [6], 12: [2, 10] })
+  const pages = render(entries, task).map(pageOf)
+  expect(pages[2]).toBe(omittedSnapshot)
+  expect(pages[10]).toStartWith(`${snapshotLabel}\nPage URL: https://cards.example/shop\nPage title: Shop\n`)
+  expect(pages[10]).toContain('- paragraph: "Gold Card annual fee: $325"')
+  const shown = render(entries.slice(0, 11), task).map(pageOf)
+  expect(shown[2]).toBe(shop())
+  expect(shown[10]).toContain("Snapshot changes:\n")
+  expect(shown[10]).toContain('+    - paragraph [ref=e92]: "Gold Card annual fee: $325"')
+})
+
 it("lets the model compare a page it left with the current one", async () => {
   const pages: Record<string, string> = { "https://cards.example/gold": goldPage, "https://cards.example/platinum": platinumPage }
   const open: BrowserTool = {

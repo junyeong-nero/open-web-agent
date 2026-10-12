@@ -9,6 +9,8 @@ export interface ToolResult {
   text: string
   /** Page state (or an unavailable-state marker). The agent keeps only the latest one in context. */
   snapshot?: string
+  /** The main frame navigated, to a new document or within the page, so the agent shows this snapshot whole. */
+  navigated?: boolean
   /** Large observed page body; only the newest is kept in model context. */
   pageText?: boolean
   image?: { mimeType: string; data: string }
@@ -436,7 +438,7 @@ async function snapshotAfterAction(session: BrowserSession, summary: string, set
     const snapshot = await session.snapshot(last)
     const tree = snapshot.split("\nSnapshot:\n")[1] ?? ""
     if (openedDocument && hasEmptyContent(tree)) summary += "\nThe page loaded, but its content is empty: the URL may not exist, or the content may still be loading."
-    return snapshotResult(summary, snapshot, session.snapshotNote)
+    return { ...snapshotResult(summary, snapshot, session.snapshotNote), ...(openedDocument ? { navigated: true } : {}) }
   } catch (error) {
     return {
       text: `${summary}\nThe browser action completed, but its follow-up snapshot failed: ${failureReason(error)}\nDo not repeat the action just to recover the snapshot. Call browser_snapshot to inspect the current page before taking another action.`,
