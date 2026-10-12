@@ -2,7 +2,7 @@ import { expect, it } from "bun:test"
 import { join } from "node:path"
 import { evaluateCase, EVALUATION_CASES, summarize } from "./evaluation"
 import { refFor, startFixtureServer } from "./fixture"
-import { lastToolText, scriptedModel } from "./scripted-model"
+import { currentPage, scriptedModel } from "./scripted-model"
 
 it("evaluates a page when renderer startup exceeds one second", async () => {
   const fixture = startFixtureServer()
@@ -16,7 +16,7 @@ it("evaluates a page when renderer startup exceeds one second", async () => {
     }, scriptedModel([
       () => ({ toolCalls: [{ id: "1", name: "browser_navigate", arguments: { url: `${fixture.url}/slow-render` } }] }),
       req => {
-        refFor(lastToolText(req.messages), /heading "Renderer ready"/)
+        refFor(currentPage(req.messages), /heading "Renderer ready"/)
         return { text: "Renderer ready", toolCalls: [] }
       },
     ]), fixture.url)
@@ -67,14 +67,14 @@ it("checks form, async and recovery tasks against actual browser state", async (
     for (const id of ["search-filter", "async-result", "ref-recovery"]) {
       const script: Parameters<typeof scriptedModel>[0] = [() => tool("1", "browser_navigate", { url: fixture.url + (id === "async-result" ? "/async" : "/") })]
       if (id === "async-result") {
-        script.push(req => tool("2", "browser_click", { ref: refFor(lastToolText(req.messages), /button "Start lookup"/) }),
+        script.push(req => tool("2", "browser_click", { ref: refFor(currentPage(req.messages), /button "Start lookup"/) }),
           () => tool("3", "browser_wait_for", { text: "READY-314" }), () => ({ text: "READY-314", toolCalls: [] }))
       } else {
         if (id === "ref-recovery") script.push(() => tool("2", "browser_click", { ref: "e999999" }), () => tool("3", "browser_snapshot", {}))
         const query = id === "ref-recovery" ? "recovered" : "evaluation-query"
-        script.push(req => tool("4", "browser_type", { ref: refFor(lastToolText(req.messages), /textbox "Search"/), text: query }),
-          req => tool("5", "browser_click", { ref: refFor(lastToolText(req.messages), /button "Search"/) }))
-        if (id === "search-filter") script.push(req => tool("6", "browser_select_option", { ref: refFor(lastToolText(req.messages), /combobox "Plan"/), values: ["pro"] }))
+        script.push(req => tool("4", "browser_type", { ref: refFor(currentPage(req.messages), /textbox "Search"/), text: query }),
+          req => tool("5", "browser_click", { ref: refFor(currentPage(req.messages), /button "Search"/) }))
+        if (id === "search-filter") script.push(req => tool("6", "browser_select_option", { ref: refFor(currentPage(req.messages), /combobox "Plan"/), values: ["pro"] }))
         script.push(() => ({ text: query, toolCalls: [] }))
       }
       const result = await evaluateCase(EVALUATION_CASES.find(c => c.id === id)!, scriptedModel(script), fixture.url)
@@ -91,11 +91,11 @@ it("passes the tab-return evaluation only after selecting the preserved original
     const run = await evaluateCase(EVALUATION_CASES.find(c => c.id === "tab-return")!, scriptedModel([
       () => ({ toolCalls: [{ id: "1", name: "browser_navigate", arguments: { url: fixture.url } }] }),
       req => {
-        const snapshot = lastToolText(req.messages)
+        const snapshot = currentPage(req.messages)
         homeTabId = snapshot.match(/Page tab: (t\d+)/)![1]
         return { toolCalls: [{ id: "2", name: "browser_type", arguments: { ref: refFor(snapshot, /textbox "Search"/), text: "comparison-note" } }] }
       },
-      req => ({ toolCalls: [{ id: "3", name: "browser_click", arguments: { ref: refFor(lastToolText(req.messages), /link "Pricing in new tab"/) } }] }),
+      req => ({ toolCalls: [{ id: "3", name: "browser_click", arguments: { ref: refFor(currentPage(req.messages), /link "Pricing in new tab"/) } }] }),
       () => ({ toolCalls: [{ id: "4", name: "browser_select_tab", arguments: { tabId: homeTabId } }] }),
       () => ({ text: "$42 per month; preserved comparison-note", toolCalls: [] }),
     ]), fixture.url)
@@ -116,13 +116,13 @@ it.each([
     const run = await evaluateCase(EVALUATION_CASES.find(c => c.id === "lowest-price")!, scriptedModel([
       () => ({ toolCalls: [{ id: "1", name: "browser_navigate", arguments: { url: `${fixture.url}/products` } }] }),
       req => {
-        const snapshot = lastToolText(req.messages)
+        const snapshot = currentPage(req.messages)
         expect(snapshot.match(/heading "Dyson Airwrap /g)).toHaveLength(31)
         expect(snapshot.indexOf('heading "Dyson Airwrap Origin+"')).toBeLessThan(snapshot.indexOf('heading "Dyson Airwrap Origin Multi Styler and Dryer"'))
         return { toolCalls: [{ id: "2", name: "browser_select_option", arguments: { ref: refFor(snapshot, /combobox "Sort by"/), values: ["price"] } }] }
       },
       req => {
-        const snapshot = lastToolText(req.messages)
+        const snapshot = currentPage(req.messages)
         expect(snapshot.indexOf('heading "Dyson Airwrap Origin Multi Styler and Dryer"')).toBeLessThan(snapshot.indexOf('heading "Dyson Airwrap Origin+"'))
         return { text: answer, toolCalls: [] }
       },

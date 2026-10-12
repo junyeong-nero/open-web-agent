@@ -14,6 +14,9 @@ const TOGGLES = `<title>Card options</title><style>
     <p><label><input id="updates" type="checkbox"> Email me card offers</label></p>
     <div style="height: 2000px"></div>`
 
+/** One page of the catalog's items. */
+const catalogItems = (page: number) => Array.from({ length: 30 }, (_, index) => `<li>Item ${30 * (page - 1) + index + 1}</li>`).join("")
+
 /** Render a result list 800 ms after DOMContentLoaded. */
 const LATE_LIST = `<script>
     setTimeout(() => document.body.insertAdjacentHTML("beforeend", "<h1>Search results</h1><ul><li>Result one</li><li>Result two</li></ul>"), 800)
@@ -111,6 +114,14 @@ const PAGES: Record<string, string> = {
     <template><div role="dialog" aria-label="Filters"><h2>Filters</h2><button>Learning Product</button><button>Duration</button>
       <button onclick="document.querySelector('#panel').replaceChildren()">Close</button></div></template>
   </body>`,
+  // Like a shop's list: Filters opens a small panel in place, and Next page replaces the items at the same URL.
+  "/catalog": `<!doctype html><title>Catalog</title><body><h1>Catalog</h1>
+    <button onclick="document.querySelector('#filters').hidden = false">Filters</button>
+    <div id="filters" role="dialog" aria-label="Filters" hidden><button onclick="this.textContent = 'In stock only'">In stock</button>
+      <button onclick="document.querySelector('#filters').hidden = true">Close</button></div>
+    <ol id="items">${catalogItems(1)}</ol>
+    <button onclick="document.querySelector('#items').innerHTML = '${catalogItems(2)}'">Next page</button>
+    <a href="/pricing">Pricing</a></body>`,
   "/sorry": `<!doctype html><title>Just a moment...</title><h1>Check you are human</h1>`,
   "/overlay": `<!doctype html><title>Overlay</title>
     <button>Buy now</button><div id="overlay" style="position: fixed; inset: 0"></div>`,

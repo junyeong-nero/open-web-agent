@@ -8,7 +8,7 @@ import { type BrowserTool, callTool, compactLine, resultContent, selectTools, ty
 
 export const SYSTEM_PROMPT = `You are a web agent that completes the user's task by operating a real browser through tools.
 
-- Page state arrives as accessibility snapshots. Act on elements with their [ref=…] values from the most recent snapshot only; refs from older snapshots may be stale.
+- Page state arrives as accessibility snapshots. Act on elements with their [ref=…] values from the most recent snapshot only; refs from older snapshots may be stale. An action on the same page may return only the lines changed since its last full snapshot (+ added, - removed); that snapshot plus these changes is the current page.
 - Actions return a fresh snapshot, so you rarely need browser_snapshot right after acting.
 - Prefer navigating directly to a URL when you know it. If a URL you guessed returns HTTP 404, stop guessing URLs on that site and use its links or search instead. Use browser_get_text to read long content.
 - Only the newest snapshot and text read stay whole. Older ones from the last few pages are reduced to their task-relevant lines, without refs, and the rest are omitted. Before leaving a page whose facts you still need, read the relevant content with browser_get_text; keep any other needed facts in a brief assistant note.
@@ -452,29 +452,43 @@ const DIGEST_PAGES = 4
 /** Characters in one digest, its label included. */
 const DIGEST_CHARS = 1_500
 /** The header that `BrowserSession.snapshot` puts before the tree. */
-const SNAPSHOT_HEADER = /^Page URL: ([^\n]*)\nPage title: ([\s\S]*?)\nPage tab: [^\n]*\nSnapshot:\n/
+const SNAPSHOT_HEADER = /^Page URL: ([^\n]*)\nPage title: ([\s\S]*?)\nPage tab: ([^\n]*)\nSnapshot:\n/
+/** Tools whose snapshot is always shown whole: the model asked for it, or it shows a document just opened. */
+const SHOWN_WHOLE = new Set(["browser_snapshot", "browser_navigate", "browser_go_back"])
+/**
+ * Above this share of a snapshot's lines added or removed since the last full snapshot, it is shown whole again. In a
+ * replay of 100 recorded runs (#201), the characters that a prompt cache cannot reuse fell 17.3% at 0.2, 18.3% at 0.3
+ * and 18.5% at 0.5, but only 15.6% at 1, while the model had ever more changes to apply.
+ */
+const MAX_CHANGED_LINES = 0.3
+const CHANGES_LABEL = '[Changes since the last full snapshot of this page: that snapshot plus these changes is the current page, and refs on its unchanged lines still work. "+" marks added lines and "-" removed ones; other lines are unchanged context, and "…" skips unchanged lines.]'
 
 /**
- * Keep the newest snapshot, page text and image whole. Superseded snapshots and page texts of the last few pages keep a
- * digest of their task-relevant lines (see `pageDigests`); older page state becomes a placeholder.
+ * Keep the newest snapshot, page text and image whole. A snapshot of the same page as the last full one is shown as its
+ * changes since that one, which stays whole in place (see `shownSnapshots`). Superseded snapshots and page texts of the
+ * last few pages keep a digest of their task-relevant lines (see `pageDigests`); older page state becomes a placeholder.
  */
 export function render(entries: Entry[], task: string): Message[] {
+  const shown = shownSnapshots(entries)
   const lastSnapshot = entries.findLastIndex((entry) => snapshotOf(entry) !== undefined)
   const lastPageText = entries.findLastIndex((entry) => textOf(entry) !== undefined)
   const lastImage = entries.findLastIndex((entry) => "result" in entry && entry.result.image !== undefined)
-  const digests = pageDigests(entries, task)
+  const current = shown.get(lastSnapshot)
+  const digests = pageDigests(entries, task, shown)
+  const snapshotAt = (index: number, snapshot: string) => {
+    if (index === lastSnapshot) return current?.changes ? changesOf(snapshot, current.changes) : snapshot
+    if (index === current?.base) return snapshot
+    return digests.get(`snapshot ${index}`) ?? OMITTED_SNAPSHOT
+  }
 
   return entries.map((entry, index): Message => {
     if ("snapshot" in entry) {
-      const snapshot = index === lastSnapshot ? entry.snapshot : digests.get(`snapshot ${index}`) ?? OMITTED_SNAPSHOT
-      return { role: "user", content: [{ type: "text", text: `${entry.dateLine}\n\nTask: ${entry.task}\n\nCurrent page:\n${snapshot}` }] }
+      return { role: "user", content: [{ type: "text", text: `${entry.dateLine}\n\nTask: ${entry.task}\n\nCurrent page:\n${snapshotAt(index, entry.snapshot)}` }] }
     }
     if (!("result" in entry)) return entry
     const result: ToolResult = { ...entry.result }
     if (result.pageText && index !== lastPageText) result.text = digests.get(`text ${index}`) ?? "[older page text omitted: superseded by a newer read]"
-    if (result.snapshot !== undefined && index !== lastSnapshot) {
-      result.snapshot = digests.get(`snapshot ${index}`) ?? OMITTED_SNAPSHOT
-    }
+    if (result.snapshot !== undefined) result.snapshot = snapshotAt(index, result.snapshot)
     if (result.image !== undefined && index !== lastImage) {
       result.image = undefined
       result.text += " [older screenshot omitted]"
@@ -497,14 +511,145 @@ function textOf(entry: Entry): string | undefined {
   return "result" in entry && entry.result.pageText ? entry.result.text : undefined
 }
 
+/** How a snapshot is shown: whole when `base` is its own index, otherwise as the `changes` since the snapshot at `base`. */
+interface Shown {
+  base: number
+  changes?: LineChange[]
+}
+
+/**
+ * How each snapshot entry is shown, by index. A snapshot shown whole becomes the base, the last full snapshot the model
+ * saw. An action's snapshot is shown as its changes since the base when it shows the same tab and URL, ignoring the
+ * fragment, the main frame did not navigate, and at most MAX_CHANGED_LINES of its lines were added or removed since.
+ * Snapshots of browser_snapshot, browser_navigate and browser_go_back are always whole, and a snapshot without the page
+ * header leaves no base. Both are compared as shown, so the changes match what the model saw. This depends only on the
+ * entries up to each one, so a later entry never changes how an earlier one is shown.
+ */
+function shownSnapshots(entries: Entry[]): Map<number, Shown> {
+  const shown = new Map<number, Shown>()
+  let base: { index: number; url: string; tab: string; lines: string[] } | undefined
+  entries.forEach((entry, index) => {
+    const snapshot = snapshotOf(entry)
+    if (snapshot === undefined) return
+    const header = SNAPSHOT_HEADER.exec(snapshot)
+    const lines = header ? snapshot.slice(header[0].length).split("\n") : []
+    const url = header?.[1]!.replace(/#.*/, "")
+    if (base && header && "result" in entry && !SHOWN_WHOLE.has(entry.name) && !entry.result.navigated && url === base.url && header[3] === base.tab) {
+      const changes = lineChanges(base.lines, lines, Math.floor(MAX_CHANGED_LINES * lines.length))
+      if (changes) {
+        shown.set(index, { base: base.index, changes })
+        return
+      }
+    }
+    shown.set(index, { base: index })
+    base = header ? { index, url: url!, tab: header[3]!, lines } : undefined
+  })
+  return shown
+}
+
+/** A line of either text in a line diff: " " when both have it, "-" when only the old text does, "+" when only the new one. */
+type LineChange = [mark: " " | "-" | "+", line: string]
+
+/**
+ * A shortest line diff from `a` to `b` (Myers' algorithm): every line of both in order, marked. Undefined when it would
+ * add and remove more than `max` lines in all, which bounds its time and memory.
+ */
+function lineChanges(a: string[], b: string[], max: number): LineChange[] | undefined {
+  // `v[offset + k]` is the furthest index into `a` reached on diagonal k: the index into `a` minus the one into `b`.
+  const offset = max + 1
+  const v = new Int32Array(2 * offset + 1)
+  // `v` before each round d, in which the d-th line is added or removed.
+  const rounds: Int32Array[] = []
+  const adds = (v: Int32Array, d: number, k: number) => k === -d || (k !== d && v[offset + k - 1]! < v[offset + k + 1]!)
+  for (let d = 0; d <= max; d++) {
+    rounds.push(v.slice())
+    for (let k = -d; k <= d; k += 2) {
+      let x = adds(v, d, k) ? v[offset + k + 1]! : v[offset + k - 1]! + 1
+      let y = x - k
+      while (x < a.length && y < b.length && a[x] === b[y]) {
+        x++
+        y++
+      }
+      v[offset + k] = x
+      if (x < a.length || y < b.length) continue
+      // Walk back from the end: each round ends with a run of kept lines after its added or removed line.
+      const changes: LineChange[] = []
+      for (let round = d; round > 0; round--) {
+        const added = adds(rounds[round]!, round, x - y)
+        const from = rounds[round]![offset + x - y + (added ? 1 : -1)]!
+        for (const kept = added ? from : from + 1; x > kept; y--) changes.push([" ", a[--x]!])
+        changes.push(added ? ["+", b[--y]!] : ["-", a[--x]!])
+      }
+      for (; x > 0; y--) changes.push([" ", a[--x]!])
+      return changes.reverse()
+    }
+  }
+  return undefined
+}
+
+/** A line's indentation, which is its depth in a snapshot's tree. */
+function indentOf(line: string): number {
+  return line.length - line.trimStart().length
+}
+
+/**
+ * The changes since the base as the model reads them: a label, the current page header and the added and removed lines.
+ * Each run of changes follows the unchanged lines that show where it is: the lines just before it, as many as it takes
+ * for them and its first removed lines to occur only once after the last line shown, and, up the tree, the lines of its
+ * ancestors. "…" marks skipped unchanged lines.
+ */
+function changesOf(snapshot: string, changes: LineChange[]): string {
+  const header = SNAPSHOT_HEADER.exec(snapshot)![0]
+  const page = header.slice(0, -"Snapshot:\n".length)
+  // The base's lines, and for each line of the diff the number of them before it.
+  const base: string[] = []
+  const before = changes.map(([mark, line]) => mark === "+" ? base.length : base.push(line) - 1)
+  /** Whether the base's lines among changes `from` to `to` occur together only once from base line `after` on. */
+  const once = (from: number, to: number, after: number) => {
+    const block = changes.slice(from, to).flatMap(([mark, line]) => mark === "+" ? [] : [line])
+    let count = 0
+    for (let at = after; at + block.length <= base.length && count < 2; at++) if (block.every((line, offset) => base[at + offset] === line)) count++
+    return count === 1
+  }
+  const lines: string[] = []
+  let last = -1
+  const show = (index: number) => {
+    if (index > last + 1) lines.push("…")
+    lines.push(changes[index]!.join(""))
+    last = index
+  }
+  for (let start = 0; start < changes.length; start++) {
+    if (changes[start]![0] === " ") continue
+    let removed = start
+    while (changes[removed]?.[0] === "-") removed++
+    const after = last < 0 ? 0 : before[last]! + (changes[last]![0] === "+" ? 0 : 1)
+    let from = start
+    while (from > last + 1 && (from === start || !once(from, removed, after))) from--
+    // Unshown ancestors come after the last line shown, since the ones before it are ancestors of a run shown already.
+    const context: number[] = []
+    for (let index = start - 1, indent = indentOf(changes[start]![1]); index > last && (indent > 0 || index >= from); index--) {
+      const own = indentOf(changes[index]![1])
+      if (index < from && own >= indent) continue
+      context.push(index)
+      indent = Math.min(indent, own)
+    }
+    for (const index of context.reverse()) show(index)
+    while (start < changes.length && changes[start]![0] !== " ") show(start++)
+  }
+  if (last === -1) lines.push("(none)")
+  else if (last < changes.length - 1) lines.push("…")
+  return `${CHANGES_LABEL}\n${page}Snapshot changes:\n${lines.join("\n")}`
+}
+
 /**
  * Digests of the newest DIGEST_PAGES superseded pages, keyed by kind and entry index. A snapshot belongs to the page at
- * its URL, and a text read or a snapshot without a URL to its text. Going back from the newest entry, the newest snapshot
- * and text read are shown whole, and every other page counts once, at its newest entry; a page shown whole gets no
- * digest. This depends only on the task and the entries from each one on, so an entry only moves from whole to digest to
- * placeholder, and messages before the first one that moves stay byte-identical for prompt caching.
+ * the URL of the full snapshot it is shown against, and a text read or a snapshot without a URL to its text. Going back
+ * from the newest entry, the newest snapshot (with the full snapshot it is shown against) and text read are shown, and
+ * every other page counts once, at its newest entry; a page shown gets no digest. This depends only on the task and the
+ * entries from each one on, so an entry only moves from shown to digest to placeholder, and messages before the first
+ * one that moves stay byte-identical for prompt caching.
  */
-function pageDigests(entries: Entry[], task: string): Map<string, string> {
+function pageDigests(entries: Entry[], task: string, shown: Map<number, Shown>): Map<string, string> {
   // A URL in the task, such as where to start, is not a fact to find; its pieces would match every link on the site.
   const query = task.replace(/https?:\/\/\S+/g, " ")
   const digests = new Map<string, string>()
@@ -515,7 +660,8 @@ function pageDigests(entries: Entry[], task: string): Map<string, string> {
     const entry = entries[index]!
     for (const [kind, content] of [["text", textOf(entry)], ["snapshot", snapshotOf(entry)]] as const) {
       if (content === undefined) continue
-      const page = kind === "text" ? `text ${content}` : `snapshot ${SNAPSHOT_HEADER.exec(content)?.[1] ?? content}`
+      const base = kind === "snapshot" ? snapshotOf(entries[shown.get(index)!.base]!)! : content
+      const page = kind === "text" ? `text ${content}` : `snapshot ${SNAPSHOT_HEADER.exec(base)?.[1] ?? base}`
       const covered = seen.has(page)
       seen.add(page)
       if (!shownWhole.has(kind)) shownWhole.add(kind)
