@@ -23,11 +23,19 @@ export interface OpenAIChatOptions {
   fetch?: FetchLike
 }
 
+/**
+ * Hosts that get a request's cache key as `prompt_cache_key`. OpenAI routes requests by it on models before GPT-5.6, and
+ * keeps a key's cache apart from other keys. OpenRouter pins a key's requests to one provider, and providers that do not
+ * take it ignore it. Other OpenAI-format endpoints, such as Gemini's, may reject a field they do not know.
+ */
+const CACHE_KEY_HOSTS = ["api.openai.com", "openrouter.ai"]
+
 /** OpenAI Chat Completions wire format. Also serves OpenRouter, Gemini's OpenAI endpoint, Ollama, vLLM, … */
 export function openaiChat(options: OpenAIChatOptions): ModelAdapter {
   const baseUrl = (options.baseUrl ?? "https://api.openai.com/v1").replace(/\/+$/, "")
   const fetchImpl = options.fetch ?? fetch
   const name = `openai-chat:${options.model}`
+  const takesCacheKey = CACHE_KEY_HOSTS.includes(URL.parse(baseUrl)?.hostname ?? "")
 
   return {
     name,
@@ -43,6 +51,8 @@ export function openaiChat(options: OpenAIChatOptions): ModelAdapter {
               })),
             }
           : {}),
+        // Model options come last, so a prompt_cache_key set there wins.
+        ...(request.cacheKey && takesCacheKey ? { prompt_cache_key: request.cacheKey } : {}),
         ...options.extraBody,
       }
       const headers: Record<string, string> = { ...options.headers }
@@ -76,7 +86,7 @@ export function openaiChat(options: OpenAIChatOptions): ModelAdapter {
           arguments: parseToolArguments(call.function.arguments),
         })),
         model: json.model || undefined,
-        // prompt_tokens already includes cache reads and writes. OpenRouter adds cache_write_tokens and cost.
+        // prompt_tokens already includes cache reads and writes. OpenAI (GPT-5.6 and later) and OpenRouter add cache_write_tokens; OpenRouter adds cost.
         usage: reportedUsage({
           inputTokens: json.usage?.prompt_tokens,
           outputTokens: json.usage?.completion_tokens,

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { interruptible } from "./cancel"
 import type { BrowserSession } from "./browser"
 import { judgeRequest, matchingLines, parseVerdict, UNSUPPORTED_AT, withoutRefs } from "./judge"
@@ -117,6 +117,8 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   const maxSteps = options.maxSteps ?? 30
   const maxFailures = options.maxConsecutiveFailures ?? 3
   const system = options.systemPrompt ?? SYSTEM_PROMPT
+  // Every request of this run shares one prompt cache key, which no other run uses.
+  const cacheKey = randomUUID()
   const callUsage: Array<Usage | undefined> = []
   const judgeUsage: Array<Usage | undefined> = []
   const checkerUsage: Array<Usage | undefined> = []
@@ -132,7 +134,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   let judgeError: string | undefined
   let checkerError: string | undefined
   const revisit = revisits()
-  const checkPage = options.checkerModel && pageChecker(options.checkerModel, options.browser, signal)
+  const checkPage = options.checkerModel && pageChecker(options.checkerModel, options.browser, signal, `${cacheKey}:checker`)
 
   const finish = (status: AgentResult["status"], stopReason: AgentResult["stopReason"], text: string, error?: string, outcome?: AgentResult["outcome"]): AgentResult => {
     const final = parseFinalAnswer(text)
@@ -151,6 +153,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       system,
       messages: render(entries, options.task),
       tools: withTools ? specs : [],
+      cacheKey,
       signal,
     }), signal)
     const durationMs = Math.round(performance.now() - requestedAt)
@@ -179,7 +182,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   const judge = async (judgeModel: ModelAdapter, answer: string) => {
     const requestedAt = performance.now()
     try {
-      const response = await interruptible(() => judgeModel.complete({ ...judgeRequest(options.task, answer, latestPages(entries), dateLine), signal }), signal)
+      const response = await interruptible(() => judgeModel.complete({ ...judgeRequest(options.task, answer, latestPages(entries), dateLine), cacheKey: `${cacheKey}:judge`, signal }), signal)
       judgeUsage.push(response.usage)
       emit({ type: "model", role: "judge", step, text: response.text, toolCalls: response.toolCalls, model: response.model, durationMs: Math.round(performance.now() - requestedAt), usage: response.usage })
       const verdict = parseVerdict(response.text)

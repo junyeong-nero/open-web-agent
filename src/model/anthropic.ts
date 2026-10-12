@@ -20,6 +20,9 @@ export interface AnthropicMessagesOptions {
   fetch?: FetchLike
 }
 
+/** Marks the end of a prefix for Anthropic's prompt cache, with the default five-minute lifetime. */
+const CACHE_BREAKPOINT = { cache_control: { type: "ephemeral" } }
+
 /** Anthropic Messages wire format. */
 export function anthropicMessages(options: AnthropicMessagesOptions): ModelAdapter {
   const baseUrl = (options.baseUrl ?? "https://api.anthropic.com/v1").replace(/\/+$/, "")
@@ -29,20 +32,26 @@ export function anthropicMessages(options: AnthropicMessagesOptions): ModelAdapt
   return {
     name,
     async complete(request: ModelRequest): Promise<ModelResponse> {
+      let system: string | unknown[] = request.system
+      const messages = toAnthropicMessages(request)
+      const tools: Array<Record<string, unknown>> = request.tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.inputSchema }))
+      // Only a request with a cache key gets breakpoints, and model options that set cache_control choose their own.
+      if (request.cacheKey && !Object.hasOwn(options.extraBody ?? {}, "cache_control")) {
+        // The cache covers tools, then system, then messages. One breakpoint ends the static prefix, on the last tool
+        // when the system prompt is empty, since an empty text block cannot hold one.
+        if (request.system) system = [{ type: "text", text: request.system, ...CACHE_BREAKPOINT }]
+        else if (tools.length > 0) tools.push({ ...tools.pop(), ...CACHE_BREAKPOINT })
+        // The other ends the message before the newest turn. The next request of an agent loop may send that turn
+        // differently (owa reduces a superseded snapshot to a digest) but keeps the turns before it, so it reads them back.
+        const previous = messages.at(-2)?.content
+        if (previous?.length) previous.push({ ...(previous.pop() as object), ...CACHE_BREAKPOINT })
+      }
       const body = {
         model: options.model,
         max_tokens: options.maxTokens ?? 4096,
-        system: request.system,
-        messages: toAnthropicMessages(request),
-        ...(request.tools.length > 0
-          ? {
-              tools: request.tools.map((tool) => ({
-                name: tool.name,
-                description: tool.description,
-                input_schema: tool.inputSchema,
-              })),
-            }
-          : {}),
+        system,
+        messages,
+        ...(tools.length > 0 ? { tools } : {}),
         ...options.extraBody,
       }
       const headers: Record<string, string> = { "anthropic-version": "2023-06-01", ...options.headers }

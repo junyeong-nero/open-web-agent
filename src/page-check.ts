@@ -100,14 +100,14 @@ export function parsePageKind(text = "", kinds = PAGE_KINDS): PageKind | undefin
 }
 
 /** Ask `model` which kind of page this is, for at most `timeoutMs` and never past `signal`. Never rejects. */
-export async function askPageKind(model: ModelAdapter, page: CheckedPage, signal: AbortSignal, kinds = PAGE_KINDS, timeoutMs = CHECK_TIMEOUT_MS): Promise<PageCheckCall> {
+export async function askPageKind(model: ModelAdapter, page: CheckedPage, signal: AbortSignal, kinds = PAGE_KINDS, timeoutMs = CHECK_TIMEOUT_MS, cacheKey?: string): Promise<PageCheckCall> {
   const timeout = new AbortController()
   const timer = setTimeout(() => timeout.abort(new Error(`${model.name} gave no page check within ${timeoutMs / 1000} s`)), timeoutMs)
   const bound = AbortSignal.any([signal, timeout.signal])
   const startedAt = performance.now()
   const durationMs = () => Math.round(performance.now() - startedAt)
   try {
-    const response = await interruptible(() => model.complete({ ...pageCheckRequest(page, model, kinds), signal: bound }), bound)
+    const response = await interruptible(() => model.complete({ ...pageCheckRequest(page, model, kinds), ...(cacheKey ? { cacheKey } : {}), signal: bound }), bound)
     const verdict = parsePageKind(response.text, kinds)
     return verdict ? { response, verdict, durationMs: durationMs() } : { response, error: `${model.name} replied without a page kind`, durationMs: durationMs() }
   } catch (error) {
@@ -121,9 +121,9 @@ export async function askPageKind(model: ModelAdapter, page: CheckedPage, signal
  * The agent loop's page check. It asks once after a tool result that opened a page: browser_navigate or browser_go_back,
  * or another action whose snapshot shows another URL, ignoring the fragment, than the last action it looked at. Reads,
  * waits, scrolls and failed tools are never checked, so a page first seen in one of them is checked at the next action
- * on it. Returns the result to record and, when it asked, the checker's call.
+ * on it. Returns the result to record and, when it asked, the checker's call. Its requests carry `cacheKey` when given.
  */
-export function pageChecker(model: ModelAdapter, browser: BrowserSession, signal: AbortSignal) {
+export function pageChecker(model: ModelAdapter, browser: BrowserSession, signal: AbortSignal, cacheKey?: string) {
   let last = browser.currentUrl?.replace(/#.*/, "")
   return async (tool: string, result: ToolResult): Promise<{ result: ToolResult; call?: PageCheckCall }> => {
     if (result.isError || READS.has(tool) || result.snapshot === undefined) return { result }
@@ -132,7 +132,7 @@ export function pageChecker(model: ModelAdapter, browser: BrowserSession, signal
     const previous = last
     last = url.replace(/#.*/, "")
     if (!OPENS.has(tool) && last === previous) return { result }
-    const call = await askPageKind(model, { url, result: result.text, snapshot: result.snapshot }, signal)
+    const call = await askPageKind(model, { url, result: result.text, snapshot: result.snapshot }, signal, PAGE_KINDS, CHECK_TIMEOUT_MS, cacheKey)
     return { result: await applyVerdict(call.verdict, result, browser, signal), call }
   }
 }
