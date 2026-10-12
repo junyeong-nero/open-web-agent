@@ -233,11 +233,8 @@ Snapshots longer than 40,000 characters are cut. When one is cut, its open dialo
 `alertdialog`) come first and the rest of the page fills the remaining space, so a modal rendered at
 the end of the page stays visible and its refs work.
 
-Before the cut, a link's `/url:` line is shortened when the shorter URL opens the same page. A link on
-the page's own origin keeps only its path, query and fragment, so resolve it against the snapshot's
-`Page URL` before navigating to it. Well-known tracking parameters such as `utm_*` and `gclid` are
-dropped, and a Google or Bing click-tracking link shows the target it holds. Other parameters stay,
-even in long queries, because a page may need them.
+Snapshots leave out the link URLs (Playwright's `/url:` lines), before the cut. A link is followed
+by clicking its ref, and these URLs took about a sixth of a snapshot's characters.
 
 A checkbox or radio covered by its own label, as when a site hides the input under a styled label, is
 clicked through that label at the same point instead of waiting for the action timeout, and the result
