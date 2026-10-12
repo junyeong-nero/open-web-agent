@@ -112,6 +112,15 @@ const PAGES: Record<string, string> = {
       <button onclick="document.querySelector('#panel').replaceChildren()">Close</button></div></template>
   </body>`,
   "/sorry": `<!doctype html><title>Just a moment...</title><h1>Check you are human</h1>`,
+  // Links as sites and search engines write them: an absolute URL on the page's own origin with tracking parameters,
+  // and a Bing click-tracking link that holds its target as "a1" and the URL in base64url.
+  "/links": `<!doctype html><title>Plans</title><h1>Plans</h1>
+    <a id="pro">Pro plan</a> <a id="team">Team plan search result</a>
+    <script>
+      document.querySelector("#pro").href = location.origin + "/pricing?plan=pro&utm_source=newsletter&gclid=abc123"
+      const target = btoa(location.origin + "/pricing?plan=team").replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "")
+      document.querySelector("#team").href = "https://www.bing.com/ck/a?!&&p=f00d&ptn=3&ver=2&hsh=4&u=a1" + target + "&ntb=1"
+    </script>`,
   "/overlay": `<!doctype html><title>Overlay</title>
     <button>Buy now</button><div id="overlay" style="position: fixed; inset: 0"></div>`,
   // Like a sign-in popup that covers the whole page and opens after the click's own snapshot, which comes about 0.8 s after the click.

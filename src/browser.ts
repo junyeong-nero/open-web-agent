@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import { errors, chromium, firefox, webkit, type Browser, type BrowserContext, type Locator, type Page, type WebSocket } from "playwright"
+import { compactUrls } from "./link-urls"
 
 export interface BrowserOptions {
   headless?: boolean
@@ -34,7 +35,10 @@ export class BrowserSession {
   private tabIds = new Map<Page, string>()
   private nextTabId = 1
   private sockets = new WeakMap<Page, Set<WebSocket>>()
-  /** Tab, URL and untruncated tree of the last snapshot, for re-identifying a ref whose element was replaced. */
+  /**
+   * Tab, URL and tree of the last snapshot as captured, uncut and with its link URLs as the page wrote them, for
+   * re-identifying a ref whose element was replaced. That reads only ref lines, which `shown` never changes.
+   */
   lastSnapshot?: { page: Page; url: string; tree: string }
   /** Recovery note for the most recent snapshot, kept in tool result text. */
   snapshotNote = ""
@@ -86,14 +90,19 @@ export class BrowserSession {
       } catch { throw error }
       this.snapshotNote = "The first snapshot attempt timed out; a second attempt succeeded."
     }
-    this.lastSnapshot = { page, url: page.url(), tree }
-    return `Page URL: ${page.url()}\nPage title: ${await page.title()}\nPage tab: ${this.track(page)}\nSnapshot:\n${this.shown(tree)}`
+    const url = page.url()
+    this.lastSnapshot = { page, url, tree }
+    return `Page URL: ${url}\nPage title: ${await page.title()}\nPage tab: ${this.track(page)}\nSnapshot:\n${this.shown(tree, url)}`
   }
 
-  /** The part of a snapshot tree that a snapshot shows. */
-  shown(tree: string): string {
+  /**
+   * The part of a snapshot tree that a snapshot shows: link URLs compacted for the page at `url` (see `compactUrls`),
+   * then cut to the budget, so that the budget holds more of the page.
+   */
+  shown(tree: string, url = this.currentUrl): string {
+    const compact = compactUrls(tree, url)
     const max = this.options.maxSnapshotChars ?? 40_000
-    return tree.length > max ? truncate(tree, max) : tree
+    return compact.length > max ? truncate(compact, max) : compact
   }
 
   /** The page's open WebSockets, including those it opened before the current action. */
