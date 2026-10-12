@@ -9,7 +9,7 @@
  * one the page needs, such as a search filter, an OAuth state or a signed token, so no cut could promise the same page.
  */
 
-/** Parameters that only carry ad, analytics and email-campaign IDs: Firefox's query-stripping list, utm_* and other click IDs. */
+/** Parameters that only carry ad-click, analytics and email-campaign IDs; most are on Firefox's query-stripping list. */
 const TRACKING = /^(?:utm_\w+|gclid|gclsrc|dclid|gbraid|wbraid|fbclid|msclkid|twclid|ttclid|li_fat_id|igshid|yclid|ysclid|srsltid|_gl|_openstat|mc_cid|mc_eid|_hsenc|_hsmi|__hssc|__hstc|__hsfp|hsctatracking|mkt_tok|oly_anon_id|oly_enc_id|vero_id|vero_conv|wickedid)$/i
 
 /** `tree` with the `- /url: …` line of each link compacted for the page at `pageUrl`; every other line stays as it was. */
