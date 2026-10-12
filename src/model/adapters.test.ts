@@ -165,11 +165,12 @@ describe("prompt caching", () => {
   const marks = (body: unknown) => JSON.stringify(body).split('"cache_control"').length - 1
   const answered = () => recordingFetch({ choices: [{ message: { content: "done" } }], content: [{ type: "text", text: "done" }] })
 
-  it("sends a request's cache key as prompt_cache_key to OpenAI and OpenRouter only, and nothing else", async () => {
+  it("sends a request's cache key as prompt_cache_key to OpenRouter only, and nothing else", async () => {
     for (const [baseUrl, sent] of [
-      [undefined, true],
-      ["https://api.openai.com/v1", true],
       ["https://openrouter.ai/api/v1", true],
+      // OpenAI's GPT-5.6 and later models route requests themselves; a key there would only keep runs from sharing a cache.
+      [undefined, false],
+      ["https://api.openai.com/v1", false],
       ["https://generativelanguage.googleapis.com/v1beta/openai", false],
       ["http://localhost:11434/v1", false],
       ["http://127.0.0.1:8000/v1", false],
@@ -186,10 +187,12 @@ describe("prompt caching", () => {
     }
   })
 
-  it("keeps a prompt_cache_key from the model options", async () => {
-    const { calls, fetchImpl } = answered()
-    await openaiChat({ model: "m", extraBody: { prompt_cache_key: "mine" }, fetch: fetchImpl }).complete(keyed)
-    expect(calls[0]!.body.prompt_cache_key).toBe("mine")
+  it("passes a prompt_cache_key from the model options through as is", async () => {
+    for (const baseUrl of ["https://api.openai.com/v1", "https://openrouter.ai/api/v1"]) {
+      const { calls, fetchImpl } = answered()
+      await openaiChat({ model: "m", baseUrl, extraBody: { prompt_cache_key: "mine" }, fetch: fetchImpl }).complete(keyed)
+      expect(calls[0]!.body.prompt_cache_key).toBe("mine")
+    }
   })
 
   it("marks the end of the system prompt and of the message before the newest turn for Anthropic", async () => {

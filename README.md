@@ -374,12 +374,11 @@ and checker's requests (`<key>:judge`, `<key>:checker`). Every run gets a new ke
 one that a library caller sends to an adapter directly, goes out as before. A custom `ModelAdapter` gets the key as the
 request's `cacheKey`.
 
-- **OpenAI format.** Requests to `api.openai.com` and `openrouter.ai` carry the key as `prompt_cache_key`. On models
-  before GPT-5.6, OpenAI routes the requests of one key to the same cache. GPT-5.6 and later models route requests
-  themselves, and the key only keeps each run's cache apart, so a run's first request no longer reads the system prompt
-  and tools that other runs cached. OpenRouter keeps the requests of one key on one provider. Other endpoints, such as
-  Gemini's, Ollama and vLLM, get no key, because some reject fields they do not know. A `prompt_cache_key` in
-  `--model-options` replaces the run's key.
+- **OpenAI format.** Requests to `openrouter.ai` carry the key as `prompt_cache_key`, which keeps a run's requests on
+  one provider. Requests to `api.openai.com` carry none. OpenAI's GPT-5.6 and later models route requests themselves,
+  and a key would only keep each run's cache apart, so runs would stop sharing the cached tools and system prompt.
+  Other endpoints, such as Gemini's, Ollama and vLLM, get no key, because some reject fields they do not know. A
+  `prompt_cache_key` in `--model-options` is sent as is.
 - **Anthropic format.** A request with a key marks two cache breakpoints, `cache_control: {"type":"ephemeral"}`. One
   ends the system prompt, so the tools and the system prompt are cached. The other ends the turn before the newest one,
   and the next request reads those turns back. The newest turn holds the newest snapshot, which the next request reduces
@@ -388,9 +387,12 @@ request's `cacheKey`.
 
 From one request to the next, the messages before the newest snapshot or text read usually stay the same. A page that
 leaves the four digests, or that the agent opens again, changes an older message, and the next request reuses less.
-GPT-5.6 and later models write their cache at the end of the newest message, which holds the newest snapshot. After a
-step that brought a new snapshot, they reuse only the system prompt, the tools and the task (about 1.3k tokens), with or
-without a key. `usage.cachedInputTokens` in the `model` events of a `--trace` file shows what each request reused.
+
+On OpenAI's GPT-5.6 and later models, such as gpt-6-luna, caching helps little for now. They write the cache at the end
+of the newest message, which holds the newest snapshot, and owa reduces that snapshot to a digest on the next step. So
+they reuse little more than the tools, the system prompt and the task, until same-page snapshot diffs (#201) keep the
+base snapshot in place. `usage.cachedInputTokens` in the `model` events of a `--trace` file shows what each request
+reused.
 
 ### Task limits and cancellation
 
