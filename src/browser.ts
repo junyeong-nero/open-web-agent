@@ -34,7 +34,10 @@ export class BrowserSession {
   private tabIds = new Map<Page, string>()
   private nextTabId = 1
   private sockets = new WeakMap<Page, Set<WebSocket>>()
-  /** Tab, URL and untruncated tree of the last snapshot, for re-identifying a ref whose element was replaced. */
+  /**
+   * Tab, URL and tree of the last snapshot as captured, uncut and with its link URLs, for re-identifying a ref whose
+   * element was replaced. That reads only ref lines, which `shown` never changes.
+   */
   lastSnapshot?: { page: Page; url: string; tree: string }
   /** Recovery note for the most recent snapshot, kept in tool result text. */
   snapshotNote = ""
@@ -90,10 +93,11 @@ export class BrowserSession {
     return `Page URL: ${page.url()}\nPage title: ${await page.title()}\nPage tab: ${this.track(page)}\nSnapshot:\n${this.shown(tree)}`
   }
 
-  /** The part of a snapshot tree that a snapshot shows. */
+  /** The part of a snapshot tree that a snapshot shows: the tree without its link URLs, cut to the budget. */
   shown(tree: string): string {
+    const text = withoutLinkUrls(tree)
     const max = this.options.maxSnapshotChars ?? 40_000
-    return tree.length > max ? truncate(tree, max) : tree
+    return text.length > max ? truncate(text, max) : text
   }
 
   /** The page's open WebSockets, including those it opened before the current action. */
@@ -220,6 +224,17 @@ export class BrowserSession {
     this.browser = await withExecutableFallback(type === chromium, launch, (opts) => type.launch(opts))
     return this.browser.newContext(contextOptions)
   }
+}
+
+/**
+ * A snapshot tree without the `- /url: …` line that Playwright puts under each link; every other line stays as it was.
+ * Actions use refs, so the model follows a link by clicking it, and these lines were about a sixth of a snapshot's
+ * characters. They go before the cut, so the budget holds more of the page. In the #202 A/B (a free nemotron-3-super
+ * model, five tasks run twice), dropping them cut input tokens per step by 21%, from 16.8k to 13.2k, while
+ * golden-graded correct answers went from 2 to 3.
+ */
+function withoutLinkUrls(tree: string): string {
+  return tree.split("\n").filter((line) => !/^ *- \/url: /.test(line)).join("\n")
 }
 
 /**

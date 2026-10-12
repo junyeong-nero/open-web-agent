@@ -93,7 +93,7 @@ const PAGES: Record<string, string> = {
   "/trade-in": `<!doctype html><html><head><title>Trade-in values</title></head><body>
     <h1>Trade in your device</h1>
     <button onclick="document.querySelector('#portal').append(document.querySelector('template').content.cloneNode(true)); document.querySelector('[role=dialog]').focus()">See all values</button>
-    <ol>${Array.from({ length: 300 }, (_, index) => `<li><a href="#model-${index + 1}">Phone model ${index + 1}</a> <button>Estimate ${index + 1}</button></li>`).join("")}</ol>
+    <ol>${Array.from({ length: 400 }, (_, index) => `<li><a href="#model-${index + 1}">Phone model ${index + 1}</a> <button>Estimate ${index + 1}</button></li>`).join("")}</ol>
     <div id="portal"></div>
     <template><div style="position: fixed; inset: 0; background: rgb(0 0 0 / 50%)">
       <div role="dialog" aria-modal="true" aria-labelledby="values" tabindex="-1" style="margin: 40px; padding: 20px; background: white">

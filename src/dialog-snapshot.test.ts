@@ -11,6 +11,8 @@ const shownFirst = "Open dialog (shown first; the page behind it may not accept 
 const notice = (max: number) => `\n… [snapshot truncated at ${max} chars]`
 /** The tree part of a snapshot, after its page header. */
 const bodyOf = (snapshot: string) => snapshot.slice(snapshot.indexOf("\nSnapshot:\n") + "\nSnapshot:\n".length)
+/** A captured tree as snapshots show it before the cut, without its links' /url: lines. */
+const withoutUrls = (tree: string) => tree.replace(/\n *- \/url: .*/g, "")
 
 /** The tree part of the snapshot of a page whose aria snapshot is `tree`, without launching a browser. */
 async function shown(tree: string, maxSnapshotChars: number): Promise<string> {
@@ -35,7 +37,7 @@ it("shows a modal from past the cut first, and its refs act on the page", async 
   const opened = await call("browser_click", { ref: refFor(navigated, /button "See all values"/) })
   const tree = session.lastSnapshot!.tree
   // As on apple.com, the modal starts past the 40,000-character cut.
-  expect(tree.indexOf('dialog "Trade-in values"')).toBeGreaterThan(40_000)
+  expect(withoutUrls(tree).indexOf('dialog "Trade-in values"')).toBeGreaterThan(40_000)
   const body = bodyOf(opened.snapshot!)
   expect(body).toStartWith(`${shownFirst}\n- dialog "Trade-in values" [active] [ref=`)
   expect(body).toContain('- row "Phone 11 Pro Max Up to $140" [ref=')
@@ -54,7 +56,7 @@ it("shows a modal from past the cut first, and its refs act on the page", async 
   expect(closed.isError).toBeUndefined()
   expect(await (await session.page()).locator("#portal").innerHTML()).toBe("")
   // Without a dialog, a long page is cut as before.
-  expect(bodyOf(closed.snapshot!)).toBe(session.lastSnapshot!.tree.slice(0, 40_000) + notice(40_000))
+  expect(bodyOf(closed.snapshot!)).toBe(withoutUrls(session.lastSnapshot!.tree).slice(0, 40_000) + notice(40_000))
 }, 30_000)
 
 const dialog = [
