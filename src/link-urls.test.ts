@@ -18,7 +18,7 @@ describe("same origin", () => {
     expect(compact("https://shop.example#top")).toBe("/#top")
   })
 
-  it("keeps every link that a path would not reach from the page as written", () => {
+  it("keeps the full URL when its path would resolve to another URL", () => {
     for (const url of [
       "https://cdn.shop.example/items/42",
       "http://shop.example/items/42",
