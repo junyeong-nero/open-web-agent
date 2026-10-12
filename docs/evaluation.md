@@ -103,12 +103,20 @@ overall table, which compares the arms side by side:
 - wall time per run, median and total
 - model calls, their mean and total time, and the models that served them, as each response named
   it (a router names the model it chose)
-- input, cached input and output tokens, summed as in the task result's `usage` (see "Usage and
-  cost" in the README). The provider's reported cost appears only when every run that called the
-  model reported one. With `prices`, the summary also estimates the cost in US dollars, billing cache
-  reads at `cachedInput` and all other input at `input`.
+- input, cached input and output tokens, and cache write tokens when a run reported them, summed as in
+  the task result's `usage` (see "Usage and cost" in the README). The provider's reported cost appears
+  only when every run that called the model reported one. With `prices`, the summary also estimates
+  the cost in US dollars, billing cache reads at `cachedInput` and all other input, cache writes
+  included, at `input`.
 - tool errors by class: stale ref, click intercepted, not visible or outside the viewport,
   navigation failure, download, invalid arguments, and other
+
+Cached input tokens are the input that the provider read from its prompt cache (see "Prompt caching"
+in the README). To see how caching behaved within a run, read `usage.cachedInputTokens` of the `model`
+events in its `trace.jsonl`, one event per model call. When the conversation is reused, it grows from
+step to step. When it stays near the first step's input, only the system prompt, the tools and the task
+were reused. OpenAI's GPT-5.6 and later models and Anthropic bill cache writes at 1.25 times the input
+price, so for them the estimate is low by a quarter of the input price of the cache write tokens.
 
 `summary.md` adds a per-task table with each run's outcome, median steps and wall time, input tokens
 and tool errors. `summary.json` holds the full summary for every arm, overall and per task, and one

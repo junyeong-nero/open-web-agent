@@ -214,7 +214,13 @@ it("sends the same requests without a checker model as with one that finds only 
   const calls: Call[] = [["browser_navigate", { url: `${SITE}/a` }], ["browser_click", { url: `${SITE}/b` }]]
   const without = await run(calls)
   const checked = await run(calls, [kind("content", 1), kind("content", 1)])
-  expect(checked.model.requests).toEqual(without.model.requests)
+  // Each run has its own prompt cache key; nothing else differs.
+  const keys = (requests: ModelRequest[]) => [...new Set(requests.map((request) => request.cacheKey))]
+  expect(keys(checked.model.requests)).toHaveLength(1)
+  expect(keys(without.model.requests)).toHaveLength(1)
+  expect(keys(checked.model.requests)).not.toEqual(keys(without.model.requests))
+  const withoutKey = (requests: ModelRequest[]) => requests.map(({ cacheKey: _key, ...request }) => request)
+  expect(withoutKey(checked.model.requests)).toEqual(withoutKey(without.model.requests))
   expect(without.model.requests[0]!.system).toBe(SYSTEM_PROMPT)
   expect(checkerEvents(without.events)).toHaveLength(0)
   expect(without.result).not.toHaveProperty("checkerUsage")

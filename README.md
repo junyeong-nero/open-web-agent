@@ -338,7 +338,7 @@ written as zero.
 | `inputTokens` | all input tokens, cache reads and writes included | `prompt_tokens` | `input_tokens` + `cache_read_input_tokens` + `cache_creation_input_tokens` |
 | `outputTokens` | output tokens | `completion_tokens` | `output_tokens` |
 | `cachedInputTokens` | input tokens read from the prompt cache | `prompt_tokens_details.cached_tokens` | `cache_read_input_tokens` |
-| `cacheWriteTokens` | input tokens written to the prompt cache | `prompt_tokens_details.cache_write_tokens` (OpenRouter) | `cache_creation_input_tokens` |
+| `cacheWriteTokens` | input tokens written to the prompt cache | `prompt_tokens_details.cache_write_tokens` (OpenRouter; OpenAI on GPT-5.6 and later) | `cache_creation_input_tokens` |
 | `cost` | what the provider charged, in its own unit (OpenRouter: US dollars) | `cost` (OpenRouter) | — |
 
 Uncached input is `inputTokens - cachedInputTokens - cacheWriteTokens`. The task result's `usage`
@@ -366,6 +366,33 @@ With `--checker-model`, `checkerUsage` sums the checker's calls by the same rule
 checked, which shows the result as the agent read it. A check that gave no kind has `error` in its event, even when
 its request failed. `owa run` prints one line per check, and the `browser_task` text shows the checker's tokens
 after the judge's.
+
+### Prompt caching
+
+Each agent run sends one prompt cache key with all of its model requests, and keys derived from it with its judge's
+and checker's requests (`<key>:judge`, `<key>:checker`). Every run gets a new key. A request without a key, such as
+one that a library caller sends to an adapter directly, goes out as before. A custom `ModelAdapter` gets the key as the
+request's `cacheKey`.
+
+- **OpenAI format.** Requests to `openrouter.ai` carry the key as `prompt_cache_key`, which keeps a run's requests on
+  one provider. Requests to `api.openai.com` carry none. OpenAI's GPT-5.6 and later models route requests themselves,
+  and a key would only keep each run's cache apart, so runs would stop sharing the cached tools and system prompt.
+  Other endpoints, such as Gemini's, Ollama and vLLM, get no key, because some reject fields they do not know. A
+  `prompt_cache_key` in `--model-options` is sent as is.
+- **Anthropic format.** A request with a key marks two cache breakpoints, `cache_control: {"type":"ephemeral"}`. One
+  ends the system prompt, so the tools and the system prompt are cached. The other ends the turn before the newest one,
+  and the next request reads those turns back. The newest turn holds the newest snapshot, which the next request reduces
+  to a digest, so it is never written to the cache. `cache_control` in `--model-options` turns these breakpoints off,
+  for example to use Anthropic's automatic caching instead.
+
+From one request to the next, the messages before the newest snapshot or text read usually stay the same. A page that
+leaves the four digests, or that the agent opens again, changes an older message, and the next request reuses less.
+
+On OpenAI's GPT-5.6 and later models, such as gpt-6-luna, caching helps little for now. They write the cache at the end
+of the newest message, which holds the newest snapshot, and owa reduces that snapshot to a digest on the next step. So
+they reuse little more than the tools, the system prompt and the task, until same-page snapshot diffs (#201) keep the
+base snapshot in place. `usage.cachedInputTokens` in the `model` events of a `--trace` file shows what each request
+reused.
 
 ### Task limits and cancellation
 

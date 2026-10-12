@@ -171,6 +171,50 @@ it("renders the same entries the same way, and a new entry changes only older pa
   expect(entries).toEqual(copy)
 })
 
+it("starts each request with the previous one, byte for byte, up to the page state its step superseded", async () => {
+  const pages: Record<string, string> = { gold: goldPage, platinum: platinumPage, c: page("c") }
+  const texts: Record<string, string> = { gold: "Gold annual fee: $325", platinum: "Platinum annual fee: $695" }
+  let current = ""
+  const tools: BrowserTool[] = [
+    {
+      name: "browser_navigate", description: "test", schema: z.object({ url: z.string() }), readOnly: false, capability: "core",
+      async run(_, { url }) { current = url; return { text: `Navigated to ${url}`, snapshot: pages[url] } },
+    },
+    {
+      name: "browser_get_text", description: "test", schema: z.object({}), readOnly: true, capability: "core",
+      async run() { return { text: texts[current]!, pageText: true } },
+    },
+  ]
+  const call = (id: string, name: string, args: Record<string, unknown> = {}) => () => ({ toolCalls: [{ id, name, arguments: args }] })
+  const model = scriptedModel([
+    call("1", "browser_navigate", { url: "gold" }),
+    call("2", "browser_get_text"),
+    call("3", "browser_navigate", { url: "platinum" }),
+    call("4", "browser_get_text"),
+    call("5", "browser_navigate", { url: "c" }),
+    () => ({ text: 'Gold: $325 a year. Platinum: $695 a year.\n{"outcome":"succeeded","unfinished":[]}', toolCalls: [] }),
+  ])
+  await runAgent({ task, model, browser: new BrowserSession({ headless: true }), tools })
+  const requests = model.requests
+  expect(new Set(requests.map((request) => request.cacheKey)).size).toBe(1)
+  // Indexes of the messages of each request that the next request sends differently.
+  const changed = requests.slice(1).map((next, index) => {
+    const previous = requests[index]!
+    expect(next.system).toBe(previous.system)
+    expect(next.tools).toEqual(previous.tools)
+    const moved = previous.messages.flatMap((message, at) => (JSON.stringify(message) === JSON.stringify(next.messages[at]) ? [] : [at]))
+    // A changed message held the newest snapshot or text read, which the new step's own snapshot or text reduced.
+    for (const at of moved) {
+      expect(pageOf(previous.messages[at]!)).not.toStartWith("[older")
+      expect(pageOf(next.messages[at]!)).toStartWith("[older")
+    }
+    return moved
+  })
+  // A snapshot supersedes the gold page, a text read its text, a snapshot the platinum page. A page pushed out of the
+  // four digests, or shown again, also changes an older message (see the test above), which prompt caching cannot reuse.
+  expect(changed).toEqual([[], [], [2], [4], [6]])
+})
+
 it("lets the model compare a page it left with the current one", async () => {
   const pages: Record<string, string> = { "https://cards.example/gold": goldPage, "https://cards.example/platinum": platinumPage }
   const open: BrowserTool = {

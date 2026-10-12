@@ -28,6 +28,12 @@ export interface ModelRequest {
    * `{"label":"<label>","confidence":<its probability>}`. Other adapters ignore this field, so the prompt must list the labels for them.
    */
   choices?: Record<string, string>
+  /**
+   * Prompt cache key. `runAgent` gives every request of a run the same key, and its judge and checker requests keys
+   * derived from it. An adapter that caches prompts caches a request's prefix only when it has a key, and sends the
+   * key where the API takes one. Other adapters ignore it.
+   */
+  cacheKey?: string
   signal?: AbortSignal
 }
 

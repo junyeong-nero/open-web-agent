@@ -159,6 +159,92 @@ describe("anthropicMessages", () => {
   })
 })
 
+describe("prompt caching", () => {
+  const keyed: ModelRequest = { ...request, cacheKey: "run-1" }
+  const breakpoint = { cache_control: { type: "ephemeral" } }
+  const marks = (body: unknown) => JSON.stringify(body).split('"cache_control"').length - 1
+  const answered = () => recordingFetch({ choices: [{ message: { content: "done" } }], content: [{ type: "text", text: "done" }] })
+
+  it("sends a request's cache key as prompt_cache_key to OpenRouter only, and nothing else", async () => {
+    for (const [baseUrl, sent] of [
+      ["https://openrouter.ai/api/v1", true],
+      // OpenAI's GPT-5.6 and later models route requests themselves; a key there would only keep runs from sharing a cache.
+      [undefined, false],
+      ["https://api.openai.com/v1", false],
+      ["https://generativelanguage.googleapis.com/v1beta/openai", false],
+      ["http://localhost:11434/v1", false],
+      ["http://127.0.0.1:8000/v1", false],
+    ] as const) {
+      const { calls, fetchImpl } = answered()
+      const model = openaiChat({ model: "m", baseUrl, fetch: fetchImpl })
+      await model.complete(keyed)
+      await model.complete(request)
+      const [withKey, withoutKey] = calls.map((call) => call.body)
+      expect(withKey.prompt_cache_key).toBe(sent ? "run-1" : undefined)
+      const { prompt_cache_key: _key, ...rest } = withKey
+      expect(rest).toEqual(withoutKey)
+      expect(withoutKey).not.toHaveProperty("prompt_cache_key")
+    }
+  })
+
+  it("passes a prompt_cache_key from the model options through as is", async () => {
+    for (const baseUrl of ["https://api.openai.com/v1", "https://openrouter.ai/api/v1"]) {
+      const { calls, fetchImpl } = answered()
+      await openaiChat({ model: "m", baseUrl, extraBody: { prompt_cache_key: "mine" }, fetch: fetchImpl }).complete(keyed)
+      expect(calls[0]!.body.prompt_cache_key).toBe("mine")
+    }
+  })
+
+  it("marks the end of the system prompt and of the message before the newest turn for Anthropic", async () => {
+    const { calls, fetchImpl } = answered()
+    const model = anthropicMessages({ model: "claude", fetch: fetchImpl })
+    await model.complete(keyed)
+    await model.complete(request)
+    const [cached, plain] = calls.map((call) => call.body)
+    expect(cached.system).toEqual([{ type: "text", text: "sys", ...breakpoint }])
+    // The newest turn holds the tool results; the assistant turn before it ends with the browser_click call.
+    expect(cached.messages[1].content.at(-1)).toEqual({ type: "tool_use", id: "c2", name: "browser_click", input: { ref: "e1" }, ...breakpoint })
+    expect(marks(cached)).toBe(2)
+    // Without a key nothing is marked, and the marks are the only difference.
+    expect(plain.system).toBe("sys")
+    expect(marks(plain)).toBe(0)
+    const unmarked = JSON.parse(JSON.stringify(cached, (key, value) => (key === "cache_control" ? undefined : value)))
+    expect({ ...unmarked, system: "sys" }).toEqual(plain)
+  })
+
+  it("marks only the static prefix of a first request, on the last tool when the system prompt is empty", async () => {
+    const { calls, fetchImpl } = answered()
+    const model = anthropicMessages({ model: "claude", fetch: fetchImpl })
+    const first: ModelRequest = { ...keyed, messages: [request.messages[0]!] }
+    await model.complete(first)
+    await model.complete({ ...first, system: "" })
+    const [withSystem, withoutSystem] = calls.map((call) => call.body)
+    expect(withSystem.system).toEqual([{ type: "text", text: "sys", ...breakpoint }])
+    expect(marks(withSystem)).toBe(1)
+    expect(withoutSystem.system).toBe("")
+    expect(withoutSystem.tools).toEqual([{ name: "browser_click", description: "Click", input_schema: { type: "object", properties: {} }, ...breakpoint }])
+    expect(marks(withoutSystem)).toBe(1)
+  })
+
+  it("adds no Anthropic breakpoints when the model options set cache_control", async () => {
+    const { calls, fetchImpl } = answered()
+    const automatic = { type: "ephemeral", ttl: "1h" }
+    await anthropicMessages({ model: "claude", extraBody: { cache_control: automatic }, fetch: fetchImpl }).complete(keyed)
+    expect(calls[0]!.body.cache_control).toEqual(automatic)
+    expect(calls[0]!.body.system).toBe("sys")
+    expect(marks(calls[0]!.body)).toBe(1)
+  })
+
+  it("leaves TypeSafe requests unchanged", async () => {
+    const { calls, fetchImpl } = recordingFetch({ answers: { answer: { type: "noul", noul: 0.5 } } })
+    const model = typesafeSystemOne({ model: "jev-latest", fetch: fetchImpl })
+    const question: ModelRequest = { system: "Is it?", tools: [], messages: [{ role: "user", content: [{ type: "text", text: "state" }] }] }
+    await model.complete({ ...question, cacheKey: "run-1:judge" })
+    await model.complete(question)
+    expect(calls[0]!.body).toEqual(calls[1]!.body)
+  })
+})
+
 // Response bodies in each API's documented shape; 11,268 input tokens with 11,265 cached is the probe in #161.
 describe("usage and serving model", () => {
   const toolCall = { id: "call_1", type: "function", function: { name: "browser_click", arguments: '{"ref":"e2"}' } }

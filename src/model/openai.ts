@@ -23,11 +23,20 @@ export interface OpenAIChatOptions {
   fetch?: FetchLike
 }
 
+/**
+ * The host that gets a request's cache key as `prompt_cache_key`. OpenRouter keeps the requests of one key on one
+ * provider, and providers that do not take it ignore it. OpenAI gets none: its GPT-5.6 and later models route requests
+ * themselves, and a key would only keep each run's cache apart, so runs would stop sharing the cached tools and system
+ * prompt. Other OpenAI-format endpoints, such as Gemini's, may reject a field they do not know.
+ */
+const CACHE_KEY_HOST = "openrouter.ai"
+
 /** OpenAI Chat Completions wire format. Also serves OpenRouter, Gemini's OpenAI endpoint, Ollama, vLLM, … */
 export function openaiChat(options: OpenAIChatOptions): ModelAdapter {
   const baseUrl = (options.baseUrl ?? "https://api.openai.com/v1").replace(/\/+$/, "")
   const fetchImpl = options.fetch ?? fetch
   const name = `openai-chat:${options.model}`
+  const takesCacheKey = URL.parse(baseUrl)?.hostname === CACHE_KEY_HOST
 
   return {
     name,
@@ -43,6 +52,8 @@ export function openaiChat(options: OpenAIChatOptions): ModelAdapter {
               })),
             }
           : {}),
+        // Model options come last, so a prompt_cache_key set there goes to any host as is.
+        ...(request.cacheKey && takesCacheKey ? { prompt_cache_key: request.cacheKey } : {}),
         ...options.extraBody,
       }
       const headers: Record<string, string> = { ...options.headers }
@@ -76,7 +87,7 @@ export function openaiChat(options: OpenAIChatOptions): ModelAdapter {
           arguments: parseToolArguments(call.function.arguments),
         })),
         model: json.model || undefined,
-        // prompt_tokens already includes cache reads and writes. OpenRouter adds cache_write_tokens and cost.
+        // prompt_tokens already includes cache reads and writes. OpenAI (GPT-5.6 and later) and OpenRouter add cache_write_tokens; OpenRouter adds cost.
         usage: reportedUsage({
           inputTokens: json.usage?.prompt_tokens,
           outputTokens: json.usage?.completion_tokens,
